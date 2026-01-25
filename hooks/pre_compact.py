@@ -31,7 +31,7 @@ def main():
             with open(static_path, "r") as f:
                 content = f.read().strip()
             if content:
-                output_parts.append(f"# Retained Context (Project)\n\n{content}")
+                output_parts.append(content)
         except Exception as e:
             print(f"[pre_compact] Error reading {static_path}: {e}", file=sys.stderr)
 
@@ -42,7 +42,7 @@ def main():
             with open(sublime_retain_path, "r") as f:
                 content = f.read().strip()
             if content:
-                output_parts.append(f"# Retained Context (Sublime Project)\n\n{content}")
+                output_parts.append(content)
         except Exception as e:
             print(f"[pre_compact] Error reading {sublime_retain_path}: {e}", file=sys.stderr)
 
@@ -54,7 +54,7 @@ def main():
                 with open(dynamic_path, "r") as f:
                     content = f.read().strip()
                 if content:
-                    output_parts.append(f"# Retained Context (Session)\n\n{content}")
+                    output_parts.append(content)
             except Exception as e:
                 print(f"[pre_compact] Error reading {dynamic_path}: {e}", file=sys.stderr)
 

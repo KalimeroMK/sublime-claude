@@ -71,10 +71,10 @@ class Session:
         self._input_mode_entered: bool = False
         # Callback for channel mode responses
         self._response_callback: Optional[Callable[[str], None]] = None
-        # Track query count when compact_boundary received (inject when that query ends)
-        self._compact_pending: bool = False  # True when compact_boundary received, waiting for query end
         # Queue of prompts to send after current query completes
         self._queued_prompts: List[str] = []
+        # Track if inject was sent (to skip "done" status until inject query completes)
+        self._inject_pending: bool = False
 
         # Extract subsession_id and parent_view_id if provided
         if initial_context:
@@ -317,61 +317,57 @@ class Session:
         filtered = [line for line in lines if line.strip() and not line.strip().startswith('#')]
         return '\n'.join(filtered).strip()
 
-    def _inject_retain_after_compact(self):
-        """Inject retain content as prompt AFTER compaction completes."""
+    def _gather_retain_content(self) -> Optional[str]:
+        """Gather all retain content from various sources.
+
+        Returns combined retain content string, or None if no content found.
+        """
         prompts = []
         cwd = self._cwd()
-        print(f"[Claude] _inject_retain_after_compact: cwd={cwd}")
 
         # 1. Static retain file (.claude/RETAIN.md)
         if cwd:
             static_path = os.path.join(cwd, ".claude", "RETAIN.md")
-            print(f"[Claude]   checking {static_path}: exists={os.path.exists(static_path)}")
             if os.path.exists(static_path):
                 try:
                     with open(static_path, "r") as f:
                         content = self._strip_comment_only_content(f.read())
                     if content:
-                        prompts.append(f"# Retained Context (Project)\n\n{content}")
-                        print(f"[Claude]   -> added project retain ({len(content)} chars)")
+                        prompts.append(content)
                 except Exception as e:
                     print(f"[Claude] Error reading static retain: {e}")
 
         # 2. Sublime project retain file
         if cwd:
             sublime_retain_path = os.path.join(cwd, ".claude", "sublime_project_retain.md")
-            print(f"[Claude]   checking {sublime_retain_path}: exists={os.path.exists(sublime_retain_path)}")
             if os.path.exists(sublime_retain_path):
                 try:
                     with open(sublime_retain_path, "r") as f:
                         content = self._strip_comment_only_content(f.read())
                     if content:
-                        prompts.append(f"# Retained Context (Sublime Project)\n\n{content}")
-                        print(f"[Claude]   -> added sublime project retain ({len(content)} chars)")
+                        prompts.append(content)
                 except Exception as e:
                     print(f"[Claude] Error reading sublime project retain: {e}")
 
         # 3. Session retain file
         session_retain = self._strip_comment_only_content(self.retain() or "")
-        print(f"[Claude]   session retain: {len(session_retain) if session_retain else 0} chars")
         if session_retain:
-            prompts.append(f"# Retained Context (Session)\n\n{session_retain}")
+            prompts.append(session_retain)
 
         # 4. Profile pre_compact_prompt
-        has_profile_prompt = self.profile and self.profile.get("pre_compact_prompt")
-        print(f"[Claude]   profile pre_compact_prompt: {bool(has_profile_prompt)}")
-        if has_profile_prompt:
+        if self.profile and self.profile.get("pre_compact_prompt"):
             prompts.append(self.profile["pre_compact_prompt"])
 
-        # Send retain content as a new query after compaction
-        print(f"[Claude]   total prompts found: {len(prompts)}")
         if prompts:
-            combined = "\n\n---\n\n".join(prompts)
-            print(f"[Claude] Sending retain content after compact ({len(combined)} chars):\n{combined[:200]}...")
-            # Use short display_prompt to hide full content from UI
-            self.query(combined, display_prompt="[retain context restored]")
-        else:
-            print("[Claude] No retain content to inject after compact")
+            return "\n\n---\n\n".join(prompts)
+        return None
+
+    def _inject_retain_midquery(self) -> None:
+        """Inject retain content mid-query via queue_prompt mechanism."""
+        content = self._gather_retain_content()
+        if content:
+            print(f"[Claude] Injecting retain content mid-query ({len(content)} chars)")
+            self.queue_prompt(f"[retain context]\n\n{content}")
 
     def _record_edit(self, tool_name: str):
         """Record an Edit/Write operation to the order table's edit log."""
@@ -674,8 +670,10 @@ class Session:
             self._status("interrupted")
             self.output.interrupted()
         else:
-            self._status("done")
-            sublime.set_timeout(lambda: self._status("ready") if not self.working else None, 2000)
+            # Skip "done" if inject is pending (another query will start)
+            if not self._inject_pending:
+                self._status("done")
+                sublime.set_timeout(lambda: self._status("ready") if not self.working else None, 2000)
 
         self.output.set_name(self.name or "Claude")
         self.output.clear_all_permissions()
@@ -706,14 +704,8 @@ class Session:
             sublime.set_timeout(lambda: self._enter_input_with_draft() if not self.working else None, 100)
             return
 
-        # 5. Process deferred actions (retain injection, queued prompts)
-        print(f"[Claude] _on_done: query #{self.query_count}, _compact_pending={self._compact_pending}")
-        if self._compact_pending:
-            self._compact_pending = False
-            print(f"[Claude] _on_done: compact_boundary was received, injecting retain")
-            self._inject_retain_after_compact()
-            return
-
+        # 5. Process queued prompts
+        print(f"[Claude] _on_done: query #{self.query_count}")
         if self._queued_prompts:
             prompt = self._queued_prompts.pop(0)
             print(f"[Claude] _on_done: sending queued prompt: {prompt[:60]}...")
@@ -721,13 +713,14 @@ class Session:
             self.query(prompt)
             return
 
-        # 6. Enter input mode
-        sublime.set_timeout(lambda: self._enter_input_with_draft() if not self.working else None, 100)
+        # 6. Enter input mode (skip if inject is pending)
+        if not self._inject_pending:
+            sublime.set_timeout(lambda: self._enter_input_with_draft() if not self.working else None, 100)
 
     def _clear_deferred_state(self) -> None:
-        """Clear all deferred action state. Called on error/interrupt."""
-        self._compact_pending = False
+        """Clear deferred action state. Called on error/interrupt."""
         self._queued_prompts.clear()
+        self._inject_pending = False
         self._input_mode_entered = False  # Allow re-entry to input mode
 
     def _enter_input_with_draft(self) -> None:
@@ -756,12 +749,22 @@ class Session:
             self.output.view.sel().add(sublime.Region(end, end))
 
     def queue_prompt(self, prompt: str) -> None:
-        """Queue a prompt to be sent after current query completes."""
-        print(f"[Claude] Queuing prompt: {prompt[:60]}...")
-        self._status(f"queued: {prompt[:30]}...")
+        """Inject a prompt into the current query stream."""
+        print(f"[Claude] Injecting prompt: {prompt[:60]}... working={self.working}")
+        self._status(f"injected: {prompt[:30]}...")
 
-        # Queue locally - will be sent as new query in _on_done
-        self._queued_prompts.append(prompt)
+        if self.working and self.client:
+            # Mid-query: show prompt and inject via bridge
+            short = prompt[:100] + "..." if len(prompt) > 100 else prompt
+            self.output.text(f"\n◎ [injected] {short} ▶\n\n")
+            self._inject_pending = True  # Don't show "done" until inject query completes
+            self.client.send("inject_message", {"message": prompt})
+        elif self.client:
+            # Not working: start query directly (no round-trip delay)
+            self.query(prompt)
+        else:
+            # No client - queue locally for later
+            self._queued_prompts.append(prompt)
 
     def show_queue_input(self) -> None:
         """Show input panel to queue a prompt while session is working."""
@@ -795,7 +798,6 @@ class Session:
             self._status("interrupting...")
             self.working = False
             # Clear pending state but don't touch _input_mode_entered yet
-            self._compact_pending = False
             self._queued_prompts.clear()
 
         # Break any active channel connection (only for user-initiated interrupts)
@@ -843,12 +845,10 @@ class Session:
 
         if method == "queued_inject":
             # Injected prompt was queued because query completed too fast
-            # Auto-submit it now
+            # Auto-submit it now (visual marker already shown by queue_prompt)
             message = params.get("message", "")
             if message:
-                # Set working=True immediately to prevent input mode race condition
-                # (notification handler runs on background thread, but _on_done schedules
-                # input mode entry on main thread with 100ms delay)
+                self._inject_pending = False  # Clear flag, new query starting
                 self.working = True
                 print(f"[Claude] Auto-submitting queued inject: {message[:60]}...")
                 self.query(message)
@@ -953,11 +953,11 @@ class Session:
         elif t == "system":
             subtype = params.get("subtype", "")
             data = params.get("data", {})
-            print(f"[Claude] system subtype={subtype}")
+            print(f"[Claude] system subtype={subtype} data={data}")
             if subtype == "compact_boundary":
-                # Mark that compaction happened - inject retain when query ends
-                self._compact_pending = True
-                print(f"[Claude] compact_boundary received, will inject retain when query completes")
+                # Inject retain content mid-query (between tool calls)
+                print(f"[Claude] compact_boundary received! Injecting retain mid-query")
+                self._inject_retain_midquery()
 
     def _set_name(self, name: str) -> None:
         """Set session name and update UI."""

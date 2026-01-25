@@ -417,14 +417,14 @@ class ClaudeCodeCompactCommand(sublime_plugin.WindowCommand):
                         with open(static_path, "r") as f:
                             content = f.read().strip()
                         if content:
-                            prompts.append(f"# Retained Context (Project)\n\n{content}")
+                            prompts.append(content)
                     except:
                         pass
 
             # 2. Session retain file
             session_retain = s.retain()
             if session_retain:
-                prompts.append(f"# Retained Context (Session)\n\n{session_retain}")
+                prompts.append(session_retain)
 
             # 3. Project-level hook file (.claude/hooks/pre-compact)
             if cwd:
@@ -1657,7 +1657,7 @@ class ClaudeOrderGotoCommand(sublime_plugin.TextCommand):
 
 
 class ClaudeOrderDeleteCommand(sublime_plugin.TextCommand):
-    """Delete the order under cursor."""
+    """Delete order(s) - uses selection to determine which items to delete."""
 
     def run(self, edit):
         import re
@@ -1666,32 +1666,54 @@ class ClaudeOrderDeleteCommand(sublime_plugin.TextCommand):
         if not self.view.settings().get("order_table_view"):
             return
 
-        # Get current line
-        sel = self.view.sel()
-        if not sel:
-            return
-        line_region = self.view.line(sel[0])
-        line = self.view.substr(line_region)
-
-        # Extract order_id
-        match = re.search(r'\[(order_\d+)\]', line)
-        if not match:
-            sublime.status_message("No order on this line")
-            return
-
-        order_id = match.group(1)
         window = self.view.window()
         table = get_table(window)
         if not table:
             return
 
-        ok, msg = table.delete(order_id)
-        if ok:
-            sublime.status_message(f"Deleted {order_id} (u to undo)")
-            # Defer refresh to after command completes
-            sublime.set_timeout(lambda: refresh_order_table(window), 10)
+        sel = self.view.sel()
+        if not sel:
+            return
+
+        # Collect order IDs from all selected lines (use set to dedupe)
+        order_ids = set()
+        for region in sel:
+            for line_region in self.view.lines(region):
+                line = self.view.substr(line_region)
+                match = re.search(r'\[(order_\d+)\]', line)
+                if match:
+                    order_ids.add(match.group(1))
+
+        if not order_ids:
+            sublime.status_message("No orders in selection")
+            return
+
+        # Save cursor row for restoration after refresh
+        cursor_row, _ = self.view.rowcol(sel[0].begin())
+
+        # Delete all found orders
+        deleted = 0
+        for order_id in order_ids:
+            ok, _ = table.delete(order_id)
+            if ok:
+                deleted += 1
+
+        if deleted:
+            sublime.status_message(f"Deleted {deleted} order(s) (u to undo)")
+
+            def refresh_and_restore():
+                refresh_order_table(window)
+                # Restore cursor to same row (clamped to valid range)
+                if self.view.is_valid():
+                    max_row = self.view.rowcol(self.view.size())[0]
+                    row = min(cursor_row, max_row)
+                    pt = self.view.text_point(row, 0)
+                    self.view.sel().clear()
+                    self.view.sel().add(sublime.Region(pt, pt))
+
+            sublime.set_timeout(refresh_and_restore, 10)
         else:
-            sublime.status_message(msg)
+            sublime.status_message("No orders deleted")
 
 
 class ClaudeOrderUndoCommand(sublime_plugin.TextCommand):
@@ -1842,7 +1864,7 @@ class ClaudeEditMessageCommand(sublime_plugin.TextCommand):
 
 
 class ClaudeClearEditsCommand(sublime_plugin.TextCommand):
-    """Clear edit(s) - individual, per-file, or all."""
+    """Clear edit(s) - uses selection to determine which items to clear."""
 
     def run(self, edit, all_edits=False):
         import re
@@ -1864,38 +1886,63 @@ class ClaudeClearEditsCommand(sublime_plugin.TextCommand):
             return
 
         folders = window.folders() if window else []
+        all_edits_list = table.list_edits()
 
-        # Get current line
         sel = self.view.sel()
         if not sel:
             return
 
-        line_region = self.view.line(sel[0])
-        line = self.view.substr(line_region)
+        # Collect edit IDs from selected lines (use set to dedupe)
+        edits_to_clear = set()
+        for region in sel:
+            for line_region in self.view.lines(region):
+                line = self.view.substr(line_region)
+                # Skip order lines
+                if '[order_' in line:
+                    continue
+                # Parse edit line: file:line ... [agent_id]
+                edit_match = re.match(r'\s+(.+?):(\d+)\s+', line)
+                if not edit_match:
+                    continue
 
-        # Parse edit line: file:line ... [agent_id]
-        edit_match = re.match(r'\s+(.+?):(\d+)\s+', line)
-        if not edit_match or '[order_' in line:
-            sublime.status_message("Place cursor on edit entry (C to clear all)")
+                rel_path = edit_match.group(1).strip()
+                line_num = int(edit_match.group(2))
+
+                # Find matching edit
+                for e in all_edits_list:
+                    full_rel = _relative_path(e["file_path"], folders)
+                    if rel_path.startswith("..."):
+                        matches = full_rel.endswith(rel_path[3:])
+                    else:
+                        matches = full_rel == rel_path
+                    if matches and e["line_num"] == line_num:
+                        edits_to_clear.add(e["id"])
+                        break
+
+        if not edits_to_clear:
+            sublime.status_message("No edits in selection (C to clear all)")
             return
 
-        rel_path = edit_match.group(1).strip()
-        line_num = int(edit_match.group(2))
+        # Save cursor row for restoration after refresh
+        cursor_row, _ = self.view.rowcol(sel[0].begin())
 
-        # Find and clear the specific edit
-        for e in table.list_edits():
-            full_rel = _relative_path(e["file_path"], folders)
-            if rel_path.startswith("..."):
-                matches = full_rel.endswith(rel_path[3:])
-            else:
-                matches = full_rel == rel_path
-            if matches and e["line_num"] == line_num:
-                table.clear_edits(edit_id=e["id"])
-                sublime.status_message(f"Cleared edit {rel_path}:{line_num}")
-                sublime.set_timeout(lambda: refresh_order_table(window), 10)
-                return
+        # Clear all found edits
+        for edit_id in edits_to_clear:
+            table.clear_edits(edit_id=edit_id)
 
-        sublime.status_message("Could not find edit entry")
+        sublime.status_message(f"Cleared {len(edits_to_clear)} edit(s)")
+
+        def refresh_and_restore():
+            refresh_order_table(window)
+            # Restore cursor to same row (clamped to valid range)
+            if self.view.is_valid():
+                max_row = self.view.rowcol(self.view.size())[0]
+                row = min(cursor_row, max_row)
+                pt = self.view.text_point(row, 0)
+                self.view.sel().clear()
+                self.view.sel().add(sublime.Region(pt, pt))
+
+        sublime.set_timeout(refresh_and_restore, 10)
 
 
 class ClaudeToggleEditsGroupedCommand(sublime_plugin.TextCommand):
