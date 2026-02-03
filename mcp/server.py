@@ -508,6 +508,31 @@ Examples:
                         "required": ["cmd"]
                     }
                 },
+                # ─── Garage Session Search ──────────────────────────────────
+                {
+                    "name": "garage_search",
+                    "description": """Search indexed Claude sessions using semantic search.
+Returns session IDs that can be used with spawn_session to fork/resume.
+
+Requires garage CLI to be installed. Sessions are indexed from ~/.claude/projects/.
+
+Example response:
+  [{"session_id": "f400b570-...", "short_id": "f400b570", "score": 0.68, "project": "sublime-claude", "turns": 334, "summary": "Add slash command support..."}]""",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "query": {
+                                "type": "string",
+                                "description": "Search query (semantic)"
+                            },
+                            "k": {
+                                "type": "integer",
+                                "description": "Number of results (default: 5)"
+                            }
+                        },
+                        "required": ["query"]
+                    }
+                },
                 # ─── Order Table ─────────────────────────────────────────────
                 {
                     "name": "order",

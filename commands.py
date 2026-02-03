@@ -1057,6 +1057,160 @@ class ClaudeCodeForkFromCommand(sublime_plugin.WindowCommand):
         self.window.show_quick_panel(items, on_select)
 
 
+class ClaudeGarageSearchCommand(sublime_plugin.WindowCommand):
+    """Search indexed sessions with garage CLI and fork/resume."""
+
+    def run(self) -> None:
+        self.window.show_input_panel(
+            "Search sessions:",
+            "",
+            self._on_query,
+            None,
+            None
+        )
+
+    def _on_query(self, query: str) -> None:
+        if not query.strip():
+            return
+
+        import subprocess
+        try:
+            result = subprocess.run(
+                ["garage", "search", query, "--k", "10"],
+                capture_output=True,
+                text=True,
+                timeout=10
+            )
+            # garage may crash partway through but still output useful results
+            # so we parse stdout regardless of return code
+            if result.stdout.strip():
+                self._parse_and_show(result.stdout, query)
+            elif result.returncode != 0:
+                sublime.error_message(f"garage search failed: {result.stderr}")
+        except FileNotFoundError:
+            sublime.error_message("garage CLI not found. Install it first.")
+        except subprocess.TimeoutExpired:
+            sublime.error_message("garage search timed out")
+
+    def _parse_and_show(self, output: str, query: str) -> None:
+        """Parse garage search output and show quick panel."""
+        import re
+        # New format: 1. [0.696] 2ccb865b  [pil]  Turns: 268
+        #                - Summary text here...
+        # Old format: 1. [0.610] f400b570
+        #                Project: /path/to/project
+        #                Created: 2026-01-17T02:38:12.192Z  Turns: 41
+        results = []
+        lines = output.strip().split("\n")
+        i = 0
+        while i < len(lines):
+            # Try new format: 1. [0.696] 2ccb865b  [pil]  Turns: 268
+            #                   - Summary...
+            #                   ID: full-uuid-here
+            new_match = re.match(r'\d+\.\s+\[([0-9.]+)\]\s+([a-f0-9]+)\s+\[([^\]]+)\]\s+Turns:\s*(\d+)', lines[i])
+            if new_match:
+                score = float(new_match.group(1))
+                short_id = new_match.group(2)
+                project = new_match.group(3)
+                turns = int(new_match.group(4))
+                summary = ""
+                full_id = short_id  # Default to short if full not found
+                # Parse following lines for summary and full ID
+                while i + 1 < len(lines) and not re.match(r'\d+\.', lines[i + 1]):
+                    i += 1
+                    line = lines[i].strip()
+                    if line.startswith("- "):
+                        summary = line[2:]  # Remove "- " prefix
+                    elif line.startswith("ID: "):
+                        full_id = line[4:]  # Full UUID
+                results.append({
+                    "session_id": full_id,
+                    "short_id": short_id,
+                    "score": score,
+                    "project": project,
+                    "turns": turns,
+                    "summary": summary,
+                })
+                i += 1
+                continue
+
+            # Try old format: 1. [0.610] f400b570
+            old_match = re.match(r'\d+\.\s+\[([0-9.]+)\]\s+([a-f0-9]+)', lines[i])
+            if old_match:
+                score = float(old_match.group(1))
+                session_id = old_match.group(2)
+                project = ""
+                turns = 0
+                summary = ""
+                # Parse following lines for metadata
+                while i + 1 < len(lines) and not re.match(r'\d+\.', lines[i + 1]):
+                    i += 1
+                    line = lines[i].strip()
+                    if line.startswith("Project:"):
+                        project = line.replace("Project:", "").strip()
+                    elif line.startswith("Created:"):
+                        if "Turns:" in line:
+                            turns = int(line.split("Turns:")[-1].strip())
+                results.append({
+                    "session_id": session_id,
+                    "score": score,
+                    "project": project,
+                    "turns": turns,
+                    "summary": summary,
+                })
+            i += 1
+
+        if not results:
+            sublime.status_message("No sessions found")
+            return
+
+        # Build quick panel items
+        items = []
+        for r in results:
+            import os
+            proj_name = os.path.basename(r["project"]) if r["project"] else r["project"]
+            summary = r.get("summary", "")
+            if len(summary) > 80:
+                summary = summary[:77] + "..."
+            short_id = r.get("short_id", r["session_id"][:8])
+            items.append([
+                f"[{r['score']:.2f}] {short_id}  [{proj_name}]  {r['turns']} turns",
+                summary or "(no summary)"
+            ])
+
+        def on_select(idx):
+            if idx >= 0:
+                self._show_action_panel(results[idx])
+
+        self.window.show_quick_panel(items, on_select, placeholder=f"Results for: {query}")
+
+    def _show_action_panel(self, result: dict) -> None:
+        """Show fork/resume options for selected session."""
+        session_id = result["session_id"]  # Full UUID
+        short_id = result.get("short_id", session_id[:8])
+
+        items = [
+            ["Fork", f"Create new session branching from {short_id}"],
+            ["Resume", f"Continue session {short_id} (same ID)"],
+        ]
+
+        def on_action(idx):
+            if idx == 0:
+                # Fork
+                s = create_session(self.window, resume_id=session_id, fork=True)
+                s.name = f"fork:{short_id}"
+                s.output.set_name(s.name)
+                sublime.status_message(f"Forked session {short_id}")
+            elif idx == 1:
+                # Resume
+                s = create_session(self.window, resume_id=session_id, fork=False)
+                s.name = f"resume:{short_id}"
+                s.output.set_name(s.name)
+                sublime.status_message(f"Resumed session {short_id}")
+
+        self.window.show_quick_panel(items, on_action)
+
+
 class ClaudeCodeAddMcpCommand(sublime_plugin.WindowCommand):
     """Add MCP tools config to project."""
     def run(self) -> None:

@@ -1913,3 +1913,82 @@ def chatroom_history(room_id: str, limit: int = 50, before_id: int = 0) -> dict:
     if before_id > 0:
         req["before_id"] = before_id
     return _chatroom_command(req)
+
+
+def garage_search(query: str, k: int = 5) -> list:
+    """Search indexed sessions with garage CLI."""
+    import subprocess
+    import re
+
+    try:
+        result = subprocess.run(
+            ["garage", "search", query, "--k", str(k)],
+            capture_output=True,
+            text=True,
+            timeout=10
+        )
+    except FileNotFoundError:
+        return {"error": "garage CLI not found"}
+    except subprocess.TimeoutExpired:
+        return {"error": "garage search timed out"}
+
+    # Parse output - handles both old and new format
+    results = []
+    lines = result.stdout.strip().split("\n")
+    i = 0
+    while i < len(lines):
+        # New format: 1. [0.696] 2ccb865b  [pil]  Turns: 268
+        new_match = re.match(r'\d+\.\s+\[([0-9.]+)\]\s+([a-f0-9]+)\s+\[([^\]]+)\]\s+Turns:\s*(\d+)', lines[i])
+        if new_match:
+            score = float(new_match.group(1))
+            short_id = new_match.group(2)
+            project = new_match.group(3)
+            turns = int(new_match.group(4))
+            summary = ""
+            full_id = short_id
+            while i + 1 < len(lines) and not re.match(r'\d+\.', lines[i + 1]):
+                i += 1
+                line = lines[i].strip()
+                if line.startswith("- "):
+                    summary = line[2:]
+                elif line.startswith("ID: "):
+                    full_id = line[4:]
+            results.append({
+                "session_id": full_id,
+                "short_id": short_id,
+                "score": score,
+                "project": project,
+                "turns": turns,
+                "summary": summary,
+            })
+            i += 1
+            continue
+
+        # Old format: 1. [0.610] f400b570
+        old_match = re.match(r'\d+\.\s+\[([0-9.]+)\]\s+([a-f0-9]+)', lines[i])
+        if old_match:
+            score = float(old_match.group(1))
+            session_id = old_match.group(2)
+            project = ""
+            turns = 0
+            while i + 1 < len(lines) and not re.match(r'\d+\.', lines[i + 1]):
+                i += 1
+                line = lines[i].strip()
+                if line.startswith("Project:"):
+                    project = line.replace("Project:", "").strip()
+                elif "Turns:" in line:
+                    try:
+                        turns = int(line.split("Turns:")[-1].strip())
+                    except:
+                        pass
+            results.append({
+                "session_id": session_id,
+                "short_id": session_id[:8],
+                "score": score,
+                "project": project,
+                "turns": turns,
+                "summary": "",
+            })
+        i += 1
+
+    return results

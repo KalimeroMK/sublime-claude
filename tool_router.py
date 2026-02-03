@@ -271,6 +271,10 @@ def create_sublime_router() -> ToolRouter:
 
     router.register("order", order_handler)
 
+    # ─── Garage Session Search ────────────────────────────────────────────
+    router.register("garage_search", lambda args:
+        f"return garage_search({args.get('query', '')!r}, {args.get('k', 5)})")
+
     return router
 
 

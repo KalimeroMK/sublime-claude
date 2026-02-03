@@ -149,5 +149,9 @@
     {
         "caption": "Claude: Open Link at Cursor",
         "command": "claude_open_link"
+    },
+    {
+        "caption": "Claude: Search Sessions (Garage)...",
+        "command": "claude_garage_search"
     }
 ]
