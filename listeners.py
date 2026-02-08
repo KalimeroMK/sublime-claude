@@ -10,7 +10,34 @@ from .session import Session
 from .context_parser import ContextParser, ContextMenuItem, ContextMenuHandler
 
 
+_last_copy_meta = None  # {file, regions: [(row_start, row_end), ...], text}
+
 class ClaudeCodeEventListener(sublime_plugin.EventListener):
+    def on_post_text_command(self, view, command_name, args):
+        global _last_copy_meta
+        if command_name not in ("copy", "cut"):
+            return
+        print(f"[Claude] on_post_text_command: {command_name}")
+        path = view.file_name()
+        if not path or view.settings().get("claude_output"):
+            print(f"[Claude] copy tracking skipped: path={path}, claude_output={view.settings().get('claude_output')}")
+            return
+        sel = view.sel()
+        if not sel:
+            print("[Claude] copy tracking skipped: no sel")
+            return
+        regions = []
+        for r in sel:
+            row_start = view.rowcol(r.begin())[0] + 1
+            row_end = view.rowcol(r.end())[0] + 1
+            regions.append((row_start, row_end))
+        _last_copy_meta = {
+            "file": path,
+            "regions": regions,
+            "text": sublime.get_clipboard(),
+        }
+        print(f"[Claude] copy tracked: {path} regions={regions}")
+
     def on_window_command(self, window: sublime.Window, command: str, args: dict) -> None:
         if command == "close_window":
             # Stop all sessions in this window

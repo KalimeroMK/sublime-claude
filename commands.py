@@ -1,6 +1,7 @@
 """Claude Code commands for Sublime Text."""
 import sublime
 import sublime_plugin
+import platform
 
 from .core import get_active_session, get_session_for_view, create_session
 from .session import Session, load_saved_sessions
@@ -1738,13 +1739,18 @@ class ClaudeOrderGotoCommand(sublime_plugin.TextCommand):
         line_region = self.view.line(sel[0])
         line = self.view.substr(line_region)
 
+        print(f"[OrderGoto] line={line!r}")
+
         # Check if it's an edit entry: file:line ... (not an order line)
         edit_match = re.match(r'\s+(.+?):(\d+)\s+', line)
+        print(f"[OrderGoto] edit_match={edit_match}, groups={edit_match.groups() if edit_match else None}")
         if edit_match and '[order_' not in line:
             rel_path = edit_match.group(1).strip()
             line_num = int(edit_match.group(2))
+            print(f"[OrderGoto] rel_path={rel_path!r}, line_num={line_num}")
             # Find full path and edit entry from edits
             edit_entry = self._find_edit_entry(rel_path, line_num)
+            print(f"[OrderGoto] edit_entry={edit_entry}")
             if edit_entry:
                 file_path = edit_entry["file_path"]
                 # Also reveal in agent's session view (without focus)
@@ -2349,8 +2355,35 @@ class ClaudePasteImageCommand(sublime_plugin.TextCommand):
                 sublime.status_message(f"Added {len(file_paths)} file(s) to context")
                 return
 
-            # Normal text paste
+            # Check if pasted from Sublime — add as context with file:line info
+            print(f"[Claude] paste: trying context paste...")
+            if self._try_paste_as_context(session, text):
+                print(f"[Claude] paste: added as context")
+                return
+            print(f"[Claude] paste: plain text insert")
+            # Plain text paste
             self.view.run_command("insert", {"characters": text})
+
+    def _try_paste_as_context(self, session, text):
+        import os
+        from .listeners import _last_copy_meta
+        if not _last_copy_meta:
+            return False
+        if _last_copy_meta["text"] != text:
+            return False
+        path = _last_copy_meta["file"]
+        regions = _last_copy_meta["regions"]
+        region_parts = []
+        for start, end in regions:
+            if start == end:
+                region_parts.append(f"L{start}")
+            else:
+                region_parts.append(f"L{start}-L{end}")
+        region_str = ",".join(region_parts)
+        label = f"{path}:{region_str}"
+        session.add_context_selection(label, text)
+        sublime.status_message(f"Pasted as context: {os.path.basename(path)}:{region_str}")
+        return True
 
     def _get_clipboard_image(self):
         """Check if clipboard contains image data using platform-specific helper."""

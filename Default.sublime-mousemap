@@ -2,7 +2,8 @@
     {
         "button": "button1",
         "count": 2,
-        "command": "claude_order_goto",
+        "modifiers": [],
+        "press_command": "claude_order_goto",
         "context": [
             { "key": "setting.order_table_view", "operator": "equal", "operand": true }
         ]
