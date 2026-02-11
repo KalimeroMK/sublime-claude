@@ -46,6 +46,19 @@ class PermissionRequest:
 
 
 @dataclass
+class QuestionRequest:
+    """A pending inline question request."""
+    qid: int
+    questions: List[dict]     # [{question, options, header, multiSelect}]
+    current_idx: int = 0
+    answers: Dict[str, str] = field(default_factory=dict)
+    callback: Callable = None  # Called with answers dict or None (cancelled)
+    region: tuple = (0, 0)
+    button_regions: Dict[str, tuple] = field(default_factory=dict)
+    selected: set = field(default_factory=set)  # multi-select toggles
+
+
+@dataclass
 class ToolCall:
     """A single tool call."""
     name: str
@@ -102,6 +115,7 @@ class OutputView:
         self.pending_permission: Optional[PermissionRequest] = None
         self._permission_queue: List[PermissionRequest] = []  # Queue for multiple requests
         self.pending_plan: Optional[PlanApproval] = None
+        self.pending_question: Optional[QuestionRequest] = None
         self.auto_allow_tools: set = set()  # Tools auto-allowed for this session
         self._last_allowed_tool: Optional[str] = None  # Track last tool we allowed
         self._last_allowed_time: float = 0  # Timestamp of last allow
@@ -537,6 +551,8 @@ class OutputView:
                 self.current.working = False
                 self._render_current()
             self.conversations.append(self.current)
+            if len(self.conversations) > 20:
+                self.conversations = self.conversations[-20:]
             # Carry todos forward only if not all completed
             if not self.current.todos_all_done:
                 prev_todos = self.current.todos
@@ -653,6 +669,13 @@ class OutputView:
         if self.pending_plan:
             self._clear_plan_approval()
             self.pending_plan = None
+        # Clear any pending question
+        if self.pending_question:
+            callback = self.pending_question.callback
+            self._clear_question()
+            self.pending_question = None
+            if callback:
+                callback(None)
         # Append interrupted text
         self.current.events.append("\n\n*[interrupted]*\n")
         self._render_current()
@@ -679,6 +702,7 @@ class OutputView:
         self.pending_permission = None
         self._permission_queue.clear()
         self.pending_plan = None
+        self.pending_question = None
         self.auto_allow_tools.clear()
         self._pending_context_region = (0, 0)
         self._input_mode = False
@@ -1352,6 +1376,188 @@ class OutputView:
         callback(response)
         return True
 
+    # --- Question UI ---
+
+    def question_request(self, qid: int, questions: list, callback: Callable) -> None:
+        """Show an inline question block."""
+        self.show(focus=False)
+
+        if self.view:
+            self.view.settings().set("claude_input_mode", False)
+
+        self.pending_question = QuestionRequest(
+            qid=qid,
+            questions=questions,
+            callback=callback,
+        )
+        self._render_question()
+        self._scroll_to_end()
+
+    def _render_question(self) -> None:
+        """Render the current question inline."""
+        if not self.pending_question or not self.view:
+            return
+
+        q_req = self.pending_question
+        if q_req.current_idx >= len(q_req.questions):
+            return
+
+        q = q_req.questions[q_req.current_idx]
+        question_text = q.get("question", "")
+        options = q.get("options", [])
+        multi = q.get("multiSelect", False)
+
+        lines = ["\n"]
+        if multi:
+            lines.append(f"  ❓ {question_text} (Enter to confirm)\n")
+        else:
+            lines.append(f"  ❓ {question_text}\n")
+
+        # Numbered options
+        for i, opt in enumerate(options):
+            label = opt.get("label", str(opt)) if isinstance(opt, dict) else str(opt)
+            desc = opt.get("description", "") if isinstance(opt, dict) else ""
+            num = i + 1
+            if multi:
+                check = "✓" if i in q_req.selected else " "
+                line = f"    [{num}] {check} {label}"
+            else:
+                line = f"    [{num}] {label}"
+            if desc:
+                line += f" — {desc}"
+            lines.append(line + "\n")
+
+        # Other + confirm buttons
+        if multi:
+            lines.append(f"    [O] Other...  [⏎] Confirm\n")
+        else:
+            lines.append(f"    [O] Other...\n")
+
+        text = "".join(lines)
+
+        # Write to view
+        start = self.view.size()
+        end = self._write(text)
+        q_req.region = (start, end)
+
+        # Track region
+        self.view.add_regions(
+            "claude_question_block",
+            [sublime.Region(start, end)],
+            "", "", sublime.HIDDEN,
+        )
+
+    def _clear_question(self, summary: str = "") -> None:
+        """Remove question block and optionally write compact summary."""
+        if not self.pending_question or not self.view:
+            return
+
+        # Erase the block
+        regions = self.view.get_regions("claude_question_block")
+        if regions:
+            region = regions[0]
+            if summary:
+                self._replace(region.begin(), region.end(), f"\n  ❓ {summary}\n")
+            else:
+                self._replace(region.begin(), region.end(), "")
+        self.view.erase_regions("claude_question_block")
+
+    def _advance_question(self) -> None:
+        """Advance to next question or fire callback."""
+        q_req = self.pending_question
+        if not q_req:
+            return
+
+        q_req.current_idx += 1
+        q_req.selected = set()  # Reset for next question
+
+        if q_req.current_idx >= len(q_req.questions):
+            # All done
+            callback = q_req.callback
+            answers = q_req.answers
+            self.pending_question = None
+            self._move_cursor_to_end()
+            if callback:
+                callback(answers)
+        else:
+            # Render next question
+            self._render_question()
+            self._scroll_to_end()
+
+    def handle_question_key(self, key: str) -> bool:
+        """Handle key press for question UI. Returns True if consumed."""
+        if not self.pending_question:
+            return False
+        if self.pending_question.callback is None:
+            return False
+
+        q_req = self.pending_question
+        q = q_req.questions[q_req.current_idx]
+        options = q.get("options", [])
+        multi = q.get("multiSelect", False)
+        header = q.get("header", f"Q{q_req.current_idx + 1}")
+        key = key.lower()
+
+        # Number keys 1-4
+        if key in ("1", "2", "3", "4"):
+            idx = int(key) - 1
+            if idx >= len(options):
+                return True  # Consumed but invalid
+
+            opt = options[idx]
+            label = opt.get("label", str(opt)) if isinstance(opt, dict) else str(opt)
+
+            if multi:
+                # Toggle selection
+                if idx in q_req.selected:
+                    q_req.selected.discard(idx)
+                else:
+                    q_req.selected.add(idx)
+                # Re-render (erase + redraw)
+                self._clear_question()
+                self._render_question()
+                self._scroll_to_end()
+            else:
+                # Single select - record and advance
+                q_req.answers[str(q_req.current_idx)] = label
+                self._clear_question(f"{header} → {label}")
+                self._advance_question()
+            return True
+
+        # O key - other (custom input)
+        if key == "o":
+            def on_input(text):
+                if text.strip():
+                    q_req.answers[str(q_req.current_idx)] = text.strip()
+                    self._clear_question(f"{header} → {text.strip()}")
+                    self._advance_question()
+
+            def on_cancel():
+                # Don't cancel the whole question, just dismiss the input panel
+                pass
+
+            question_text = q.get("question", "")
+            self.window.show_input_panel(question_text, "", on_input, None, on_cancel)
+            return True
+
+        # Enter - confirm multi-select
+        if key == "enter":
+            if multi:
+                selected_labels = []
+                for idx in sorted(q_req.selected):
+                    opt = options[idx]
+                    label = opt.get("label", str(opt)) if isinstance(opt, dict) else str(opt)
+                    selected_labels.append(label)
+                answer = ", ".join(selected_labels) if selected_labels else "(none)"
+                q_req.answers[str(q_req.current_idx)] = answer
+                self._clear_question(f"{header} → {answer}")
+                self._advance_question()
+                return True
+            return False
+
+        # Escape handled by interrupt flow
+        return False
+
     def _render_current(self, auto_scroll: bool = True) -> None:
         """Re-render current conversation in place (debounced)."""
         if not self.current or not self.view:
@@ -1466,7 +1672,8 @@ class OutputView:
         # BUT: Don't extend if there's a permission block - that's intentional content after the region
         has_trailing_ui = (
             (self.pending_permission and self.pending_permission.callback) or
-            (self.pending_plan and self.pending_plan.callback)
+            (self.pending_plan and self.pending_plan.callback) or
+            (self.pending_question and self.pending_question.callback)
         )
         if end < view_size and not has_trailing_ui:
             end = view_size
@@ -1480,6 +1687,11 @@ class OutputView:
         if self.pending_permission and self.pending_permission.callback:
             self._remove_permission_block()
             self._render_permission()
+
+        # Re-render question block if pending (it may have been shifted)
+        if self.pending_question and self.pending_question.callback:
+            self._clear_question()
+            self._render_question()
 
         # Scroll after render completes (only if auto_scroll is enabled)
         if getattr(self, '_auto_scroll', True):

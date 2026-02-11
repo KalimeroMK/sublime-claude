@@ -834,6 +834,12 @@ class Session:
             self.client.send("shutdown", {}, lambda _: self.client.stop())
         self._clear_status()
 
+        # Release accumulated state
+        if self.output:
+            self.output.conversations.clear()
+        self.pending_context.clear()
+        self._queued_prompts.clear()
+
     def _release_persona(self) -> None:
         """Release acquired persona."""
         import threading
@@ -1093,7 +1099,7 @@ class Session:
         self.output.permission_request(pid, tool, tool_input, on_response)
 
     def _handle_question_request(self, params: dict) -> None:
-        """Handle AskUserQuestion from Claude - show quick panel for each question."""
+        """Handle AskUserQuestion from Claude - show inline question UI."""
         qid = params.get("id")
         questions = params.get("questions", [])
         print(f"[Claude] _handle_question_request: qid={qid}, questions={len(questions)}")
@@ -1103,58 +1109,11 @@ class Session:
                 self.client.send("question_response", {"id": qid, "answers": {}})
             return
 
-        answers = {}
-        current_q = [0]  # Use list to allow mutation in nested function
+        def on_done(answers):
+            if self.client:
+                self.client.send("question_response", {"id": qid, "answers": answers})
 
-        def ask_next():
-            if current_q[0] >= len(questions):
-                # All questions answered
-                if self.client:
-                    self.client.send("question_response", {"id": qid, "answers": answers})
-                return
-
-            q = questions[current_q[0]]
-            question_text = q.get("question", "")
-            options = q.get("options", [])
-            header = q.get("header", f"Q{current_q[0]+1}")
-
-            # Build quick panel items
-            items = []
-            for opt in options:
-                label = opt.get("label", str(opt)) if isinstance(opt, dict) else str(opt)
-                desc = opt.get("description", "") if isinstance(opt, dict) else ""
-                items.append([label, desc])
-            items.append(["Other...", "Type a custom response"])
-
-            def on_select(idx):
-                if idx == -1:
-                    # Cancelled - send None to deny
-                    if self.client:
-                        self.client.send("question_response", {"id": qid, "answers": None})
-                    return
-                elif idx == len(options):
-                    # "Other" - show input panel
-                    def on_input(text):
-                        answers[str(current_q[0])] = text
-                        current_q[0] += 1
-                        sublime.set_timeout(ask_next, 50)
-
-                    def on_cancel():
-                        if self.client:
-                            self.client.send("question_response", {"id": qid, "answers": None})
-
-                    self.window.show_input_panel(question_text, "", on_input, None, on_cancel)
-                else:
-                    # Selected an option
-                    opt = options[idx]
-                    label = opt.get("label", str(opt)) if isinstance(opt, dict) else str(opt)
-                    answers[str(current_q[0])] = label
-                    current_q[0] += 1
-                    sublime.set_timeout(ask_next, 50)
-
-            self.window.show_quick_panel(items, on_select, placeholder=f"{header}: {question_text}")
-
-        sublime.set_timeout(ask_next, 0)
+        self.output.question_request(qid, questions, on_done)
 
     # ─── Plan Mode ─────────────────────────────────────────────────────
 

@@ -48,6 +48,60 @@
         ]
     },
     {
+        "keys": ["1"],
+        "command": "claude_question_key",
+        "args": { "key": "1" },
+        "context": [
+            { "key": "setting.claude_output", "operator": "equal", "operand": true },
+            { "key": "setting.claude_input_mode", "operator": "equal", "operand": false }
+        ]
+    },
+    {
+        "keys": ["2"],
+        "command": "claude_question_key",
+        "args": { "key": "2" },
+        "context": [
+            { "key": "setting.claude_output", "operator": "equal", "operand": true },
+            { "key": "setting.claude_input_mode", "operator": "equal", "operand": false }
+        ]
+    },
+    {
+        "keys": ["3"],
+        "command": "claude_question_key",
+        "args": { "key": "3" },
+        "context": [
+            { "key": "setting.claude_output", "operator": "equal", "operand": true },
+            { "key": "setting.claude_input_mode", "operator": "equal", "operand": false }
+        ]
+    },
+    {
+        "keys": ["4"],
+        "command": "claude_question_key",
+        "args": { "key": "4" },
+        "context": [
+            { "key": "setting.claude_output", "operator": "equal", "operand": true },
+            { "key": "setting.claude_input_mode", "operator": "equal", "operand": false }
+        ]
+    },
+    {
+        "keys": ["o"],
+        "command": "claude_question_key",
+        "args": { "key": "o" },
+        "context": [
+            { "key": "setting.claude_output", "operator": "equal", "operand": true },
+            { "key": "setting.claude_input_mode", "operator": "equal", "operand": false }
+        ]
+    },
+    {
+        "keys": ["enter"],
+        "command": "claude_question_key",
+        "args": { "key": "enter" },
+        "context": [
+            { "key": "setting.claude_output", "operator": "equal", "operand": true },
+            { "key": "setting.claude_input_mode", "operator": "equal", "operand": false }
+        ]
+    },
+    {
         "keys": ["enter"],
         "command": "claude_submit_input",
         "context": [

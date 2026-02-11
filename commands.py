@@ -1467,6 +1467,14 @@ class ClaudePermissionAllowAllCommand(sublime_plugin.TextCommand):
             s.output.handle_permission_key("a")
 
 
+class ClaudeQuestionKeyCommand(sublime_plugin.TextCommand):
+    """Handle number/o/enter keys for inline question UI."""
+    def run(self, edit, key=""):
+        s = get_session_for_view(self.view)
+        if s:
+            s.output.handle_question_key(key)
+
+
 # --- Quick Prompts ---
 
 QUICK_PROMPTS = {
