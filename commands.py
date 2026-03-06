@@ -576,6 +576,7 @@ class ClaudeCodeUsageCommand(sublime_plugin.WindowCommand):
 class ClaudeCodeViewHistoryCommand(sublime_plugin.WindowCommand):
     """View session history from Claude's stored conversation."""
     def run(self) -> None:
+        import os
         from .session import load_saved_sessions
         sessions = load_saved_sessions()
         if not sessions:
@@ -602,7 +603,7 @@ class ClaudeCodeViewHistoryCommand(sublime_plugin.WindowCommand):
 
     def _show_history(self, session: dict) -> None:
         """Extract and display user messages from session history."""
-        import json
+        import json, os
 
         sid = session.get("session_id", "")
         project = session.get("project", "")

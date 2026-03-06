@@ -204,10 +204,7 @@ class ClaudeOutputEventListener(sublime_plugin.ViewEventListener):
 
         # Reset active states
         session.output.reset_active_states()
-        if session_name:
-            view.set_name(f"Claude: {session_name}")
-        else:
-            view.set_name("Claude")
+        session.output.set_name(session_name or "Claude")
 
         session.start()
 

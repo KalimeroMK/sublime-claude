@@ -178,13 +178,23 @@ class OutputView:
         # Check if this is the active Claude view
         window = self.view.window()
         is_active = window and window.settings().get("claude_active_view") == self.view.id()
-        # ◉ = active+working, ◇ = active+idle, • = inactive+working, (none) = inactive+idle
+        # ◉ = working, ◇ = idle, • = inactive+working, ❓ = questioning
+        is_questioning = bool(
+            (self.pending_permission and self.pending_permission.callback) or
+            (self.pending_question and self.pending_question.callback) or
+            (self.pending_plan and self.pending_plan.callback)
+        )
         is_working = self.current and self.current.working
-        if is_active:
+        if is_questioning:
+            prefix = "❓"
+        elif is_active:
             prefix = "◉ " if is_working else "◇ "
         else:
-            prefix = "• " if is_working else ""
-        self.view.set_name(f"{prefix}Claude: {name}")
+            prefix = "• " if is_working else "◇ "
+        # Truncate to keep tab bar usable
+        if len(name) > 20:
+            name = name[:19] + "…"
+        self.view.set_name(f"{prefix}{name}")
 
     def _write(self, text: str, pos: Optional[int] = None) -> int:
         """Write text at position (or end). Returns end position."""

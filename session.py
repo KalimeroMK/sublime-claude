@@ -1189,7 +1189,8 @@ class Session:
 
         # If it has an endpoint, POST to it first
         if endpoint:
-            session_id = params.get("session_id", f"sublime.{self.view.id()}")
+            view_id = self.output.view.id() if self.output and self.output.view else 0
+            session_id = params.get("session_id", f"sublime.{view_id}")
             try:
                 req = urllib.request.Request(
                     endpoint,
@@ -1211,7 +1212,8 @@ class Session:
                 "params": params,
                 "wake_prompt": wake_prompt
             })
-        return {"ok": True, "notification_type": notification_type, "session_id": params.get("session_id", f"sublime.{self.view.id()}")}
+        view_id = self.output.view.id() if self.output and self.output.view else 0
+        return {"ok": True, "notification_type": notification_type, "session_id": params.get("session_id", f"sublime.{view_id}")}
 
     def register_notification(
         self,
