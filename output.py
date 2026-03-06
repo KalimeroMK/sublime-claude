@@ -1478,6 +1478,19 @@ class OutputView:
             "", "", sublime.HIDDEN,
         )
 
+        # Highlight option keys [1], [2], ..., [O], [⏎]
+        import re
+        key_regions = []
+        for m in re.finditer(r'\[\d+\]|\[O\]|\[⏎\]', text):
+            key_regions.append(sublime.Region(start + m.start(), start + m.end()))
+        if key_regions:
+            self.view.add_regions(
+                "claude_question_keys",
+                key_regions,
+                "claude.permission.button.allow",
+                "", sublime.DRAW_NO_OUTLINE,
+            )
+
     def _clear_question(self, summary: str = "") -> None:
         """Remove question block and optionally write compact summary."""
         if not self.pending_question or not self.view:
@@ -1498,6 +1511,7 @@ class OutputView:
             if view_size > conv_end:
                 self._replace(conv_end, view_size, "")
         self.view.erase_regions("claude_question_block")
+        self.view.erase_regions("claude_question_keys")
 
     def _advance_question(self) -> None:
         """Advance to next question or fire callback."""
@@ -1707,12 +1721,26 @@ class OutputView:
         # If there's content after our region, extend end to clean it up
         # This handles race conditions where content was orphaned from previous renders
         # BUT: Don't extend if there's a permission block - that's intentional content after the region
+        rerender_ui = False
         has_trailing_ui = (
             (self.pending_permission and self.pending_permission.callback) or
             (self.pending_plan and self.pending_plan.callback) or
             (self.pending_question and self.pending_question.callback)
         )
-        if end < view_size and not has_trailing_ui:
+        if has_trailing_ui:
+            # Clamp end to not eat the trailing UI block
+            ui_region = (
+                self.view.get_regions("claude_permission_block") or
+                self.view.get_regions("claude_plan_block") or
+                self.view.get_regions("claude_question_block")
+            )
+            if ui_region and ui_region[0].size() > 0:
+                end = min(end, ui_region[0].begin())
+            else:
+                # UI block tracked region lost — extend to clean up, then re-render UI
+                end = view_size
+                rerender_ui = True
+        elif end < view_size:
             end = view_size
         new_end = self._replace(start, end, text)
         self.current.region = (start, new_end)
@@ -1720,15 +1748,12 @@ class OutputView:
         # Update title to reflect working state
         self._update_title()
 
-        # Re-render permission block if pending (it may have been shifted)
-        if self.pending_permission and self.pending_permission.callback:
-            self._remove_permission_block()
-            self._render_permission()
-
-        # Re-render question block if pending (it may have been shifted)
-        if self.pending_question and self.pending_question.callback:
-            self._clear_question()
-            self._render_question()
+        # Re-render UI blocks only if their tracked regions were lost
+        if rerender_ui:
+            if self.pending_permission and self.pending_permission.callback:
+                self._render_permission()
+            if self.pending_question and self.pending_question.callback:
+                self._render_question()
 
         # Scroll after render completes (only if auto_scroll is enabled)
         if getattr(self, '_auto_scroll', True):

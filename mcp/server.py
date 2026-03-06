@@ -160,7 +160,7 @@ def handle_request(request: dict) -> dict:
                 },
                 {
                     "name": "spawn_session",
-                    "description": "Spawn a new Claude session with the given prompt. Returns view_id. Always waits for initialization. Use profile for specialized configurations (e.g. 1M context model with preloaded docs).",
+                    "description": "Spawn a new Claude subsession. Returns view_id. Use fork_current=true to share your full conversation context with the subsession — it sees everything you've learned so far (files read, decisions made, codebase understanding) without re-discovering it. This is the preferred way to parallelize work. Use profile for specialized configurations (e.g. 1M context model with preloaded docs).",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
@@ -327,24 +327,7 @@ Your session has a dedicated terminal reused across calls. Do not specify tag or
                     }
                 },
                 # ─── User Interaction ────────────────────────────────────────
-                {
-                    "name": "ask_user",
-                    "description": """Ask the user a question and wait for their response.
-Shows a quick panel with options. Use for clarifying requirements, getting preferences, or confirming actions.
-User can always type a custom response.""",
-                    "inputSchema": {
-                        "type": "object",
-                        "properties": {
-                            "question": {"type": "string", "description": "The question to ask"},
-                            "options": {
-                                "type": "array",
-                                "items": {"type": "string"},
-                                "description": "List of options to choose from (user can also type custom answer)"
-                            }
-                        },
-                        "required": ["question"]
-                    }
-                },
+                # ask_user removed — Claude's native AskUserQuestion shows inline in session view
                 # ─── Notification Tools (notalone2) ──────────────────────────
                 # Timer and subsession notifications via notalone2 daemon
                 # Session ID is embedded in bridge - no need to specify

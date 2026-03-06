@@ -127,9 +127,7 @@ def create_sublime_router() -> ToolRouter:
     router.register("terminal_close", lambda args:
         f"return terminus_close(tag={args.get('tag')!r}, target_id={args.get('target_id')!r})")
 
-    # User interaction
-    router.register("ask_user", lambda args:
-        f"return ask_user({args.get('question', '')!r}, {args.get('options', [])!r})")
+    # ask_user removed — Claude's native AskUserQuestion shows inline in session view
 
     # ─── Notification System (notalone2) ───────────────────────────
     # Uses notalone2 daemon for timers and subsession notifications
