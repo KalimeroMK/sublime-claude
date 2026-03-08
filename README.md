@@ -81,7 +81,7 @@ The output view features an inline input area (marked with `◎`) where you type
 - **Shift+Enter** - Insert newline (multiline prompts)
 - **@** - Open context menu (add files, selection, folder, or clear context)
 - **Cmd+K** - Clear output
-- **Cmd+Escape** - Interrupt current query
+- **Cmd+Escape** - Clear input text, or interrupt current query if input is empty
 - **Cmd+Z** - Undo clear (restores cleared content)
 
 When a permission prompt appears:

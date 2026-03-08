@@ -84,6 +84,7 @@ class Conversation:
     todos_all_done: bool = False  # True when all todos completed (don't carry to next)
     working: bool = True  # True while processing, False when done
     duration: float = 0.0
+    usage: dict = None
     region: tuple = (0, 0)
     context_names: List[str] = field(default_factory=list)  # Context files used
 
@@ -665,12 +666,13 @@ class OutputView:
             self.current.events.append(content)
         self._render_current()
 
-    def meta(self, duration: float, cost: float = None) -> None:
+    def meta(self, duration: float, cost: float = None, usage: dict = None) -> None:
         """Set completion meta - marks conversation as done."""
         if not self.current:
             return
 
         self.current.duration = duration
+        self.current.usage = usage
         self.current.working = False
         self._render_current()
 
@@ -1781,7 +1783,15 @@ class OutputView:
 
         # Meta
         if self.current.duration > 0:
-            lines.append(f"\n  @done({self.current.duration:.1f}s)\n")
+            meta_parts = [f"{self.current.duration:.1f}s"]
+            if self.current.usage:
+                input_t = self.current.usage.get("input_tokens") or self.current.usage.get("total_tokens")
+                if input_t:
+                    if input_t >= 1000:
+                        meta_parts.append(f"{input_t // 1000}k tok")
+                    else:
+                        meta_parts.append(f"{input_t} tok")
+            lines.append(f"\n  @done({', '.join(meta_parts)})\n")
 
         text = "".join(lines)
 

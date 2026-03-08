@@ -63,6 +63,7 @@ class Session:
         self.name: Optional[str] = None
         self.total_cost: float = 0.0
         self.query_count: int = 0
+        self.context_usage: Optional[Dict] = None  # Latest usage/context stats
         # Pending context for next query
         self.pending_context: List[ContextItem] = []
         # Profile docs available for reading (paths only, not content)
@@ -973,8 +974,13 @@ class Session:
             cost = params.get("total_cost_usd") or 0
             self.total_cost += cost
             dur = params.get("duration_ms", 0) / 1000
+            usage = params.get("usage")
+            if usage:
+                self.context_usage = usage
             print(f"[Claude] [{dur:.1f}s, ${cost:.4f}]" if cost else f"[Claude] [{dur:.1f}s]")
-            self.output.meta(dur, cost)
+            if usage:
+                print(f"[Claude] usage: {usage}")
+            self.output.meta(dur, cost, usage=usage)
             self._update_status_bar()
         elif t == "system":
             subtype = params.get("subtype", "")
@@ -1033,8 +1039,31 @@ class Session:
             parts.append(f"${self.total_cost:.4f}")
         if self.query_count > 0:
             parts.append(f"{self.query_count}q")
+        # Show context usage percentage
+        if self.context_usage:
+            pct = self._context_pct()
+            if pct is not None:
+                parts.append(f"ctx:{pct}%")
         status = " | ".join(parts) if parts else "Claude"
         self.output.view.set_status("claude_session", f"Claude: {status}")
+
+    def _context_pct(self) -> Optional[int]:
+        """Estimate context usage percentage from latest usage data."""
+        if not self.context_usage:
+            return None
+        # Try input_tokens + output_tokens vs context window
+        input_t = self.context_usage.get("input_tokens") or self.context_usage.get("total_tokens") or 0
+        if not input_t:
+            return None
+        # Claude models context windows
+        model = (self.profile or {}).get("model", "sonnet")
+        if "opus" in str(model).lower():
+            ctx_limit = 200000
+        elif "haiku" in str(model).lower():
+            ctx_limit = 200000
+        else:
+            ctx_limit = 200000  # sonnet/default
+        return min(100, int(input_t / ctx_limit * 100))
 
     def _clear_status(self) -> None:
         if self.output.view and self.output.view.is_valid():

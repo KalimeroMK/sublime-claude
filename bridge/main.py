@@ -938,14 +938,19 @@ You are subsession **{subsession_id}**. Call signal_complete(session_id={view_id
                             "is_error": block.is_error,
                         })
         elif isinstance(message, ResultMessage):
-            send_notification("message", {
+            result_params = {
                 "type": "result",
                 "session_id": message.session_id,
                 "duration_ms": message.duration_ms,
                 "is_error": message.is_error,
                 "num_turns": message.num_turns,
                 "total_cost_usd": message.total_cost_usd,
-            })
+            }
+            if message.usage:
+                result_params["usage"] = message.usage
+            if message.stop_reason:
+                result_params["stop_reason"] = message.stop_reason
+            send_notification("message", result_params)
         elif isinstance(message, SystemMessage):
             with open("/tmp/claude_bridge.log", "a") as f:
                 f.write(f"SystemMessage: subtype={message.subtype}, data={message.data}\n")

@@ -59,6 +59,7 @@ class CodexBridge:
         # Track turn timing
         self._turn_start_time: float = 0
         self._query_req_id: Optional[int] = None
+        self._last_usage: Optional[dict] = None
 
     # ── Codex subprocess management ─────────────────────────────────
 
@@ -226,13 +227,18 @@ class CodexBridge:
         # Build input
         user_input = [{"type": "text", "text": prompt}]
 
-        # Add images if provided
+        # Add images if provided (format: {"mime_type": str, "data": base64_str})
         images = params.get("images", [])
         for img in images:
-            if img.startswith("/"):
-                user_input.append({"type": "localImage", "path": img})
-            else:
-                user_input.append({"type": "image", "url": img})
+            if isinstance(img, dict):
+                mime = img.get("mime_type", "image/png")
+                data = img.get("data", "")
+                user_input.append({"type": "image", "url": f"data:{mime};base64,{data}"})
+            elif isinstance(img, str):
+                if img.startswith("/"):
+                    user_input.append({"type": "localImage", "path": img})
+                else:
+                    user_input.append({"type": "image", "url": img})
 
         await self.codex_request("turn/start", {
             "threadId": self.thread_id,
@@ -350,7 +356,8 @@ class CodexBridge:
             pass  # Could forward as tool output streaming
 
         elif method == "thread/tokenUsage/updated":
-            pass  # Could track token counts
+            log(f"Token usage: {params}")
+            self._last_usage = params
 
         elif method == "codex/event/task_complete":
             # Codex-specific turn completion (alongside or instead of turn/completed)
@@ -435,13 +442,16 @@ class CodexBridge:
     def _complete_turn(self, is_error: bool = False) -> None:
         """Send turn result notification and deferred query response."""
         duration = time.time() - self._turn_start_time if self._turn_start_time else 0
-        send_notification("message", {
+        result_msg = {
             "type": "result",
             "session_id": self.session_id,
             "duration_ms": int(duration * 1000),
             "is_error": is_error,
             "total_cost_usd": 0,
-        })
+        }
+        if self._last_usage:
+            result_msg["usage"] = self._last_usage
+        send_notification("message", result_msg)
         # Respond to the deferred query request — triggers _on_done in session.py
         if self._query_req_id is not None:
             send_result(self._query_req_id, {

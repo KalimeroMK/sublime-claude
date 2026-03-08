@@ -401,8 +401,21 @@ class ClaudeCodeQueuePromptCommand(sublime_plugin.WindowCommand):
 class ClaudeCodeInterruptCommand(sublime_plugin.WindowCommand):
     def run(self) -> None:
         s = get_active_session(self.window)
-        if s:
-            s.interrupt()
+        if not s:
+            return
+        # If in input mode with text, clear the input instead of interrupting
+        if s.output.is_input_mode() and s.output.get_input_text().strip():
+            view = s.output.view
+            start = s.output._input_start
+            view.run_command("claude_replace", {
+                "start": start,
+                "end": view.size(),
+                "text": ""
+            })
+            view.sel().clear()
+            view.sel().add(sublime.Region(start, start))
+            return
+        s.interrupt()
 
 
 class ClaudeCloseSessionCommand(sublime_plugin.TextCommand):
@@ -762,9 +775,13 @@ class ClaudeCodeResumeCommand(sublime_plugin.WindowCommand):
 
 class ClaudeCodeSwitchCommand(sublime_plugin.WindowCommand):
     """Switch between active sessions in this window."""
-    def run(self) -> None:
+    def run(self, backend: str = "claude") -> None:
         import os
+        import shutil
         from .core import create_session
+
+        backend_prefix = f"[{backend}] " if backend != "claude" else ""
+        has_codex = bool(shutil.which("codex"))
 
         # Get all sessions in this window
         sessions_in_window = []
@@ -792,7 +809,7 @@ class ClaudeCodeSwitchCommand(sublime_plugin.WindowCommand):
         # Add "New Session with This File" option when in a non-session file
         if not in_output_view and current_file:
             filename = os.path.basename(current_file)
-            items.append([f"📎 New with ctx:{filename}", "Create session with this file as context"])
+            items.append([f"📎 {backend_prefix}New with ctx:{filename}", "Create session with this file as context"])
             actions.append(("new_with_file", current_file))
 
         if active_session and not in_output_view:
@@ -832,12 +849,12 @@ class ClaudeCodeSwitchCommand(sublime_plugin.WindowCommand):
 
         for name, config in profiles.items():
             desc = config.get("description", f"{config.get('model', 'default')} model")
-            items.append([f"😶 {name}", desc])
+            items.append([f"😶 {backend_prefix}{name}", desc])
             actions.append(("profile", config))
 
         for name, config in checkpoints.items():
             desc = config.get("description", "Saved checkpoint")
-            items.append([f"📍 {name}", desc])
+            items.append([f"📍 {backend_prefix}{name}", desc])
             actions.append(("checkpoint", config))
 
         # Add "From Persona" option
@@ -846,8 +863,8 @@ class ClaudeCodeSwitchCommand(sublime_plugin.WindowCommand):
         items.append(["👤 From Persona...", "Acquire a persona identity"])
         actions.append(("persona", persona_url))
 
-        # Add "New Session" option at end
-        items.append(["🆕 New Session", "Start fresh with default settings"])
+        # Add "New Session" option
+        items.append([f"🆕 {backend_prefix}New Session", "Start fresh with default settings"])
         actions.append(("new", None))
 
         # Add "Fork Session" option when in a session window
@@ -855,15 +872,25 @@ class ClaudeCodeSwitchCommand(sublime_plugin.WindowCommand):
             items.append(["🍴 Fork Session", "Create new session with copy of history"])
             actions.append(("fork", active_session))
 
+        # Add "Switch Backend" option
+        if has_codex:
+            other = "codex" if backend == "claude" else "claude"
+            items.append([f"⇄ Switch to {other}", f"Show {other} options"])
+            actions.append(("switch_backend", other))
+
         def on_select(idx):
             if idx >= 0:
                 action, data = actions[idx]
+                if action == "switch_backend":
+                    # Re-open panel with new backend
+                    sublime.set_timeout(lambda: self.run(backend=data), 0)
+                    return
                 if action == "restart" and data:
                     # Show profile picker for restart
                     self._show_restart_picker(data, profiles, checkpoints)
                 elif action == "new_with_file" and data:
                     # Create new session with current file as context
-                    s = create_session(self.window)
+                    s = create_session(self.window, backend=backend)
                     # Read file content and add to context
                     try:
                         with open(data, "r", encoding="utf-8") as f:
@@ -872,13 +899,13 @@ class ClaudeCodeSwitchCommand(sublime_plugin.WindowCommand):
                     except Exception as e:
                         print(f"[Claude] Error adding file context: {e}")
                 elif action == "new":
-                    create_session(self.window)
+                    create_session(self.window, backend=backend)
                 elif action == "profile":
-                    create_session(self.window, profile=data)
+                    create_session(self.window, profile=data, backend=backend)
                 elif action == "checkpoint":
                     session_id = data.get("session_id")
                     if session_id:
-                        create_session(self.window, resume_id=session_id, fork=True)
+                        create_session(self.window, resume_id=session_id, fork=True, backend=backend)
                 elif action == "fork" and data:
                     # Fork the current session
                     if data.session_id:
