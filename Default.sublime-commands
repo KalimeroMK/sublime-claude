@@ -4,6 +4,10 @@
         "command": "claude_code_query"
     },
     {
+        "caption": "Codex: New Session",
+        "command": "codex_start"
+    },
+    {
         "caption": "Claude: Query Selection",
         "command": "claude_code_query_selection"
     },

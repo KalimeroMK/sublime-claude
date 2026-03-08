@@ -191,9 +191,13 @@ class OutputView:
             prefix = "◉ " if is_working else "◇ "
         else:
             prefix = "• " if is_working else "◇ "
+        # Show backend for non-claude sessions
+        backend = self.view.settings().get("claude_backend")
+        if backend:
+            name = f"[{backend}] {name}"
         # Truncate to keep tab bar usable
-        if len(name) > 20:
-            name = name[:19] + "…"
+        if len(name) > 24:
+            name = name[:23] + "…"
         self.view.set_name(f"{prefix}{name}")
 
     def _write(self, text: str, pos: Optional[int] = None) -> int:
@@ -654,7 +658,11 @@ class OutputView:
         if not self.current:
             return
 
-        self.current.events.append(content)
+        # Merge with previous text event to avoid per-token line breaks
+        if self.current.events and isinstance(self.current.events[-1], str):
+            self.current.events[-1] += content
+        else:
+            self.current.events.append(content)
         self._render_current()
 
     def meta(self, duration: float, cost: float = None) -> None:

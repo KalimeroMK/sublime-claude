@@ -11,9 +11,13 @@ from .command_parser import CommandParser
 
 class ClaudeCodeStartCommand(sublime_plugin.WindowCommand):
     """Start a new session. Shows profile picker if profiles are configured."""
-    def run(self, profile: str = None, persona_id: int = None) -> None:
+    def run(self, profile: str = None, persona_id: int = None, backend: str = None) -> None:
         from .settings import load_profiles_and_checkpoints, load_project_settings
         import os
+
+        # Default to claude — use "codex" backend via explicit arg or separate command
+        if backend is None:
+            backend = "claude"
 
         # If persona_id specified, acquire and start
         if persona_id:
@@ -33,7 +37,7 @@ class ClaudeCodeStartCommand(sublime_plugin.WindowCommand):
         # If profile specified directly, use it
         if profile:
             profile_config = profiles.get(profile, {})
-            create_session(self.window, profile=profile_config)
+            create_session(self.window, profile=profile_config, backend=backend)
             return
 
         # Build options list
@@ -59,7 +63,7 @@ class ClaudeCodeStartCommand(sublime_plugin.WindowCommand):
 
         if len(options) == 1:
             # Only default, just start
-            create_session(self.window)
+            create_session(self.window, backend=backend)
             return
 
         # Show quick panel
@@ -70,17 +74,17 @@ class ClaudeCodeStartCommand(sublime_plugin.WindowCommand):
                 return
             opt_type, opt_name, _, _ = options[idx]
             if opt_type == "default":
-                create_session(self.window)
+                create_session(self.window, backend=backend)
             elif opt_type == "persona":
                 self._show_persona_picker(opt_name)  # opt_name contains the URL
             elif opt_type == "profile":
                 profile_config = profiles.get(opt_name, {})
-                create_session(self.window, profile=profile_config)
+                create_session(self.window, profile=profile_config, backend=backend)
             elif opt_type == "checkpoint":
                 checkpoint = checkpoints.get(opt_name, {})
                 session_id = checkpoint.get("session_id")
                 if session_id:
-                    create_session(self.window, resume_id=session_id, fork=True)
+                    create_session(self.window, resume_id=session_id, fork=True, backend=backend)
                 else:
                     sublime.error_message(f"Checkpoint '{opt_name}' has no session_id")
 
@@ -180,6 +184,16 @@ class ClaudeCodeStartCommand(sublime_plugin.WindowCommand):
             sublime.set_timeout(start, 0)
 
         threading.Thread(target=acquire_and_start, daemon=True).start()
+
+
+class CodexStartCommand(sublime_plugin.WindowCommand):
+    """Start a new Codex session."""
+    def run(self) -> None:
+        import shutil
+        if not shutil.which("codex"):
+            sublime.error_message("Codex CLI not found. Install from: https://github.com/openai/codex")
+            return
+        create_session(self.window, backend="codex")
 
 
 class ClaudeCodeQueryCommand(sublime_plugin.WindowCommand):

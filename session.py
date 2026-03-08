@@ -10,6 +10,7 @@ from .output import OutputView
 
 
 BRIDGE_SCRIPT = os.path.join(os.path.dirname(__file__), "bridge", "main.py")
+CODEX_BRIDGE_SCRIPT = os.path.join(os.path.dirname(__file__), "bridge", "codex_main.py")
 SESSIONS_FILE = os.path.join(os.path.dirname(__file__), ".sessions.json")
 
 
@@ -42,8 +43,9 @@ class ContextItem:
 
 
 class Session:
-    def __init__(self, window: sublime.Window, resume_id: Optional[str] = None, fork: bool = False, profile: Optional[Dict] = None, initial_context: Optional[Dict] = None):
+    def __init__(self, window: sublime.Window, resume_id: Optional[str] = None, fork: bool = False, profile: Optional[Dict] = None, initial_context: Optional[Dict] = None, backend: str = "claude"):
         self.window = window
+        self.backend = backend
         self.client: Optional[JsonRpcClient] = None
         self.output = OutputView(window)
         self.initialized = False
@@ -114,8 +116,9 @@ class Session:
         # Sync sublime project retain content to file for hook
         self._sync_project_retain()
 
+        bridge_script = CODEX_BRIDGE_SCRIPT if self.backend == "codex" else BRIDGE_SCRIPT
         self.client = JsonRpcClient(self._on_notification)
-        self.client.start([python_path, BRIDGE_SCRIPT], env=env)
+        self.client.start([python_path, bridge_script], env=env)
         self._status("connecting...")
 
         permission_mode = settings.get("permission_mode", "acceptEdits")

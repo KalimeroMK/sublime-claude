@@ -169,23 +169,27 @@ class ClaudeOutputEventListener(sublime_plugin.ViewEventListener):
         name = view.name()
         session_name = None
 
-        # Strip status prefix if present
-        if name.startswith(("◉ ", "◇ ", "• ")):
-            name = name[2:]
-        if name.startswith("Claude: "):
-            session_name = name[8:]
-            if " - " in session_name:
-                session_name = session_name.split(" - ")[0]
+        # Strip status prefixes (new format: ◉/◇/•/❓ + space, old: spinner)
+        import re
+        name = re.sub(r'^[◉◇•❓⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]\s*', '', name)
 
-        # Handle spinner prefix
-        for c in "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏":
-            if name.startswith(c + " "):
-                name = name[2:]
-                if " - " in name:
-                    session_name = name.split(" - ")[0]
-                else:
-                    session_name = name
-                break
+        # Strip old "Claude: " prefix
+        if name.startswith("Claude: "):
+            name = name[8:]
+
+        # Strip backend prefix like "[codex] "
+        if name.startswith("[") and "] " in name:
+            name = name[name.index("] ") + 2:]
+
+        # Strip trailing ellipsis from truncation
+        if name.endswith("…"):
+            name = name[:-1]
+
+        # Extract session name (before " - " suffix if present)
+        if " - " in name:
+            session_name = name.split(" - ")[0]
+        elif name and name != "Claude":
+            session_name = name
 
         # Try to find session_id from saved sessions (only if it was actually used)
         resume_id = None
