@@ -1696,10 +1696,30 @@ class OutputView:
         sublime.set_timeout(self._do_render, 10)
 
     def advance_spinner(self) -> None:
-        """Advance spinner animation frame and re-render if working."""
-        if self.current and self.current.working:
-            self._spinner_frame += 1
-            self._render_current(auto_scroll=False)  # Don't scroll during spinner updates
+        """Advance spinner animation frame and update only the spinner character."""
+        if not self.current or not self.current.working or not self.view:
+            return
+        self._spinner_frame += 1
+        # Only replace the spinner character in-place instead of re-rendering everything
+        tracked = self.view.get_regions("claude_spinner")
+        if tracked and tracked[0].size() == 1:
+            spinner = SPINNER_FRAMES[self._spinner_frame % len(SPINNER_FRAMES)]
+            self.view.set_read_only(False)
+            self.view.run_command("claude_replace", {
+                "start": tracked[0].begin(),
+                "end": tracked[0].end(),
+                "text": spinner,
+            })
+            self.view.set_read_only(True)
+            # Re-track the spinner region
+            pos = tracked[0].begin()
+            self.view.add_regions("claude_spinner", [sublime.Region(pos, pos + 1)], "", "", sublime.HIDDEN)
+        else:
+            # No spinner region tracked yet — full re-render will create it
+            self._render_current(auto_scroll=False)
+        # Periodically clear undo history to prevent memory bloat
+        if self._spinner_frame % 50 == 0:
+            self.view.buffer().clear_undo_stack()
 
     def _do_render(self) -> None:
         """Actually perform the render."""
@@ -1788,12 +1808,15 @@ class OutputView:
         if self.current.duration > 0:
             meta_parts = [f"{self.current.duration:.1f}s"]
             if self.current.usage:
-                input_t = self.current.usage.get("input_tokens") or self.current.usage.get("total_tokens")
+                u = self.current.usage
+                input_t = (u.get("input_tokens", 0)
+                         + u.get("cache_read_input_tokens", 0)
+                         + u.get("cache_creation_input_tokens", 0))
                 if input_t:
                     if input_t >= 1000:
-                        meta_parts.append(f"{input_t // 1000}k tok")
+                        meta_parts.append(f"{input_t // 1000}k ctx")
                     else:
-                        meta_parts.append(f"{input_t} tok")
+                        meta_parts.append(f"{input_t} ctx")
             lines.append(f"\n  @done({', '.join(meta_parts)})\n")
 
         text = "".join(lines)
@@ -1831,6 +1854,18 @@ class OutputView:
             [sublime.Region(start, new_end)],
             "", "", sublime.HIDDEN,
         )
+
+        # Track spinner character position for efficient in-place updates
+        if self.current.working:
+            spinner = SPINNER_FRAMES[self._spinner_frame % len(SPINNER_FRAMES)]
+            # Find "  X\n" pattern in rendered region
+            rendered = self.view.substr(sublime.Region(start, new_end))
+            spinner_offset = rendered.find(f"  {spinner}\n")
+            if spinner_offset >= 0:
+                spinner_pos = start + spinner_offset + 2  # skip the 2 spaces
+                self.view.add_regions("claude_spinner", [sublime.Region(spinner_pos, spinner_pos + 1)], "", "", sublime.HIDDEN)
+        else:
+            self.view.erase_regions("claude_spinner")
 
         # Update title to reflect working state
         self._update_title()

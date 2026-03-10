@@ -986,6 +986,8 @@ class Session:
             subtype = params.get("subtype", "")
             data = params.get("data", {})
             if subtype == "compact_boundary":
+                self.context_usage = None
+                self._update_status_bar()
                 self._inject_retain_midquery()
 
     def _set_name(self, name: str) -> None:
@@ -1051,8 +1053,10 @@ class Session:
         """Estimate context usage percentage from latest usage data."""
         if not self.context_usage:
             return None
-        # Try input_tokens + output_tokens vs context window
-        input_t = self.context_usage.get("input_tokens") or self.context_usage.get("total_tokens") or 0
+        u = self.context_usage
+        input_t = (u.get("input_tokens", 0)
+                 + u.get("cache_read_input_tokens", 0)
+                 + u.get("cache_creation_input_tokens", 0))
         if not input_t:
             return None
         # Claude models context windows
@@ -1083,7 +1087,7 @@ class Session:
         self._status(f"{s} {status}")
         # Animate spinner in output view
         self.output.advance_spinner()
-        sublime.set_timeout(self._animate, 100)
+        sublime.set_timeout(self._animate, 200)
 
     def _handle_permission_request(self, params: dict) -> None:
         """Handle permission request from bridge - show in output view."""
