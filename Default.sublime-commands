@@ -76,6 +76,10 @@
         "command": "claude_code_clear"
     },
     {
+        "caption": "Claude: Undo Message",
+        "command": "claude_undo_message"
+    },
+    {
         "caption": "Claude: Copy Conversation",
         "command": "claude_code_copy"
     },

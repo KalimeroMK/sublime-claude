@@ -164,10 +164,10 @@ class ClaudeCodeStartCommand(sublime_plugin.WindowCommand):
             ability = result.get("ability", {})
             handoff_notes = result.get("handoff_notes")
 
-            # Build profile config from persona
+            # Build profile config from persona (fallback to persona-level fields if ability empty)
             profile_config = {
-                "model": ability.get("model", "sonnet"),
-                "system_prompt": ability.get("system_prompt", ""),
+                "model": ability.get("model") or persona.get("model") or "sonnet",
+                "system_prompt": ability.get("system_prompt") or persona.get("system_prompt") or "",
                 "persona_id": persona_id,
                 "persona_session_id": session_id,
                 "persona_url": persona_url,
@@ -832,8 +832,11 @@ class ClaudeCodeSwitchCommand(sublime_plugin.WindowCommand):
             items.append([f"{marker}{name}", detail])
             actions.append(("focus", s))
 
-        # Add "Restart Session" option when in a session window
+        # Add session actions when in a session output view
         if in_output_view and active_session:
+            if not active_session.working and active_session.session_id:
+                items.append(["↩ Undo Message", "Rewind session to previous turn"])
+                actions.append(("undo_message", active_session))
             items.append(["🔄 Restart Session", "Restart current session, keep output"])
             actions.append(("restart", active_session))
 
@@ -885,7 +888,9 @@ class ClaudeCodeSwitchCommand(sublime_plugin.WindowCommand):
                     # Re-open panel with new backend
                     sublime.set_timeout(lambda: self.run(backend=data), 0)
                     return
-                if action == "restart" and data:
+                if action == "undo_message" and data:
+                    data.undo_message()
+                elif action == "restart" and data:
                     # Show profile picker for restart
                     self._show_restart_picker(data, profiles, checkpoints)
                 elif action == "new_with_file" and data:
@@ -983,8 +988,8 @@ class ClaudeCodeSwitchCommand(sublime_plugin.WindowCommand):
             handoff_notes = result.get("handoff_notes")
 
             profile_config = {
-                "model": ability.get("model", "sonnet"),
-                "system_prompt": ability.get("system_prompt", ""),
+                "model": ability.get("model") or persona.get("model") or "sonnet",
+                "system_prompt": ability.get("system_prompt") or persona.get("system_prompt") or "",
                 "persona_id": persona_id,
                 "persona_session_id": session_id,
                 "persona_url": persona_url,
@@ -1521,6 +1526,14 @@ class ClaudePermissionDenyCommand(sublime_plugin.TextCommand):
         if s:
             if not s.output.handle_plan_key("n"):
                 s.output.handle_permission_key("n")
+
+
+class ClaudeUndoMessageCommand(sublime_plugin.TextCommand):
+    """Undo last conversation turn."""
+    def run(self, edit):
+        s = get_session_for_view(self.view)
+        if s:
+            s.undo_message()
 
 
 class ClaudeViewPlanCommand(sublime_plugin.TextCommand):

@@ -248,20 +248,30 @@ class ClaudeOutputEventListener(sublime_plugin.ViewEventListener):
                         session_name = saved.get("name") or session_name
                         break
 
-        print(f"[Claude] reconnect: view_name={view.name()!r}, extracted={session_name!r}, resume_id={resume_id}, truncated={was_truncated}")
+        # Check for pending rewind point
+        resume_session_at = None
+        if resume_id:
+            for saved in saved_sessions:
+                if saved.get("session_id") == resume_id:
+                    resume_session_at = saved.get("resume_session_at")
+                    break
+
+        print(f"[Claude] reconnect: view_name={view.name()!r}, extracted={session_name!r}, resume_id={resume_id}, resume_at={resume_session_at}, truncated={was_truncated}")
 
         # Create session - with resume_id if found, fresh otherwise
         session = Session(window, resume_id=resume_id)
         session.name = session_name
         session.output.view = view
         session.draft_prompt = ""
+        if resume_session_at:
+            session._pending_resume_at = resume_session_at
         sublime._claude_sessions[view.id()] = session
 
         # Reset active states
         session.output.reset_active_states()
         session.output.set_name(session_name or "Claude")
 
-        session.start()
+        session.start(resume_session_at=resume_session_at)
 
         # Clear reconnecting flag
         view.settings().erase("claude_reconnecting")

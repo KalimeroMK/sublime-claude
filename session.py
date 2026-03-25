@@ -70,6 +70,7 @@ class Session:
         self.profile_docs: List[str] = []
         # Draft prompt (persists across input panel open/close)
         self.draft_prompt: str = ""
+        self._pending_resume_at: Optional[str] = None  # Set by undo, consumed by next query
         # Track if we've entered input mode after last query
         self._input_mode_entered: bool = False
         # Callback for channel mode responses
@@ -104,7 +105,7 @@ class Session:
         # Pending retain content (set by compact_boundary, sent after interrupt)
         self._pending_retain: Optional[str] = None
 
-    def start(self) -> None:
+    def start(self, resume_session_at: str = None) -> None:
         settings = sublime.load_settings("ClaudeCode.sublime-settings")
         python_path = settings.get("python_path", "python3")
 
@@ -144,6 +145,8 @@ class Session:
             init_params["resume"] = self.resume_id
             if self.fork:
                 init_params["fork_session"] = True
+            if resume_session_at:
+                init_params["resume_session_at"] = resume_session_at
         # Pass subsession_id if this is a subsession
         if hasattr(self, 'subsession_id') and self.subsession_id:
             init_params["subsession_id"] = self.subsession_id
@@ -197,6 +200,11 @@ class Session:
                 self.output.text(f"\n*Failed to connect: {error_msg}*\n\nTry `Claude: Restart Session` (Cmd+Shift+R).\n")
             return
         self.initialized = True
+        self.working = False
+        self.current_tool = None
+        if self._pending_resume_at:
+            self._pending_resume_at = None
+            self._save_session()  # Clear persisted rewind point
         self._input_mode_entered = False  # Reset for fresh start after init
         # Capture session_id from initialize response (set via --session-id CLI arg)
         if result.get("session_id"):
@@ -552,6 +560,153 @@ class Session:
                 parts.append(item.content)
         parts.append(prompt)
         return "\n\n".join(parts), images
+
+    def undo_message(self) -> None:
+        """Undo last conversation turn by rewinding the CLI session."""
+        if not self.session_id:
+            return
+        # Allow undo even while "working" (bridge reconnecting from previous undo)
+        if self.working and self.current_tool != "rewinding...":
+            return
+        rewind_id, undone_prompt = self._find_rewind_point()
+        if not rewind_id:
+            print(f"[Claude] undo_message: no rewind point found")
+            return
+        saved_id = self.session_id
+        print(f"[Claude] undo_message: rewinding {saved_id} to {rewind_id}")
+        # Exit input mode
+        if self.output._input_mode:
+            self.output.exit_input_mode(keep_text=False)
+        # Erase last prompt turn from view (prompt = "◎ ... ▶", not input marker "◎ ")
+        view = self.output.view
+        content = view.substr(sublime.Region(0, view.size()))
+        # Find last prompt line (contains " ▶")
+        import re as _re
+        last_prompt = None
+        for m in _re.finditer(r'\n◎ .+? ▶', content):
+            last_prompt = m
+        if not last_prompt and content.startswith("◎ ") and " ▶" in content.split("\n")[0]:
+            print(f"[Claude] undo: erasing entire view (first turn)")
+            self.output._replace(0, view.size(), "")
+        elif last_prompt:
+            erase_from = last_prompt.start()
+            print(f"[Claude] undo: erasing from {erase_from} to {view.size()}, matched={last_prompt.group()[:40]!r}")
+            self.output._replace(erase_from, view.size(), "")
+        else:
+            print(f"[Claude] undo: no prompt found to erase")
+        # Update conversation state
+        if self.output.current:
+            self.output.current = None
+        view.erase_regions("claude_conversation")
+        # Kill bridge synchronously (may already be dead from previous undo)
+        if self.client:
+            self.client.stop()
+            self.client = None
+        self.initialized = False
+        # Restart bridge with rewind
+        self.session_id = saved_id
+        self.resume_id = saved_id
+        self.fork = False
+        self.draft_prompt = undone_prompt
+        self._pending_resume_at = None
+        self._input_mode_entered = True  # Block auto input mode until bridge ready
+        self._pending_resume_at = rewind_id
+        self._save_session()  # Persist rewind point for restart survival
+        self.working = True
+        self.current_tool = "rewinding..."
+        self._animate()
+        self.start(resume_session_at=rewind_id)
+        # _on_init will reset _input_mode_entered and call _enter_input_with_draft
+
+    def _find_rewind_point(self) -> tuple:
+        """Find the assistant entry uuid to rewind to (before last visible turn).
+        Respects current _pending_resume_at to support consecutive undos.
+        Returns (uuid, undone_prompt) or (None, "") if can't rewind."""
+        jsonl_path = self._find_jsonl_path()
+        if not jsonl_path:
+            return None, ""
+        # Collect user prompt turns and their preceding assistant uuid
+        turns = []  # [(prompt, prev_assistant_uuid)]
+        last_assistant_uuid = None
+        try:
+            with open(jsonl_path, "r") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    entry = json.loads(line)
+                    if entry.get("isSidechain") or entry.get("isMeta"):
+                        continue
+                    etype = entry.get("type")
+                    if etype == "assistant":
+                        uuid = entry.get("uuid")
+                        if uuid:
+                            last_assistant_uuid = uuid
+                    elif etype == "user":
+                        msg = entry.get("message", {})
+                        content = msg.get("content", [])
+                        has_tool_result = (
+                            isinstance(content, list) and
+                            any(isinstance(b, dict) and b.get("type") == "tool_result" for b in content)
+                        )
+                        if has_tool_result:
+                            continue
+                        prompt = ""
+                        if isinstance(content, str):
+                            prompt = content
+                        elif isinstance(content, list):
+                            for block in content:
+                                if isinstance(block, dict) and block.get("type") == "text":
+                                    prompt += block.get("text", "")
+                        turns.append((prompt, last_assistant_uuid))
+        except Exception as e:
+            print(f"[Claude] _find_rewind_point error: {e}")
+            return None, ""
+        # If already rewound, find the turn whose prev_assistant_uuid == current rewind point
+        # and rewind one step further back
+        if self._pending_resume_at:
+            # Find which turn we're currently rewound to
+            for i, (prompt, asst_uuid) in enumerate(turns):
+                if asst_uuid == self._pending_resume_at:
+                    # This turn starts after the current rewind point
+                    # We want to undo the turn BEFORE this one
+                    if i < 2:
+                        return None, ""  # Can't undo further
+                    undone_prompt = turns[i - 1][0]
+                    rewind_to = turns[i - 1][1]
+                    if not rewind_to:
+                        return None, ""
+                    return rewind_to, undone_prompt
+            # Fallback: current rewind point not found in turns
+            return None, ""
+        # Normal case: undo the last turn
+        if len(turns) < 2:
+            return None, ""
+        undone_prompt = turns[-1][0]
+        rewind_to = turns[-1][1]
+        if not rewind_to:
+            return None, ""
+        return rewind_to, undone_prompt
+
+    def _find_jsonl_path(self) -> Optional[str]:
+        """Find the JSONL file for this session."""
+        if not self.session_id:
+            return None
+        fname = f"{self.session_id}.jsonl"
+        projects_dir = os.path.expanduser("~/.claude/projects")
+        # Try exact cwd match first
+        cwd = self._cwd()
+        project_key = cwd.replace("/", "-").lstrip("-")
+        exact = os.path.join(projects_dir, project_key, fname)
+        if os.path.exists(exact):
+            return exact
+        # Search all project directories
+        if os.path.isdir(projects_dir):
+            for d in os.listdir(projects_dir):
+                candidate = os.path.join(projects_dir, d, fname)
+                if os.path.exists(candidate):
+                    return candidate
+        return None
 
     def query(self, prompt: str, display_prompt: str = None, silent: bool = False) -> None:
         """
@@ -1010,16 +1165,23 @@ class Session:
                 s["project"] = self._cwd()
                 s["total_cost"] = self.total_cost
                 s["query_count"] = self.query_count
+                if self._pending_resume_at:
+                    s["resume_session_at"] = self._pending_resume_at
+                else:
+                    s.pop("resume_session_at", None)
                 found = True
                 break
         if not found:
-            sessions.insert(0, {
+            entry = {
                 "session_id": self.session_id,
                 "name": self.name,
                 "project": self._cwd(),
                 "total_cost": self.total_cost,
                 "query_count": self.query_count,
-            })
+            }
+            if self._pending_resume_at:
+                entry["resume_session_at"] = self._pending_resume_at
+            sessions.insert(0, entry)
         # Keep only last 50 sessions
         sessions = sessions[:50]
         save_sessions(sessions)

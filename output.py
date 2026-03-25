@@ -1462,7 +1462,7 @@ class OutputView:
             callback=callback,
         )
         self._render_question()
-        self._scroll_to_end()
+        self._scroll_to_end(force=True)
 
     def _render_question(self) -> None:
         """Render the current question inline."""

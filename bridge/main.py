@@ -187,7 +187,7 @@ class Bridge:
         _logger.info(f"Kanban base URL: {self.kanban_base_url}")
 
         _logger.info(f"initialize: params={params}")
-        _logger.info(f"  resume_id={resume_id}, fork={fork_session}, cwd={cwd}, actual_cwd={os.getcwd()}")
+        _logger.info(f"  resume_id={resume_id}, fork={fork_session}, resume_session_at={params.get('resume_session_at')}, cwd={cwd}, actual_cwd={os.getcwd()}")
         _logger.info(f"  mcp_servers={list(mcp_servers.keys()) if mcp_servers else None}")
         _logger.info(f"  agents={list(agents.keys()) if agents else None}")
         _logger.info(f"  plugins={plugins}")
@@ -267,6 +267,11 @@ You are subsession **{subsession_id}**. Call signal_complete(session_id={view_id
             if additional_dirs:
                 extra_args["add-dir"] = additional_dirs
             options_dict["extra_args"] = extra_args
+        else:
+            # Resume mode — check for rewind point
+            resume_session_at = params.get("resume_session_at")
+            if resume_session_at:
+                options_dict["extra_args"] = {"resume-session-at": resume_session_at}
 
         self.options = ClaudeAgentOptions(**options_dict)
         self.client = ClaudeSDKClient(options=self.options)
@@ -283,11 +288,22 @@ You are subsession **{subsession_id}**. Call signal_complete(session_id={view_id
                 ("Command failed" in error_msg and resume_id)
             )
             if is_session_error and resume_id:
-                options_dict["resume"] = None
-                options_dict["fork_session"] = False
-                self.options = ClaudeAgentOptions(**options_dict)
-                self.client = ClaudeSDKClient(options=self.options)
-                await self.client.connect()
+                # If rewind failed, retry resume without rewind point
+                if "extra_args" in options_dict and "resume-session-at" in options_dict.get("extra_args", {}):
+                    with open("/tmp/claude_bridge.log", "a") as f:
+                        f.write(f"resume-session-at failed, retrying plain resume: {error_msg}\n")
+                    del options_dict["extra_args"]["resume-session-at"]
+                    if not options_dict["extra_args"]:
+                        del options_dict["extra_args"]
+                    self.options = ClaudeAgentOptions(**options_dict)
+                    self.client = ClaudeSDKClient(options=self.options)
+                    await self.client.connect()
+                else:
+                    options_dict["resume"] = None
+                    options_dict["fork_session"] = False
+                    self.options = ClaudeAgentOptions(**options_dict)
+                    self.client = ClaudeSDKClient(options=self.options)
+                    await self.client.connect()
             else:
                 raise
 
