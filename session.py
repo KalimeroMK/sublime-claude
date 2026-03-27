@@ -723,6 +723,7 @@ class Session:
 
         self.working = True
         self.query_count += 1
+        self.draft_prompt = ""  # Clear draft — query submitted
         self._input_mode_entered = False  # Reset so input mode can be entered when query completes
 
         # Mark this session as the currently executing session for MCP tools
@@ -1121,6 +1122,11 @@ class Session:
             self.current_tool = None
         elif t in ("text_delta", "text"):
             self.output.text(params.get("text", ""))
+        elif t == "turn_usage":
+            usage = params.get("usage", {})
+            if usage:
+                self.context_usage = usage
+                self._update_status_bar()
         elif t == "result":
             # Capture session ID for resume
             if params.get("session_id"):
@@ -1151,6 +1157,16 @@ class Session:
         self.output.set_name(name)
         self._update_status_bar()
         self._save_session()
+        # Sync name to CLI session JSONL
+        if self.session_id and name:
+            import threading
+            def sync():
+                try:
+                    from claude_agent_sdk import rename_session
+                    rename_session(self.session_id, name)
+                except Exception as e:
+                    print(f"[Claude] rename_session failed: {e}")
+            threading.Thread(target=sync, daemon=True).start()
 
     def _save_session(self) -> None:
         """Save session info to disk for later resume."""

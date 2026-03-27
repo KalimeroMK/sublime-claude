@@ -927,6 +927,11 @@ You are subsession **{subsession_id}**. Call signal_complete(session_id={view_id
         if isinstance(message, AssistantMessage):
             with open("/tmp/claude_bridge.log", "a") as f:
                 f.write(f"  blocks: {[type(b).__name__ for b in message.content]}\n")
+            if message.usage:
+                send_notification("message", {
+                    "type": "turn_usage",
+                    "usage": message.usage,
+                })
             for block in message.content:
                 if isinstance(block, TextBlock):
                     # Text was already streamed via StreamEvent text_deltas — skip
