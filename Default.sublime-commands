@@ -80,6 +80,10 @@
         "command": "claude_undo_message"
     },
     {
+        "caption": "Claude: Clear Notifications",
+        "command": "claude_clear_notifications"
+    },
+    {
         "caption": "Claude: Search Sessions",
         "command": "claude_search_sessions"
     },

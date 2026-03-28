@@ -1641,6 +1641,73 @@ class ClaudeUndoMessageCommand(sublime_plugin.TextCommand):
             s.undo_message()
 
 
+class ClaudeClearNotificationsCommand(sublime_plugin.WindowCommand):
+    """List and clear active notifications."""
+    def run(self) -> None:
+        import threading
+
+        def fetch():
+            import json, socket
+            sock_path = os.path.expanduser("~/.notalone/notalone.sock")
+            try:
+                sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+                sock.settimeout(5)
+                sock.connect(sock_path)
+                sock.sendall((json.dumps({"method": "list"}) + "\n").encode())
+                data = b""
+                while b"\n" not in data:
+                    chunk = sock.recv(4096)
+                    if not chunk:
+                        break
+                    data += chunk
+                sock.close()
+                result = json.loads(data.decode().strip())
+                notifications = result.get("notifications", [])
+            except Exception as e:
+                sublime.set_timeout(lambda: sublime.status_message(f"notalone not available: {e}"), 0)
+                return
+
+            if not notifications:
+                sublime.set_timeout(lambda: sublime.status_message("No active notifications"), 0)
+                return
+
+            items = []
+            for n in notifications:
+                ntype = n.get("type", "?")
+                nid = n.get("id", "?")
+                params = n.get("params", {})
+                desc = params.get("display_message") or params.get("wake_prompt", "")[:50] or str(params)[:50]
+                items.append([f"{ntype}: {desc}", f"id: {nid}"])
+
+            def show():
+                def on_select(idx):
+                    if idx < 0:
+                        return
+                    # Clear selected notification
+                    nid = notifications[idx].get("id")
+                    if nid:
+                        threading.Thread(target=lambda: _unregister(nid, sock_path), daemon=True).start()
+
+                self.window.show_quick_panel(items, on_select)
+
+            sublime.set_timeout(show, 0)
+
+        def _unregister(nid, sock_path):
+            import json, socket
+            try:
+                sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+                sock.settimeout(5)
+                sock.connect(sock_path)
+                sock.sendall((json.dumps({"method": "unregister", "notification_id": nid}) + "\n").encode())
+                data = sock.recv(4096)
+                sock.close()
+                sublime.set_timeout(lambda: sublime.status_message(f"Cleared notification {nid}"), 0)
+            except Exception as e:
+                sublime.set_timeout(lambda: sublime.status_message(f"Failed to clear: {e}"), 0)
+
+        threading.Thread(target=fetch, daemon=True).start()
+
+
 class ClaudeViewPlanCommand(sublime_plugin.TextCommand):
     """Handle V key - view plan file."""
     def run(self, edit):

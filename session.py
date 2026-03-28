@@ -132,8 +132,15 @@ class Session:
 
         default_model = settings.get("default_model")
         print(f"[Claude] initialize: permission_mode={permission_mode}, allowed_tools={allowed_tools}, resume={self.resume_id}, fork={self.fork}, profile={self.profile}, default_model={default_model}, subsession_id={getattr(self, 'subsession_id', None)}")
-        # Get additional working directories from project folders (all except first which is cwd)
+        # Get additional working directories from project folders + project settings
         additional_dirs = self.window.folders()[1:] if len(self.window.folders()) > 1 else []
+        project_data = self.window.project_data() or {}
+        project_settings = project_data.get("settings", {})
+        extra_dirs = project_settings.get("claude_additional_dirs", [])
+        if extra_dirs:
+            expanded = [os.path.expanduser(d) for d in extra_dirs]
+            additional_dirs = additional_dirs + expanded
+            print(f"[Claude] extra additional_dirs from project: {expanded}")
         init_params = {
             "cwd": self._cwd(),
             "additional_dirs": additional_dirs,
@@ -1157,16 +1164,9 @@ class Session:
         self.output.set_name(name)
         self._update_status_bar()
         self._save_session()
-        # Sync name to CLI session JSONL
-        if self.session_id and name:
-            import threading
-            def sync():
-                try:
-                    from claude_agent_sdk import rename_session
-                    rename_session(self.session_id, name)
-                except Exception as e:
-                    print(f"[Claude] rename_session failed: {e}")
-            threading.Thread(target=sync, daemon=True).start()
+        # Sync name to CLI session JSONL via bridge
+        if self.session_id and name and self.client:
+            self.client.send("rename_session", {"name": name})
 
     def _save_session(self) -> None:
         """Save session info to disk for later resume."""
