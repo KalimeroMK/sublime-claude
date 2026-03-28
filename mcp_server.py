@@ -834,9 +834,12 @@ class MCPSocketServer:
             if not name:
                 name = persona.get("alias", f"persona-{persona_id}")
 
-        # Fork from current session if requested
+        # Fork from caller session if requested
         if fork_current:
-            current_session = get_active_session(window)
+            caller_session = sublime._claude_sessions.get(_caller_view_id) if _caller_view_id else None
+            if not caller_session:
+                caller_session = get_active_session(window)
+            current_session = caller_session
             if current_session and current_session.session_id:
                 resume_id = current_session.session_id
                 fork = True
