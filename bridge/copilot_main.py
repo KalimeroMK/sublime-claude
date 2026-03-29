@@ -36,6 +36,7 @@ class CopilotBridge:
         self.permission_counter = 0
         self.pending_permissions = {}
         self.pending_questions = {}
+        self._got_first_delta = False
 
     async def handle_request(self, req: dict) -> None:
         method = req.get("method")
@@ -99,10 +100,11 @@ class CopilotBridge:
             if view_id:
                 args.append(f"--view-id={view_id}")
             config["mcp_servers"] = {
-                "sublime": {"type": "stdio", "command": sys.executable, "args": args}
+                "sublime": {"type": "stdio", "command": sys.executable, "args": args, "tools": []}
             }
 
         self._session_config = config
+        log(f"Session config: mcp_servers={'sublime' in config.get('mcp_servers', {})}, model={model}")
         self.session = await self.client.create_session(config)
         self.session.on(self._on_event)
         self.session_id = getattr(self.session, 'session_id', None) or f"copilot-{view_id}"
@@ -122,17 +124,26 @@ class CopilotBridge:
         prompt = params.get("prompt", "")
         self._query_req_id = req_id
         self._turn_start_time = time.time()
+        self._got_first_delta = False
 
         message_opts = {"prompt": prompt}
-        # Images
+        # Images — copilot only supports file attachments, not inline base64
         images = params.get("images", [])
         if images:
             attachments = []
             for img in images:
-                if isinstance(img, dict):
-                    attachments.append({"type": "base64", "data": img.get("data", ""), "mime_type": img.get("mime_type", "image/png")})
+                if isinstance(img, dict) and img.get("path"):
+                    attachments.append({"type": "file", "path": img["path"]})
                 elif isinstance(img, str) and img.startswith("/"):
                     attachments.append({"type": "file", "path": img})
+                elif isinstance(img, dict) and img.get("data"):
+                    # Save base64 to temp file for copilot
+                    import base64, tempfile
+                    mime = img.get("mime_type", "image/png")
+                    ext = mime.split("/")[-1] if "/" in mime else "png"
+                    with tempfile.NamedTemporaryFile(suffix=f".{ext}", delete=False) as f:
+                        f.write(base64.b64decode(img["data"]))
+                        attachments.append({"type": "file", "path": f.name})
             if attachments:
                 message_opts["attachments"] = attachments
 
@@ -207,12 +218,16 @@ class CopilotBridge:
         if etype == SessionEventType.ASSISTANT_MESSAGE_DELTA:
             text = getattr(data, 'delta_content', '') or ''
             if text:
-                send_notification("message", {"type": "text_delta", "text": text})
+                # Strip leading newlines from first delta of a turn
+                if not self._got_first_delta:
+                    text = text.lstrip('\n')
+                    self._got_first_delta = True
+                if text:
+                    send_notification("message", {"type": "text_delta", "text": text})
 
         elif etype == SessionEventType.ASSISTANT_MESSAGE:
-            content = getattr(data, 'content', '') or ''
-            if content:
-                send_notification("message", {"type": "text", "text": content})
+            # Text already streamed via ASSISTANT_MESSAGE_DELTA — skip
+            pass
 
         elif etype == SessionEventType.ASSISTANT_REASONING_DELTA:
             text = getattr(data, 'delta_content', '') or ''
@@ -266,10 +281,10 @@ async def main():
     bridge = CopilotBridge()
     log("Bridge started")
 
-    # Read JSON-RPC from stdin
-    reader = asyncio.StreamReader()
+    # Read JSON-RPC from stdin (1GB limit to match Claude bridge)
+    reader = asyncio.StreamReader(limit=1024 * 1024 * 1024)
     protocol = asyncio.StreamReaderProtocol(reader)
-    await asyncio.get_event_loop().connect_read_pipe(lambda: protocol, sys.stdin)
+    await asyncio.get_running_loop().connect_read_pipe(lambda: protocol, sys.stdin)
 
     while bridge.running:
         try:
