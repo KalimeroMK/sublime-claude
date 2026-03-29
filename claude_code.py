@@ -38,8 +38,6 @@ from .commands import (
     ClaudeCodeAddMcpCommand,
     ClaudeCodeTogglePermissionModeCommand,
     ClaudeSubmitInputCommand,
-    ClaudeEnterInputModeCommand,
-    ClaudeExitInputModeCommand,
     ClaudeInsertNewlineCommand,
     ClaudePermissionAllowCommand,
     ClaudePermissionDenyCommand,

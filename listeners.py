@@ -259,7 +259,8 @@ class ClaudeOutputEventListener(sublime_plugin.ViewEventListener):
         print(f"[Claude] reconnect: view_name={view.name()!r}, extracted={session_name!r}, resume_id={resume_id}, resume_at={resume_session_at}, truncated={was_truncated}")
 
         # Create session - with resume_id if found, fresh otherwise
-        session = Session(window, resume_id=resume_id)
+        saved_backend = view.settings().get("claude_backend", "claude")
+        session = Session(window, resume_id=resume_id, backend=saved_backend)
         session.name = session_name
         session.output.view = view
         session.draft_prompt = ""
@@ -270,6 +271,17 @@ class ClaudeOutputEventListener(sublime_plugin.ViewEventListener):
         # Reset active states
         session.output.reset_active_states()
         session.output.set_name(session_name or "Claude")
+
+        # Re-apply backend-specific background color
+        backend = view.settings().get("claude_backend")
+        if backend:
+            backend_themes = {
+                "codex": "Packages/ClaudeCode/ClaudeOutput-codex.hidden-tmTheme",
+                "copilot": "Packages/ClaudeCode/ClaudeOutput-copilot.hidden-tmTheme",
+            }
+            theme = backend_themes.get(backend)
+            if theme:
+                view.settings().set("color_scheme", theme)
 
         session.start(resume_session_at=resume_session_at)
 

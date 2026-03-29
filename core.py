@@ -73,7 +73,16 @@ def create_session(window: sublime.Window, resume_id: Optional[str] = None, fork
     s.output.show()  # Create view first
     if s.output.view and backend != "claude":
         s.output.view.settings().set("claude_backend", backend)
-        s.output.set_name("Codex" if backend == "codex" else backend.title())
+        backend_names = {"codex": "Codex", "copilot": "Copilot"}
+        s.output.set_name(backend_names.get(backend, backend.title()))
+        # Apply backend-specific background
+        backend_themes = {
+            "codex": "Packages/ClaudeCode/ClaudeOutput-codex.hidden-tmTheme",
+            "copilot": "Packages/ClaudeCode/ClaudeOutput-copilot.hidden-tmTheme",
+        }
+        theme = backend_themes.get(backend)
+        if theme:
+            s.output.view.settings().set("color_scheme", theme)
     s.start()
     # Register by view id and mark as active
     if s.output.view:

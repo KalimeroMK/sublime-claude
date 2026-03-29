@@ -56,22 +56,7 @@ def serialize(obj: Any) -> Any:
     return obj
 
 
-def send(msg: dict) -> None:
-    """Send JSON message to stdout."""
-    sys.stdout.write(json.dumps(msg) + "\n")
-    sys.stdout.flush()
-
-
-def send_error(id: int | None, code: int, message: str) -> None:
-    send({"jsonrpc": "2.0", "id": id, "error": {"code": code, "message": message}})
-
-
-def send_result(id: int, result: Any) -> None:
-    send({"jsonrpc": "2.0", "id": id, "result": result})
-
-
-def send_notification(method: str, params: Any) -> None:
-    send({"jsonrpc": "2.0", "method": method, "params": params})
+from rpc_helpers import send, send_error, send_result, send_notification
 
 
 class Bridge:

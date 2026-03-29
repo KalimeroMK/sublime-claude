@@ -8,6 +8,10 @@
         "command": "codex_start"
     },
     {
+        "caption": "Copilot: New Session",
+        "command": "copilot_start"
+    },
+    {
         "caption": "Claude: Query Selection",
         "command": "claude_code_query_selection"
     },

@@ -196,6 +196,18 @@ class CodexStartCommand(sublime_plugin.WindowCommand):
         create_session(self.window, backend="codex")
 
 
+class CopilotStartCommand(sublime_plugin.WindowCommand):
+    """Start a new GitHub Copilot session."""
+    def run(self) -> None:
+        # SDK check runs in bridge subprocess (Python 3.11+), not Sublime's 3.8
+        # Just check if the bridge script exists
+        copilot_bridge = os.path.join(os.path.dirname(__file__), "bridge", "copilot_main.py")
+        if not os.path.exists(copilot_bridge):
+            sublime.error_message("Copilot bridge not found")
+            return
+        create_session(self.window, backend="copilot")
+
+
 class ClaudeCodeQueryCommand(sublime_plugin.WindowCommand):
     """Open input for query (focuses output and enters input mode)."""
     def run(self) -> None:
@@ -448,70 +460,6 @@ class ClaudeCodeClearCommand(sublime_plugin.WindowCommand):
         s = get_active_session(self.window)
         if s:
             s.output.clear()
-
-
-class ClaudeCodeCompactCommand(sublime_plugin.WindowCommand):
-    """Manually trigger conversation compaction/summarization."""
-    def run(self) -> None:
-        s = get_active_session(self.window)
-        if s:
-            # Gather pre-compact prompts from multiple sources
-            from .hooks import get_project_hook_prompt, combine_hook_prompts
-            import os
-
-            prompts = []
-            cwd = self.window.folders()[0] if self.window.folders() else None
-
-            # 1. Static retain file (.claude/RETAIN.md)
-            if cwd:
-                static_path = os.path.join(cwd, ".claude", "RETAIN.md")
-                if os.path.exists(static_path):
-                    try:
-                        with open(static_path, "r") as f:
-                            content = f.read().strip()
-                        if content:
-                            prompts.append(content)
-                    except:
-                        pass
-
-            # 2. Session retain file
-            session_retain = s.retain()
-            if session_retain:
-                prompts.append(session_retain)
-
-            # 3. Project-level hook file (.claude/hooks/pre-compact)
-            if cwd:
-                project_prompt = get_project_hook_prompt("pre-compact", cwd)
-                if project_prompt:
-                    prompts.append(project_prompt)
-
-            # 4. Project-level settings (.claude/settings.json)
-            if cwd:
-                from .settings import load_project_settings
-                project_settings = load_project_settings(cwd)
-                if project_settings and "pre_compact_prompt" in project_settings:
-                    settings_prompt = project_settings["pre_compact_prompt"]
-                    if settings_prompt:
-                        prompts.append(settings_prompt)
-
-            # 5. Profile-level pre-compact prompt
-            if s.profile and "pre_compact_prompt" in s.profile:
-                profile_prompt = s.profile["pre_compact_prompt"]
-                if profile_prompt:
-                    prompts.append(profile_prompt)
-
-            # Combine and inject if we have any prompts
-            combined = combine_hook_prompts(prompts)
-            if combined:
-                # Inject combined prompt before compaction
-                s.queue_prompt(combined)
-                # Wait a bit for the inject to be processed, then compact
-                import sublime
-                sublime.set_timeout(lambda: s.query("/compact"), 500)
-                return
-
-            # No prompts - just compact
-            s.query("/compact")
 
 
 class ClaudeCodeCopyCommand(sublime_plugin.WindowCommand):
@@ -887,6 +835,7 @@ class ClaudeCodeSwitchCommand(sublime_plugin.WindowCommand):
 
         backend_prefix = f"[{backend}] " if backend != "claude" else ""
         has_codex = bool(shutil.which("codex"))
+        has_copilot = os.path.exists(os.path.join(os.path.dirname(__file__), "bridge", "copilot_main.py"))
 
         # Get all sessions in this window
         sessions_in_window = []
@@ -980,9 +929,15 @@ class ClaudeCodeSwitchCommand(sublime_plugin.WindowCommand):
             items.append(["🍴 Fork Session", "Create new session with copy of history"])
             actions.append(("fork", active_session))
 
-        # Add "Switch Backend" option
-        if has_codex:
-            other = "codex" if backend == "claude" else "claude"
+        # Add "Switch Backend" options
+        other_backends = []
+        if has_codex and backend != "codex":
+            other_backends.append("codex")
+        if has_copilot and backend != "copilot":
+            other_backends.append("copilot")
+        if backend != "claude":
+            other_backends.append("claude")
+        for other in other_backends:
             items.append([f"⇄ Switch to {other}", f"Show {other} options"])
             actions.append(("switch_backend", other))
 
@@ -1559,30 +1514,6 @@ class ClaudeSubmitInputCommand(sublime_plugin.TextCommand):
             lines.append("")
             session.output.text("\n".join(lines))
         session.output.enter_input_mode()
-
-
-class ClaudeEnterInputModeCommand(sublime_plugin.TextCommand):
-    """Enter input mode in the Claude output view."""
-    def run(self, edit):
-        s = get_session_for_view(self.view)
-        if s:
-            if s.working:
-                return  # Don't enter input mode while busy
-            s.output.enter_input_mode()
-            if s.draft_prompt:
-                self.view.run_command("append", {"characters": s.draft_prompt})
-                end = self.view.size()
-                self.view.sel().clear()
-                self.view.sel().add(sublime.Region(end, end))
-
-
-class ClaudeExitInputModeCommand(sublime_plugin.TextCommand):
-    """Exit input mode, keeping the draft."""
-    def run(self, edit):
-        s = get_session_for_view(self.view)
-        if s and s.output.is_input_mode():
-            s.draft_prompt = s.output.get_input_text()
-            s.output.exit_input_mode(keep_text=False)
 
 
 class ClaudeInsertCommand(sublime_plugin.TextCommand):
@@ -2831,34 +2762,3 @@ class ClaudeProjectRetainCommand(sublime_plugin.WindowCommand):
         self.window.open_file(retain_path)
 
 
-class ClaudeCodeViewPlanCommand(sublime_plugin.WindowCommand):
-    """Open current or most recent plan file."""
-
-    def run(self):
-        import os
-        import glob
-
-        session = get_active_session(self.window)
-
-        # Try session's plan file first
-        if session and session.plan_file and os.path.exists(session.plan_file):
-            self.window.open_file(session.plan_file)
-            return
-
-        # Otherwise find most recent plan file
-        plans_dir = os.path.expanduser("~/.claude/plans")
-        if not os.path.exists(plans_dir):
-            sublime.status_message("No plan files found")
-            return
-
-        plan_files = glob.glob(os.path.join(plans_dir, "*.md"))
-        if not plan_files:
-            sublime.status_message("No plan files found")
-            return
-
-        # Open most recent
-        most_recent = max(plan_files, key=os.path.getmtime)
-        self.window.open_file(most_recent)
-
-    def is_enabled(self):
-        return True

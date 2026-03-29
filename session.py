@@ -11,6 +11,7 @@ from .output import OutputView
 
 BRIDGE_SCRIPT = os.path.join(os.path.dirname(__file__), "bridge", "main.py")
 CODEX_BRIDGE_SCRIPT = os.path.join(os.path.dirname(__file__), "bridge", "codex_main.py")
+COPILOT_BRIDGE_SCRIPT = os.path.join(os.path.dirname(__file__), "bridge", "copilot_main.py")
 SESSIONS_FILE = os.path.join(os.path.dirname(__file__), ".sessions.json")
 
 
@@ -118,7 +119,12 @@ class Session:
         # Sync sublime project retain content to file for hook
         self._sync_project_retain()
 
-        bridge_script = CODEX_BRIDGE_SCRIPT if self.backend == "codex" else BRIDGE_SCRIPT
+        if self.backend == "codex":
+            bridge_script = CODEX_BRIDGE_SCRIPT
+        elif self.backend == "copilot":
+            bridge_script = COPILOT_BRIDGE_SCRIPT
+        else:
+            bridge_script = BRIDGE_SCRIPT
         self.client = JsonRpcClient(self._on_notification)
         self.client.start([python_path, bridge_script], env=env)
         self._status("connecting...")
@@ -615,7 +621,6 @@ class Session:
         self.resume_id = saved_id
         self.fork = False
         self.draft_prompt = undone_prompt
-        self._pending_resume_at = None
         self._input_mode_entered = True  # Block auto input mode until bridge ready
         self._pending_resume_at = rewind_id
         self._save_session()  # Persist rewind point for restart survival
@@ -1193,28 +1198,26 @@ class Session:
 
     def _status(self, text: str) -> None:
         """Update status on output view only."""
-        if self.output.view and self.output.view.is_valid():
-            prefix = "[PLAN] " if self.plan_mode else ""
-            self.output.view.set_status("claude", f"Claude: {prefix}{text}")
-
-    def _update_status_bar(self) -> None:
-        """Update status bar with session info on output view."""
         if not self.output.view or not self.output.view.is_valid():
             return
-        parts = []
+        label = self.backend.title() if self.backend != "claude" else "Claude"
+        prefix = "[PLAN] " if self.plan_mode else ""
+        parts = [f"{prefix}{text}"]
         if self.name:
             parts.append(self.name)
         if self.total_cost > 0:
             parts.append(f"${self.total_cost:.4f}")
         if self.query_count > 0:
             parts.append(f"{self.query_count}q")
-        # Show context token count
         if self.context_usage:
             ctx_k = self._context_tokens_k()
             if ctx_k is not None:
                 parts.append(f"ctx:{ctx_k}k")
-        status = " | ".join(parts) if parts else "Claude"
-        self.output.view.set_status("claude_session", f"Claude: {status}")
+        self.output.view.set_status("claude", f"{label}: {', '.join(parts)}")
+
+    def _update_status_bar(self) -> None:
+        """Update status bar with session info."""
+        self._status("ready")
 
     def _context_tokens_k(self) -> Optional[int]:
         """Get context token count in thousands from latest usage data."""
@@ -1231,7 +1234,6 @@ class Session:
     def _clear_status(self) -> None:
         if self.output.view and self.output.view.is_valid():
             self.output.view.erase_status("claude")
-            self.output.view.erase_status("claude_session")
 
     def _animate(self) -> None:
         if not self.working:

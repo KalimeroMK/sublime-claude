@@ -274,13 +274,17 @@ class MCPSocketServer:
 
     def _get_window(self):
         """Get the window for the calling session, falling back to active window."""
+        # Cache per-eval invocation (caller_view_id doesn't change within one tool call)
+        cached = getattr(self, '_cached_window', None)
+        cached_vid = getattr(self, '_cached_window_vid', None)
+        if cached and cached_vid == self._caller_view_id and cached.is_valid():
+            return cached
         if self._caller_view_id:
             for w in sublime.windows():
-                v = w.find_open_file_by_id(self._caller_view_id) if hasattr(w, 'find_open_file_by_id') else None
-                if v:
-                    return w
                 for v in w.views():
                     if v.id() == self._caller_view_id:
+                        self._cached_window = w
+                        self._cached_window_vid = self._caller_view_id
                         return w
         return sublime.active_window()
 
@@ -758,16 +762,12 @@ class MCPSocketServer:
 
     def _list_personas(self) -> dict:
         """List available personas from the persona server."""
-        import urllib.request
-        import json as json_mod
+        from .persona_client import list_personas as _list_personas
         settings = sublime.load_settings("ClaudeCode.sublime-settings")
         persona_url = settings.get("persona_url", "http://localhost:5002/personas")
-        try:
-            req = urllib.request.Request(f"{persona_url}/", method="GET")
-            with urllib.request.urlopen(req, timeout=5) as resp:
-                personas = json_mod.loads(resp.read().decode())
-        except Exception as e:
-            return {"error": f"Failed to fetch personas: {e}"}
+        personas = _list_personas(persona_url)
+        if not personas:
+            return {"error": "Failed to fetch personas or none available"}
         lines = []
         for p in personas:
             alias = p.get("alias", "?")
@@ -815,16 +815,12 @@ class MCPSocketServer:
 
         # Load persona config if specified (overrides profile)
         if persona_id:
-            import urllib.request
-            import json as json_mod
+            from .persona_client import get_persona
             settings = sublime.load_settings("ClaudeCode.sublime-settings")
             persona_url = settings.get("persona_url", "http://localhost:5002/personas")
-            try:
-                req = urllib.request.Request(f"{persona_url}/{persona_id}", method="GET")
-                with urllib.request.urlopen(req, timeout=5) as resp:
-                    persona = json_mod.loads(resp.read().decode())
-            except Exception as e:
-                return {"error": f"Failed to fetch persona: {e}"}
+            persona = get_persona(persona_id, persona_url)
+            if not persona:
+                return {"error": f"Failed to fetch persona {persona_id}"}
             # Get system_prompt from ability_version or persona top-level
             ability_version = persona.get("ability_version") or {}
             profile_config = {

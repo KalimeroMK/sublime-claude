@@ -4,7 +4,7 @@
         "command": "claude_code_switch"
     },
     {
-        "keys": ["command+shift+escape"],
+        "keys": ["super+shift+escape"],
         "command": "claude_code_interrupt"
     },
     {
@@ -136,24 +136,6 @@
         "keys": ["f"],
         "command": "claude_quick_prompt",
         "args": { "key": "refresh" },
-        "context": [
-            { "key": "setting.claude_output", "operator": "equal", "operand": true },
-            { "key": "setting.claude_input_mode", "operator": "equal", "operand": false }
-        ]
-    },
-    {
-        "keys": ["r"],
-        "command": "claude_quick_prompt",
-        "args": { "key": "retry" },
-        "context": [
-            { "key": "setting.claude_output", "operator": "equal", "operand": true },
-            { "key": "setting.claude_input_mode", "operator": "equal", "operand": false }
-        ]
-    },
-    {
-        "keys": ["c"],
-        "command": "claude_quick_prompt",
-        "args": { "key": "continue" },
         "context": [
             { "key": "setting.claude_output", "operator": "equal", "operand": true },
             { "key": "setting.claude_input_mode", "operator": "equal", "operand": false }
