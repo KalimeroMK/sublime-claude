@@ -482,10 +482,13 @@ class OutputView:
 
         # If in input mode, re-render the whole input area with new context
         if self._input_mode:
-            # print(f"[Claude] set_pending_context: already in input mode, re-rendering")
-            # Save current input text
+            # Save current input text, re-render input area with new context
             input_text = self.get_input_text()
-            # Exit and re-enter to refresh context display
+            # Clear draft to prevent on_activated from re-filling it
+            from . import claude_code
+            session = claude_code.get_session_for_view(self.view)
+            if session:
+                session.draft_prompt = ""
             self.exit_input_mode(keep_text=False)
             self.enter_input_mode()
             # Restore input text
