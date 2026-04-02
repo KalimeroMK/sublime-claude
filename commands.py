@@ -994,7 +994,8 @@ class ClaudeCodeStopCommand(sublime_plugin.WindowCommand):
 class ClaudeCodeResumeCommand(sublime_plugin.WindowCommand):
     """Resume a previous session."""
     def run(self) -> None:
-        sessions = load_saved_sessions()
+        cwd = self.window.folders()[0] if self.window.folders() else ""
+        sessions = [s for s in load_saved_sessions() if s.get("project", "") == cwd]
         if not sessions:
             sublime.status_message("No saved sessions to resume")
             return

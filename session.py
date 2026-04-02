@@ -160,6 +160,14 @@ class Session:
             init_params["resume"] = self.resume_id
             if self.fork:
                 init_params["fork_session"] = True
+            # Use saved session's project dir as cwd (session may belong to different project)
+            for saved in load_saved_sessions():
+                if saved.get("session_id") == self.resume_id:
+                    saved_project = saved.get("project", "")
+                    if saved_project and saved_project != init_params["cwd"]:
+                        print(f"[Claude] resume: using saved project {saved_project}")
+                        init_params["cwd"] = saved_project
+                    break
             if resume_session_at:
                 init_params["resume_session_at"] = resume_session_at
         # Pass subsession_id if this is a subsession
