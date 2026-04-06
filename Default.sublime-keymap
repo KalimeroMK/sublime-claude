@@ -114,6 +114,14 @@
         ]
     },
     {
+        "keys": ["enter"],
+        "command": "claude_submit_input",
+        "context": [
+            { "key": "setting.claude_output", "operator": "equal", "operand": true },
+            { "key": "setting.claude_sleeping", "operator": "equal", "operand": true }
+        ]
+    },
+    {
         "keys": ["shift+enter"],
         "command": "claude_insert_newline",
         "context": [

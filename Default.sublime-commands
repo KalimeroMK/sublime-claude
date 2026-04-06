@@ -185,5 +185,13 @@
     {
         "caption": "Claude: Search Sessions (Garage)...",
         "command": "claude_garage_search"
+    },
+    {
+        "caption": "Claude: Sleep Session",
+        "command": "claude_sleep_session"
+    },
+    {
+        "caption": "Claude: Wake Session",
+        "command": "claude_wake_session"
     }
 ]

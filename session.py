@@ -1,6 +1,7 @@
 """Claude Code session management."""
 import json
 import os
+import time
 from typing import Optional, List, Dict, Callable
 
 import sublime
@@ -99,6 +100,9 @@ class Session:
             self.persona_session_id = None
             self.persona_url = None
 
+        # Activity tracking for auto-sleep
+        self.last_activity: float = time.time()
+
         # Plan mode state
         self.plan_mode: bool = False
         self.plan_file: Optional[str] = None
@@ -107,6 +111,9 @@ class Session:
         self._pending_retain: Optional[str] = None
 
     def start(self, resume_session_at: str = None) -> None:
+        # Show connecting phantom in view
+        self._show_connecting_phantom()
+
         settings = sublime.load_settings("ClaudeCode.sublime-settings")
         python_path = settings.get("python_path", "python3")
 
@@ -208,6 +215,7 @@ class Session:
 
     def _on_init(self, result: dict) -> None:
         if "error" in result:
+            self._clear_overlay_phantom()
             error_msg = result['error'].get('message', str(result['error']))
             print(f"[Claude] init error: {error_msg}")
             self._status("error")
@@ -222,12 +230,13 @@ class Session:
             else:
                 self.output.text(f"\n*Failed to connect: {error_msg}*\n\nTry `Claude: Restart Session` (Cmd+Shift+R).\n")
             return
+        self._clear_overlay_phantom()
         self.initialized = True
         self.working = False
         self.current_tool = None
+        self.last_activity = time.time()
         if self._pending_resume_at:
             self._pending_resume_at = None
-            self._save_session()  # Clear persisted rewind point
         self._input_mode_entered = False  # Reset for fresh start after init
         # Capture session_id from initialize response (set via --session-id CLI arg)
         if result.get("session_id"):
@@ -247,6 +256,8 @@ class Session:
             self._status(f"ready ({'; '.join(parts)})")
         else:
             self._status("ready")
+        # Persist "open" state (so plugin_loaded can track which sessions had views)
+        self._save_session()
         # Auto-enter input mode when ready
         self._enter_input_with_draft()
 
@@ -903,6 +914,7 @@ class Session:
 
         # 7. Now set working=False and enter input mode
         self.working = False
+        self.last_activity = time.time()
         sublime.set_timeout(lambda: self._enter_input_with_draft() if not self.working else None, 100)
 
     def _clear_deferred_state(self) -> None:
@@ -1000,12 +1012,16 @@ class Session:
             notalone.interrupt_channel(self.output.view.id())
 
     def stop(self) -> None:
+        # Persist closed state before cleanup
+        self._persist_state("closed")
+
         # Release persona if acquired
         if self.persona_session_id and self.persona_url:
             self._release_persona()
 
         if self.client:
-            self.client.send("shutdown", {}, lambda _: self.client.stop())
+            client = self.client
+            client.send("shutdown", {}, lambda _: client.stop())
         self._clear_status()
 
         # Release accumulated state
@@ -1013,6 +1029,102 @@ class Session:
             self.output.conversations.clear()
         self.pending_context.clear()
         self._queued_prompts.clear()
+
+    @property
+    def is_sleeping(self) -> bool:
+        return bool(self.session_id) and self.client is None and not self.initialized
+
+    @property
+    def display_name(self) -> str:
+        base = self.name or "Claude"
+        # Strip any stale sleep prefixes from name
+        import re
+        base = re.sub(r'^[◉◇•❓⏸⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]\s*', '', base) or "Claude"
+        return base
+
+    def sleep(self) -> None:
+        """Put session to sleep — kill bridge, keep view."""
+        if not self.session_id:
+            return
+        if self.working:
+            self.interrupt()
+            sublime.set_timeout(self.sleep, 500)
+            return
+        if self.client:
+            client = self.client
+            self.client = None
+            client.send("shutdown", {}, lambda _: client.stop())
+        self.initialized = False
+        self._persist_state("sleeping")
+        self._apply_sleep_ui()
+
+    def _apply_sleep_ui(self) -> None:
+        """Apply sleeping state to view UI."""
+        if not self.output or not self.output.view:
+            return
+        if not self.session_id:
+            return
+        view = self.output.view
+        view.settings().set("claude_sleeping", True)
+        self.output.set_name(self.display_name)
+        self._status("sleeping")
+        if self.output.is_input_mode():
+            self.draft_prompt = self.output.get_input_text().strip()
+            self.output.exit_input_mode(keep_text=False)
+        self._show_overlay_phantom("\u23f8 Session paused \u2014 press Enter to wake")
+
+    def _get_overlay_phantom_set(self):
+        if not hasattr(self, '_overlay_phantom_set') or self._overlay_phantom_set is None:
+            if self.output and self.output.view:
+                self._overlay_phantom_set = sublime.PhantomSet(self.output.view, "claude_overlay")
+        return self._overlay_phantom_set
+
+    def _show_overlay_phantom(self, html_body: str) -> None:
+        ps = self._get_overlay_phantom_set()
+        if not ps or not self.output or not self.output.view:
+            return
+        pt = self.output.view.size()
+        html = f'<body style="margin: 8px 0; color: color(var(--foreground) alpha(0.5));">{html_body}</body>'
+        ps.update([sublime.Phantom(sublime.Region(pt, pt), html, sublime.LAYOUT_BLOCK)])
+
+    def _clear_overlay_phantom(self) -> None:
+        ps = self._get_overlay_phantom_set()
+        if ps:
+            ps.update([])
+
+    def _show_connecting_phantom(self) -> None:
+        self._show_overlay_phantom("◎ Connecting...")
+
+    def wake(self) -> None:
+        """Wake a sleeping session — re-spawn bridge with resume."""
+        if self.client or self.initialized:
+            return
+        if not self.session_id:
+            return
+        self._clear_overlay_phantom()
+        if self.output and self.output.view:
+            self.output.view.settings().erase("claude_sleeping")
+        self.resume_id = self.session_id
+        self.fork = False
+        resume_at = self._pending_resume_at
+        self.current_tool = "waking..."
+        self.start(resume_session_at=resume_at)
+        self._persist_state("open")
+        if self.output and self.output.view:
+            self.output.set_name(self.display_name)
+
+    def _persist_state(self, state: str) -> None:
+        """Save session with explicit state override."""
+        if not self.session_id:
+            return
+        sessions = load_saved_sessions()
+        for i, s in enumerate(sessions):
+            if s.get("session_id") == self.session_id:
+                sessions[i]["state"] = state
+                save_sessions(sessions)
+                return
+        # Entry doesn't exist yet — create it
+        self._save_session()
 
     def _release_persona(self) -> None:
         """Release acquired persona."""
@@ -1197,6 +1309,15 @@ class Session:
         entry["project"] = self._cwd()
         entry["total_cost"] = self.total_cost
         entry["query_count"] = self.query_count
+        entry["backend"] = self.backend
+        entry["last_activity"] = self.last_activity
+        # Derive state from current session state
+        if self.client is not None and self.initialized:
+            entry["state"] = "open"
+        elif self.session_id and self.client is None and not self.initialized:
+            entry["state"] = "sleeping"
+        else:
+            entry.setdefault("state", "closed")
         if self._pending_resume_at:
             entry["resume_session_at"] = self._pending_resume_at
         else:
@@ -1227,7 +1348,10 @@ class Session:
 
     def _update_status_bar(self) -> None:
         """Update status bar with session info."""
-        self._status("ready")
+        if self.is_sleeping:
+            self._status("sleeping")
+        else:
+            self._status("ready")
 
     def _context_tokens_k(self) -> Optional[int]:
         """Get context token count in thousands from latest usage data."""

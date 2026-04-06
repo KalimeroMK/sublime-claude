@@ -180,14 +180,19 @@ class OutputView:
         # Check if this is the active Claude view
         window = self.view.window()
         is_active = window and window.settings().get("claude_active_view") == self.view.id()
-        # ◉ = working, ◇ = idle, • = inactive+working, ❓ = questioning
+        # ◉ = working, ◇ = idle, • = inactive+working, ❓ = questioning, ⏸ = sleeping
+        from . import claude_code
+        session = claude_code.get_session_for_view(self.view)
+        is_sleeping = session and session.is_sleeping
         is_questioning = bool(
             (self.pending_permission and self.pending_permission.callback) or
             (self.pending_question and self.pending_question.callback) or
             (self.pending_plan and self.pending_plan.callback)
         )
         is_working = self.current and self.current.working
-        if is_questioning:
+        if is_sleeping:
+            prefix = "⏸ "
+        elif is_questioning:
             prefix = "❓"
         elif is_active:
             prefix = "◉ " if is_working else "◇ "
@@ -363,8 +368,6 @@ class OutputView:
         # else:
             # print(f"[Claude] enter_input_mode: no pending context to add, session={session is not None}")
 
-        # Add input marker
-        # print(f"[Claude] enter_input_mode: adding input marker at {self.view.size()}")
         self.view.run_command("append", {"characters": self._input_marker})
         self._input_start = self.view.size()  # After the marker
         # print(f"[Claude] enter_input_mode: input marker added, _input_start={self._input_start}")

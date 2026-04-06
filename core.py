@@ -1,9 +1,14 @@
 """Claude Code core - session management and plugin lifecycle."""
+import time
+
 import sublime
 import sublime_plugin
 from typing import Dict, Optional
 
-from .session import Session
+from .session import Session, load_saved_sessions, save_sessions
+
+
+_auto_sleep_timer = None
 
 
 def plugin_loaded() -> None:
@@ -19,6 +24,63 @@ def plugin_loaded() -> None:
     # Start global notalone client (receives all injects for sublime.* sessions)
     from . import notalone
     notalone.start()
+
+    # Register orphaned claude output views as sleeping sessions
+    def register_orphans():
+        import re
+        saved_sessions = load_saved_sessions()
+
+        for window in sublime.windows():
+            for view in window.views():
+                if not view.settings().get("claude_output"):
+                    continue
+                if view.id() in sublime._claude_sessions:
+                    continue
+
+                # Extract session name from view title
+                name = view.name()
+                name = re.sub(r'^[◉◇•❓⏸⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]\s*', '', name)
+                if name.startswith("Claude: "):
+                    name = name[8:]
+                if name.startswith("[") and "] " in name:
+                    name = name[name.index("] ") + 2:]
+                if name.endswith("\u2026"):
+                    name = name[:-1]
+                session_name = name if name and name != "Claude" else None
+
+                # Find resume_id from saved sessions
+                resume_id = None
+                if session_name:
+                    for saved in saved_sessions:
+                        saved_name = saved.get("name", "")
+                        if not saved.get("session_id"):
+                            continue
+                        if saved_name == session_name or saved_name.startswith(session_name):
+                            resume_id = saved.get("session_id")
+                            session_name = saved_name
+                            break
+
+                if not resume_id:
+                    continue
+
+                # Remove stale input marker from end of view
+                content = view.substr(sublime.Region(0, view.size()))
+                marker_pos = content.rfind("\n◎ ")
+                if marker_pos >= 0:
+                    view.set_read_only(False)
+                    view.run_command("claude_replace", {"start": marker_pos, "end": view.size(), "text": ""})
+                    view.set_read_only(True)
+
+                backend = view.settings().get("claude_backend", "claude")
+                session = Session(window, resume_id=resume_id, backend=backend)
+                session.name = session_name
+                session.output.view = view
+                session.draft_prompt = ""
+                sublime._claude_sessions[view.id()] = session
+                session._apply_sleep_ui()
+        schedule_auto_sleep()
+
+    sublime.set_timeout(register_orphans, 500)
 
     # Sync order table bookmarks after windows are ready
     def sync_orders():
@@ -89,7 +151,37 @@ def create_session(window: sublime.Window, resume_id: Optional[str] = None, fork
         view_id = s.output.view.id()
         sublime._claude_sessions[view_id] = s
         window.settings().set("claude_active_view", view_id)
-        print(f"[Claude] create_session: registered view_id={view_id}, _sessions={id(sublime._claude_sessions)}, count={len(sublime._claude_sessions)}, keys={list(sublime._claude_sessions.keys())}")
+        print(f"[Claude] create_session: view_id={view_id}")
     else:
         print(f"[Claude] create_session: ERROR - no output view!")
+    schedule_auto_sleep()
     return s
+
+
+def _check_auto_sleep():
+    global _auto_sleep_timer
+    _auto_sleep_timer = None
+
+    settings = sublime.load_settings("ClaudeCode.sublime-settings")
+    timeout_min = settings.get("auto_sleep_minutes", 60)
+    if not timeout_min or timeout_min <= 0:
+        return
+
+    threshold = time.time() - (timeout_min * 60)
+
+    for view_id, session in list(sublime._claude_sessions.items()):
+        if (session.initialized
+                and not session.working
+                and not session.is_sleeping
+                and session.last_activity > 0
+                and session.last_activity < threshold):
+            print(f"[Claude] auto-sleep: {session.name} idle for >{timeout_min}m")
+            session.sleep()
+
+    schedule_auto_sleep()
+
+
+def schedule_auto_sleep():
+    global _auto_sleep_timer
+    if _auto_sleep_timer is None and hasattr(sublime, '_claude_sessions') and sublime._claude_sessions:
+        _auto_sleep_timer = sublime.set_timeout(_check_auto_sleep, 60000)

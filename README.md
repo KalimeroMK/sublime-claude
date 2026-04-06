@@ -2,9 +2,6 @@
 
 A Sublime Text plugin for [Claude Code](https://claude.ai/claude-code), [Codex CLI](https://github.com/openai/codex), and [GitHub Copilot CLI](https://github.com/features/copilot/cli) integration.
 
-![Multi-session chess game demo](sessions_demo.jpg)
-*Multi-agent workflow: A coordinator orchestrating three sessions - White player, Black player, and a Board display - playing chess via MCP tools.*
-
 ## Requirements
 
 - Sublime Text 4
@@ -75,6 +72,8 @@ All commands available via Command Palette (`Cmd+Shift+P`): type "Claude"
 | Fork Session | - | Fork current session (branch conversation) |
 | Fork Session... | - | Fork from a saved session |
 | Rename Session... | - | Name the current session |
+| Sleep Session | - | Put session to sleep (free resources) |
+| Wake Session | - | Wake a sleeping session |
 | Stop Session | - | Disconnect and stop |
 | Toggle Output | `Cmd+Alt+C` | Show/hide output view |
 | Clear Output | `Cmd+Ctrl+Alt+C` | Clear output view |
@@ -208,7 +207,16 @@ Sessions are automatically saved and can be resumed later. Each session tracks:
 
 Use **Claude: Resume Session...** to pick and continue a previous conversation.
 
-After Sublime restarts, orphaned output views are automatically reconnected to their sessions.
+After Sublime restarts, orphaned output views are registered as sleeping sessions. Press Enter or use **Wake Session** to reconnect.
+
+### Sleep/Wake
+
+Sessions can be put to sleep to free bridge subprocess resources while keeping the view:
+
+- **Sleep** — kills the bridge process, view shows `⏸` prefix
+- **Wake** — press Enter in a sleeping view, or use **Wake Session** command
+- Switch panel shows sleeping sessions with `⏸` indicator
+- `auto_sleep_minutes` setting auto-sleeps idle sessions (default: 60, 0 = disabled)
 
 ## Order Table
 
@@ -264,7 +272,7 @@ View title shows session status:
 - `◉` Active + working
 - `◇` Active + idle
 - `•` Inactive + working
-- `◇` Inactive + idle
+- `⏸` Sleeping (bridge stopped)
 - `❓` Waiting for permission/question response
 
 Non-Claude sessions show backend name in tab title and have distinct background colors:

@@ -158,7 +158,7 @@ class ClaudeOutputEventListener(sublime_plugin.ViewEventListener):
         # Update this session's status and title
         if s:
             s._update_status_bar()
-            s.output.set_name(s.name or "Claude")
+            s.output.set_name(s.display_name)
 
             # Auto-enter input mode if session is idle and not already in input mode
             if s.initialized and not s.working and not s.output.is_input_mode():
@@ -177,7 +177,7 @@ class ClaudeOutputEventListener(sublime_plugin.ViewEventListener):
         # Remove active marker from previous active session
         if old_active and old_active != self.view.id() and old_active in sublime._claude_sessions:
             old_session = sublime._claude_sessions[old_active]
-            old_session.output.set_name(old_session.name or "Claude")
+            old_session.output.set_name(old_session.display_name)
 
     def _reconnect_orphaned_view(self, window):
         """Reconnect an orphaned Claude output view on focus."""
@@ -195,9 +195,9 @@ class ClaudeOutputEventListener(sublime_plugin.ViewEventListener):
         name = view.name()
         session_name = None
 
-        # Strip status prefixes (new format: ◉/◇/•/❓ + space, old: spinner)
+        # Strip status prefixes (new format: ◉/◇/•/❓/💤 + space, old: spinner)
         import re
-        name = re.sub(r'^[◉◇•❓⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]\s*', '', name)
+        name = re.sub(r'^[◉◇•❓⏸⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]\s*', '', name)
 
         # Strip old "Claude: " prefix
         if name.startswith("Claude: "):
@@ -220,16 +220,15 @@ class ClaudeOutputEventListener(sublime_plugin.ViewEventListener):
 
         # Try to find session_id from saved sessions
         resume_id = None
-        was_truncated = name_was_truncated
         saved_sessions = load_saved_sessions()
 
-        # Method 1: Match by name
+        # Method 1: Match by name (exact or prefix if name was truncated)
         if session_name:
             for saved in saved_sessions:
                 saved_name = saved.get("name", "")
-                if saved.get("query_count", 0) <= 0:
+                if not saved.get("session_id"):
                     continue
-                if saved_name == session_name or (was_truncated and saved_name.startswith(session_name)):
+                if saved_name == session_name or saved_name.startswith(session_name):
                     resume_id = saved.get("session_id")
                     session_name = saved_name
                     break
@@ -237,8 +236,7 @@ class ClaudeOutputEventListener(sublime_plugin.ViewEventListener):
         # Method 2: Match by first prompt in view content
         if not resume_id:
             content = view.substr(sublime.Region(0, min(500, view.size())))
-            import re as re2
-            m = re2.search(r'◎ (.+?) ▶', content)
+            m = re.search(r'◎ (.+?) ▶', content)
             if m:
                 first_prompt = m.group(1).strip()
                 for saved in saved_sessions:
@@ -256,9 +254,9 @@ class ClaudeOutputEventListener(sublime_plugin.ViewEventListener):
                     resume_session_at = saved.get("resume_session_at")
                     break
 
-        print(f"[Claude] reconnect: view_name={view.name()!r}, extracted={session_name!r}, resume_id={resume_id}, resume_at={resume_session_at}, truncated={was_truncated}")
+        print(f"[Claude] reconnect: view={view.name()!r}, session={session_name!r}, resume_id={resume_id}")
 
-        # Create session - with resume_id if found, fresh otherwise
+        # Create session in sleeping state — user wakes with Enter or Wake command
         saved_backend = view.settings().get("claude_backend", "claude")
         session = Session(window, resume_id=resume_id, backend=saved_backend)
         session.name = session_name
@@ -270,7 +268,6 @@ class ClaudeOutputEventListener(sublime_plugin.ViewEventListener):
 
         # Reset active states
         session.output.reset_active_states()
-        session.output.set_name(session_name or "Claude")
 
         # Re-apply backend-specific background color
         backend = view.settings().get("claude_backend")
@@ -283,14 +280,14 @@ class ClaudeOutputEventListener(sublime_plugin.ViewEventListener):
             if theme:
                 view.settings().set("color_scheme", theme)
 
-        session.start(resume_session_at=resume_session_at)
+        # If we have a session_id, sleep it. Otherwise auto-reconnect (old behavior).
+        if resume_id:
+            session._apply_sleep_ui()
+        else:
+            session.start(resume_session_at=resume_session_at)
 
         # Clear reconnecting flag
         view.settings().erase("claude_reconnecting")
-
-        if session_name:
-            view.set_status("claude_reconnect", f"Reconnected: {session_name}")
-            sublime.set_timeout(lambda v=view: v.erase_status("claude_reconnect"), 3000)
 
     def on_text_command(self, command_name, args):
         """Intercept text commands to restrict edits in input mode."""

@@ -105,11 +105,6 @@ class JsonRpcClient:
                     print("[Claude RPC] read_loop: got empty line, breaking")
                     break
                 msg = json.loads(line.decode())
-                # Debug: log message types
-                if "method" in msg:
-                    print(f"[Claude RPC] notification: {msg.get('method')}")
-                elif "id" in msg:
-                    print(f"[Claude RPC] response for id={msg.get('id')}")
                 sublime.set_timeout(lambda m=msg: self._handle(m), 0)
             except Exception as e:
                 print(f"[Claude RPC] read_loop error: {e}")

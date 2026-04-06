@@ -846,7 +846,13 @@ class ClaudeSearchSessionsCommand(sublime_plugin.WindowCommand):
                     if idx < 0:
                         return
                     sid = results[idx][0]
-                    create_session(self.window, resume_id=sid, fork=True)
+                    # Look up backend from saved sessions
+                    saved_backend = "claude"
+                    for saved in load_saved_sessions():
+                        if saved.get("session_id") == sid:
+                            saved_backend = saved.get("backend", "claude")
+                            break
+                    create_session(self.window, resume_id=sid, fork=True, backend=saved_backend)
 
                 self.window.show_quick_panel(items, on_select)
 
@@ -995,6 +1001,30 @@ class ClaudeCodeStopCommand(sublime_plugin.WindowCommand):
                 del sublime._claude_sessions[view_id]
 
 
+class ClaudeSleepSessionCommand(sublime_plugin.WindowCommand):
+    """Put the active session to sleep."""
+    def run(self):
+        session = get_active_session(self.window)
+        if session and not session.is_sleeping:
+            session.sleep()
+
+    def is_enabled(self):
+        session = get_active_session(self.window)
+        return session is not None and not session.is_sleeping
+
+
+class ClaudeWakeSessionCommand(sublime_plugin.WindowCommand):
+    """Wake a sleeping session."""
+    def run(self):
+        session = get_active_session(self.window)
+        if session and session.is_sleeping:
+            session.wake()
+
+    def is_enabled(self):
+        session = get_active_session(self.window)
+        return session is not None and session.is_sleeping
+
+
 class ClaudeCodeResumeCommand(sublime_plugin.WindowCommand):
     """Resume a previous session."""
     def run(self) -> None:
@@ -1071,10 +1101,18 @@ class ClaudeCodeSwitchCommand(sublime_plugin.WindowCommand):
 
         if active_session and not in_output_view:
             name = active_session.name or "(unnamed)"
-            status = "working..." if active_session.working else "ready"
+            if active_session.is_sleeping:
+                status = "sleeping"
+                prefix = "⏸ "
+            elif active_session.working:
+                status = "working..."
+                prefix = "Active: "
+            else:
+                status = "ready"
+                prefix = "Active: "
             cost = f"${active_session.total_cost:.4f}" if active_session.total_cost > 0 else ""
             detail = f"{status}  {cost}  {active_session.query_count}q" if cost else f"{status}  {active_session.query_count}q"
-            items.append([f"Active: {name}", detail])
+            items.append([f"{prefix}{name}", detail])
             actions.append(("focus", active_session))
 
         # Add other sessions (not the active one)
@@ -1082,8 +1120,15 @@ class ClaudeCodeSwitchCommand(sublime_plugin.WindowCommand):
             if view_id == active_view_id:
                 continue  # Already shown at top
             name = s.name or "(unnamed)"
-            marker = "• " if s.working else "  "
-            status = "working..." if s.working else "ready"
+            if s.is_sleeping:
+                marker = "⏸ "
+                status = "sleeping"
+            elif s.working:
+                marker = "\u2022 "
+                status = "working..."
+            else:
+                marker = "  "
+                status = "ready"
             cost = f"${s.total_cost:.4f}" if s.total_cost > 0 else ""
             detail = f"{status}  {cost}  {s.query_count}q" if cost else f"{status}  {s.query_count}q"
             items.append([f"{marker}{name}", detail])
@@ -1094,6 +1139,9 @@ class ClaudeCodeSwitchCommand(sublime_plugin.WindowCommand):
             if not active_session.working and active_session.session_id:
                 items.append(["↩ Undo Message", "Rewind session to previous turn"])
                 actions.append(("undo_message", active_session))
+            if active_session and not active_session.is_sleeping:
+                items.append(["○ Sleep Session", "Put session to sleep, free resources"])
+                actions.append(("sleep", active_session))
             items.append(["🔄 Restart Session", "Restart current session, keep output"])
             actions.append(("restart", active_session))
 
@@ -1206,10 +1254,12 @@ class ClaudeCodeSwitchCommand(sublime_plugin.WindowCommand):
                 elif action == "fork" and data:
                     # Fork the current session
                     if data.session_id:
-                        create_session(self.window, resume_id=data.session_id, fork=True)
+                        create_session(self.window, resume_id=data.session_id, fork=True, backend=data.backend)
                 elif action == "persona" and data:
                     # Show persona picker
                     self._show_persona_picker(data, backend=backend)
+                elif action == "sleep" and data:
+                    data.sleep()
                 elif action == "focus" and data:
                     data.output.show()
 
@@ -1336,11 +1386,11 @@ class ClaudeCodeSwitchCommand(sublime_plugin.WindowCommand):
             # Create new session with selected config
             if action == "checkpoint":
                 session_id = data.get("session_id")
-                new_session = Session(self.window, resume_id=session_id, fork=True)
+                new_session = Session(self.window, resume_id=session_id, fork=True, backend=session.backend)
             elif action == "profile":
-                new_session = Session(self.window, profile=data)
+                new_session = Session(self.window, profile=data, backend=session.backend)
             else:
-                new_session = Session(self.window)
+                new_session = Session(self.window, backend=session.backend)
 
             # Reuse existing view
             if old_view and old_view.is_valid():
@@ -1367,7 +1417,7 @@ class ClaudeCodeForkCommand(sublime_plugin.WindowCommand):
             return
 
         # Create forked session
-        forked = create_session(self.window, resume_id=s.session_id, fork=True)
+        forked = create_session(self.window, resume_id=s.session_id, fork=True, backend=s.backend)
         forked_name = f"{s.name or 'session'} (fork)"
         forked.name = forked_name
         forked.output.set_name(forked_name)
@@ -1388,7 +1438,7 @@ class ClaudeCodeForkFromCommand(sublime_plugin.WindowCommand):
                 name = session.name or "(unnamed)"
                 cost = f"${session.total_cost:.4f}" if session.total_cost > 0 else ""
                 items.append([f"● {name}", f"active  {cost}  {session.query_count}q"])
-                sources.append(("active", view_id, session.session_id, name))
+                sources.append(("active", view_id, session.session_id, name, session.backend))
 
         # Saved sessions
         saved = load_saved_sessions()
@@ -1403,7 +1453,7 @@ class ClaudeCodeForkFromCommand(sublime_plugin.WindowCommand):
             cost = s.get("total_cost", 0)
             cost_str = f"${cost:.4f}" if cost else ""
             items.append([name, f"saved  {project}  {cost_str}"])
-            sources.append(("saved", None, session_id, name))
+            sources.append(("saved", None, session_id, name, s.get("backend", "claude")))
 
         if not items:
             sublime.status_message("No sessions to fork from")
@@ -1411,8 +1461,8 @@ class ClaudeCodeForkFromCommand(sublime_plugin.WindowCommand):
 
         def on_select(idx):
             if idx >= 0:
-                source_type, view_id, session_id, name = sources[idx]
-                forked = create_session(self.window, resume_id=session_id, fork=True)
+                source_type, view_id, session_id, name, src_backend = sources[idx]
+                forked = create_session(self.window, resume_id=session_id, fork=True, backend=src_backend)
                 forked_name = f"{name} (fork)"
                 forked.name = forked_name
                 forked.output.set_name(forked_name)
@@ -1552,6 +1602,12 @@ class ClaudeGarageSearchCommand(sublime_plugin.WindowCommand):
         """Show fork/resume options for selected session."""
         session_id = result["session_id"]  # Full UUID
         short_id = result.get("short_id", session_id[:8])
+        # Look up backend from saved sessions
+        src_backend = "claude"
+        for saved in load_saved_sessions():
+            if saved.get("session_id") == session_id:
+                src_backend = saved.get("backend", "claude")
+                break
 
         items = [
             ["Fork", f"Create new session branching from {short_id}"],
@@ -1561,13 +1617,13 @@ class ClaudeGarageSearchCommand(sublime_plugin.WindowCommand):
         def on_action(idx):
             if idx == 0:
                 # Fork
-                s = create_session(self.window, resume_id=session_id, fork=True)
+                s = create_session(self.window, resume_id=session_id, fork=True, backend=src_backend)
                 s.name = f"fork:{short_id}"
                 s.output.set_name(s.name)
                 sublime.status_message(f"Forked session {short_id}")
             elif idx == 1:
                 # Resume
-                s = create_session(self.window, resume_id=session_id, fork=False)
+                s = create_session(self.window, resume_id=session_id, fork=False, backend=src_backend)
                 s.name = f"resume:{short_id}"
                 s.output.set_name(s.name)
                 sublime.status_message(f"Resumed session {short_id}")
@@ -1682,6 +1738,11 @@ class ClaudeSubmitInputCommand(sublime_plugin.TextCommand):
     def run(self, edit):
         s = get_session_for_view(self.view)
         if not s:
+            return
+
+        # Wake sleeping session on Enter
+        if s.is_sleeping:
+            s.wake()
             return
 
         # Check for question free-text input first
