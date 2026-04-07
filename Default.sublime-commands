@@ -187,6 +187,10 @@
         "command": "claude_garage_search"
     },
     {
+        "caption": "Claude: Terminal Mode",
+        "command": "claude_terminal_mode"
+    },
+    {
         "caption": "Claude: Sleep Session",
         "command": "claude_sleep_session"
     },

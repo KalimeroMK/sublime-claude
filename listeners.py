@@ -130,6 +130,14 @@ class ClaudeCodeEventListener(sublime_plugin.EventListener):
             sublime._claude_sessions[view.id()].stop()
             del sublime._claude_sessions[view.id()]
 
+        # Check if closed view was a terminal mode view
+        tag = view.settings().get("terminus_view.tag") or ""
+        if tag.startswith("claude-terminal-"):
+            for vid, session in sublime._claude_sessions.items():
+                if session.terminal_mode and session._terminal_tag == tag:
+                    session._on_terminal_exit()
+                    break
+
 
 class ClaudeOutputEventListener(sublime_plugin.ViewEventListener):
     """Handle keys in the Claude output view."""

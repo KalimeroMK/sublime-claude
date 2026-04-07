@@ -1001,6 +1001,27 @@ class ClaudeCodeStopCommand(sublime_plugin.WindowCommand):
                 del sublime._claude_sessions[view_id]
 
 
+class ClaudeTerminalModeCommand(sublime_plugin.WindowCommand):
+    """Switch active session to CLI terminal mode."""
+    def run(self):
+        session = get_active_session(self.window)
+        if not session:
+            return
+        if session.terminal_mode:
+            tv = session._find_terminal_view()
+            if tv:
+                self.window.focus_view(tv)
+            return
+        session.enter_terminal_mode()
+
+    def is_enabled(self):
+        session = get_active_session(self.window)
+        return (session is not None
+                and bool(session.session_id)
+                and not session.working
+                and session.backend != "copilot")
+
+
 class ClaudeSleepSessionCommand(sublime_plugin.WindowCommand):
     """Put the active session to sleep."""
     def run(self):
@@ -1139,6 +1160,9 @@ class ClaudeCodeSwitchCommand(sublime_plugin.WindowCommand):
             if not active_session.working and active_session.session_id:
                 items.append(["↩ Undo Message", "Rewind session to previous turn"])
                 actions.append(("undo_message", active_session))
+            if active_session and not active_session.is_sleeping and active_session.session_id and active_session.backend != "copilot":
+                items.append(["\u2b1b Terminal Mode", "Switch to CLI in terminal"])
+                actions.append(("terminal_mode", active_session))
             if active_session and not active_session.is_sleeping:
                 items.append(["○ Sleep Session", "Put session to sleep, free resources"])
                 actions.append(("sleep", active_session))
@@ -1258,6 +1282,8 @@ class ClaudeCodeSwitchCommand(sublime_plugin.WindowCommand):
                 elif action == "persona" and data:
                     # Show persona picker
                     self._show_persona_picker(data, backend=backend)
+                elif action == "terminal_mode" and data:
+                    data.enter_terminal_mode()
                 elif action == "sleep" and data:
                     data.sleep()
                 elif action == "focus" and data:
@@ -1738,6 +1764,13 @@ class ClaudeSubmitInputCommand(sublime_plugin.TextCommand):
     def run(self, edit):
         s = get_session_for_view(self.view)
         if not s:
+            return
+
+        # Terminal mode: focus the terminal view instead of waking
+        if s.terminal_mode:
+            tv = s._find_terminal_view()
+            if tv:
+                self.view.window().focus_view(tv)
             return
 
         # Wake sleeping session on Enter

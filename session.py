@@ -103,6 +103,11 @@ class Session:
         # Activity tracking for auto-sleep
         self.last_activity: float = time.time()
 
+        # Terminal mode state
+        self.terminal_mode: bool = False
+        self._terminal_tag: Optional[str] = None
+        self._terminal_poll_active: bool = False
+
         # Plan mode state
         self.plan_mode: bool = False
         self.plan_file: Optional[str] = None
@@ -1015,6 +1020,15 @@ class Session:
         # Persist closed state before cleanup
         self._persist_state("closed")
 
+        # Clean up terminal mode if active
+        if self.terminal_mode:
+            self._terminal_poll_active = False
+            tv = self._find_terminal_view()
+            if tv and tv.is_valid():
+                tv.close()
+            self.terminal_mode = False
+            self._terminal_tag = None
+
         # Release persona if acquired
         if self.persona_session_id and self.persona_url:
             self._release_persona()
@@ -1071,7 +1085,21 @@ class Session:
         if self.output.is_input_mode():
             self.draft_prompt = self.output.get_input_text().strip()
             self.output.exit_input_mode(keep_text=False)
+        else:
+            # Clean stale input marker from view content (e.g. after restart)
+            # Only remove if the last non-empty line is exactly the marker
+            content = view.substr(sublime.Region(0, view.size()))
+            lines = content.rstrip("\n").split("\n")
+            if lines and lines[-1].strip() == "\u25ce":
+                # Find the start of this last marker line
+                erase_from = content.rstrip("\n").rfind("\n" + lines[-1])
+                if erase_from >= 0:
+                    view.set_read_only(False)
+                    view.run_command("claude_replace", {"start": erase_from, "end": view.size(), "text": ""})
+                    view.set_read_only(True)
         self._show_overlay_phantom("\u23f8 Session paused \u2014 press Enter to wake")
+        if self.output and self.output.view:
+            self.output.view.show(self.output.view.size())
 
     def _get_overlay_phantom_set(self):
         if not hasattr(self, '_overlay_phantom_set') or self._overlay_phantom_set is None:
@@ -1101,6 +1129,9 @@ class Session:
             return
         if not self.session_id:
             return
+        self.terminal_mode = False
+        self._terminal_poll_active = False
+        self._terminal_tag = None
         self._clear_overlay_phantom()
         if self.output and self.output.view:
             self.output.view.settings().erase("claude_sleeping")
@@ -1112,6 +1143,155 @@ class Session:
         self._persist_state("open")
         if self.output and self.output.view:
             self.output.set_name(self.display_name)
+
+    # ─── Terminal Mode ─────────────────────────────────────────────────
+
+    def enter_terminal_mode(self) -> bool:
+        """Switch from bridge mode to CLI terminal mode."""
+        if not self.session_id or self.terminal_mode:
+            return False
+        if self.working:
+            sublime.status_message("Can't switch to terminal mode while working")
+            return False
+        cli_cmd = self._resolve_cli_command()
+        if not cli_cmd:
+            sublime.status_message("No CLI available for this backend")
+            return False
+
+        # Record JSONL position so we can replay new entries on return
+        jsonl_path = self._find_jsonl_path()
+        self._terminal_jsonl_pos = os.path.getsize(jsonl_path) if jsonl_path else 0
+
+        self.sleep()
+        self.terminal_mode = True
+        self._terminal_tag = f"claude-terminal-{self.session_id[:12]}"
+        self._show_overlay_phantom("\u2b1b Terminal mode \u2014 CLI running in terminal")
+        self._persist_state("terminal")
+        self._open_terminal(cli_cmd)
+        self._poll_terminal_exit()
+        return True
+
+    def _resolve_cli_command(self) -> list:
+        import shutil
+        settings = sublime.load_settings("ClaudeCode.sublime-settings")
+        if self.backend == "codex":
+            cli = settings.get("codex_cli_path") or shutil.which("codex") or "codex"
+            return [cli, "resume", self.session_id]
+        elif self.backend == "copilot":
+            return None  # No CLI available
+        else:
+            cli = settings.get("claude_cli_path") or shutil.which("claude") or "claude"
+            return [cli, "--resume", self.session_id]
+
+    def _open_terminal(self, cli_cmd: list) -> None:
+        cwd = self._cwd()
+        tag = self._terminal_tag
+        name = self.display_name
+        window_id = self.window.id()
+
+        def do_open():
+            for w in sublime.windows():
+                if w.id() == window_id:
+                    w.run_command("terminus_open", {
+                        "tag": tag,
+                        "title": f"CLI: {name}",
+                        "cmd": cli_cmd,
+                        "cwd": cwd,
+                        "focus": True,
+                    })
+                    break
+        sublime.set_timeout(do_open, 50)
+
+    def _poll_terminal_exit(self) -> None:
+        self._terminal_poll_active = True
+
+        def check():
+            if not self.terminal_mode or not self._terminal_poll_active:
+                return
+            tv = self._find_terminal_view()
+            if tv is None or tv.settings().get("terminus_view.finished"):
+                self._on_terminal_exit()
+                return
+            sublime.set_timeout(check, 500)
+
+        sublime.set_timeout(check, 500)
+
+    def _find_terminal_view(self):
+        if not self._terminal_tag:
+            return None
+        for view in self.window.views():
+            if view.settings().get("terminus_view.tag") == self._terminal_tag:
+                return view
+        return None
+
+    def _on_terminal_exit(self) -> None:
+        self._terminal_poll_active = False
+        self.terminal_mode = False
+        tv = self._find_terminal_view()
+        if tv and tv.settings().get("terminus_view.finished"):
+            sublime.set_timeout(lambda: tv.close() if tv.is_valid() else None, 200)
+        self._terminal_tag = None
+        if self.output and self.output.view and self.output.view.is_valid():
+            self._replay_terminal_history()
+            self.wake()
+        else:
+            self._persist_state("closed")
+
+    def _replay_terminal_history(self) -> None:
+        """Render conversation entries added during terminal mode."""
+        jsonl_path = self._find_jsonl_path()
+        start_pos = getattr(self, '_terminal_jsonl_pos', 0)
+        if not jsonl_path or not os.path.exists(jsonl_path):
+            return
+        try:
+            with open(jsonl_path, "r") as f:
+                f.seek(start_pos)
+                new_lines = f.readlines()
+        except Exception:
+            return
+        if not new_lines:
+            return
+        # Parse and render new conversation turns
+        for line in new_lines:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                entry = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if entry.get("isSidechain") or entry.get("isMeta"):
+                continue
+            etype = entry.get("type")
+            if etype == "user":
+                msg = entry.get("message", {})
+                content = msg.get("content", [])
+                # Skip tool_result messages
+                if isinstance(content, list) and any(
+                    isinstance(b, dict) and b.get("type") == "tool_result" for b in content
+                ):
+                    continue
+                prompt = ""
+                if isinstance(content, str):
+                    prompt = content
+                elif isinstance(content, list):
+                    for block in content:
+                        if isinstance(block, dict) and block.get("type") == "text":
+                            prompt += block.get("text", "")
+                if prompt:
+                    self.output.text(f"\n◎ {prompt} ▶\n\n")
+            elif etype == "assistant":
+                msg = entry.get("message", {})
+                content = msg.get("content", [])
+                if isinstance(content, list):
+                    for block in content:
+                        if isinstance(block, dict) and block.get("type") == "text":
+                            text = block.get("text", "")
+                            if text:
+                                self.output.text(text)
+                elif isinstance(content, str) and content:
+                    self.output.text(content)
+        self.output.text("\n")
 
     def _persist_state(self, state: str) -> None:
         """Save session with explicit state override."""

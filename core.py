@@ -63,14 +63,6 @@ def plugin_loaded() -> None:
                 if not resume_id:
                     continue
 
-                # Remove stale input marker from end of view
-                content = view.substr(sublime.Region(0, view.size()))
-                marker_pos = content.rfind("\n◎ ")
-                if marker_pos >= 0:
-                    view.set_read_only(False)
-                    view.run_command("claude_replace", {"start": marker_pos, "end": view.size(), "text": ""})
-                    view.set_read_only(True)
-
                 backend = view.settings().get("claude_backend", "claude")
                 session = Session(window, resume_id=resume_id, backend=backend)
                 session.name = session_name
