@@ -144,6 +144,7 @@ class OutputView:
         self.view.set_scratch(True)
         self.view.set_read_only(True)
         self.view.settings().set("claude_output", True)
+        self.view.settings().set("auto_indent", False)
         output_settings = sublime.load_settings("ClaudeOutput.sublime-settings")
         for key in ("font_size", "line_numbers", "gutter", "word_wrap", "margin",
                      "draw_indent_guides", "highlight_line", "fold_buttons"):

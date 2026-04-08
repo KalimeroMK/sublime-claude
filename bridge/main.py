@@ -289,11 +289,7 @@ You are subsession **{subsession_id}**. Call signal_complete(session_id={view_id
                     self.client = ClaudeSDKClient(options=self.options)
                     await self.client.connect()
                 else:
-                    options_dict["resume"] = None
-                    options_dict["fork_session"] = False
-                    self.options = ClaudeAgentOptions(**options_dict)
-                    self.client = ClaudeSDKClient(options=self.options)
-                    await self.client.connect()
+                    raise
             else:
                 raise
 

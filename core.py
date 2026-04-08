@@ -52,7 +52,7 @@ def plugin_loaded() -> None:
                 resume_id = None
                 if session_name:
                     for saved in saved_sessions:
-                        saved_name = saved.get("name", "")
+                        saved_name = saved.get("name") or ""
                         if not saved.get("session_id"):
                             continue
                         if saved_name == session_name or saved_name.startswith(session_name):

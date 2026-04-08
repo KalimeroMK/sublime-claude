@@ -1109,7 +1109,6 @@ class Session:
         if not ps or not self.output or not self.output.view:
             return
         view = self.output.view
-        # Place phantom on the last line of content (not after it) so it's within scroll bounds
         content = view.substr(sublime.Region(0, view.size()))
         last_nl = content.rfind("\n")
         pt = last_nl if last_nl >= 0 else 0
