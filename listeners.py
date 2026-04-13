@@ -19,8 +19,7 @@ class ClaudeCodeEventListener(sublime_plugin.EventListener):
             return
         print(f"[Claude] on_post_text_command: {command_name}")
         path = view.file_name()
-        if not path or view.settings().get("claude_output"):
-            print(f"[Claude] copy tracking skipped: path={path}, claude_output={view.settings().get('claude_output')}")
+        if not path or view.is_scratch() or view.settings().get("claude_output"):
             return
         sel = view.sel()
         if not sel:

@@ -184,6 +184,12 @@ class Session:
         # Pass subsession_id if this is a subsession
         if hasattr(self, 'subsession_id') and self.subsession_id:
             init_params["subsession_id"] = self.subsession_id
+        # Effort setting (default "high", overridable via settings or profile)
+        effort = settings.get("effort", "high")
+        if self.profile and self.profile.get("effort"):
+            effort = self.profile["effort"]
+        init_params["effort"] = effort
+
         # Apply profile config or default model
         if self.profile:
             if self.profile.get("model"):
@@ -1096,7 +1102,7 @@ class Session:
                     view.set_read_only(False)
                     view.run_command("claude_replace", {"start": erase_from, "end": view.size(), "text": ""})
                     view.set_read_only(True)
-        self._show_overlay_phantom("\u23f8 Session paused \u2014 press Enter to wake")
+        self._show_overlay_phantom("\u23f8 Session paused \u2014 press Enter to wake", color="var(--yellowish)")
 
     def _get_overlay_phantom_set(self):
         if not hasattr(self, '_overlay_phantom_set') or self._overlay_phantom_set is None:
@@ -1104,7 +1110,7 @@ class Session:
                 self._overlay_phantom_set = sublime.PhantomSet(self.output.view, "claude_overlay")
         return self._overlay_phantom_set
 
-    def _show_overlay_phantom(self, html_body: str) -> None:
+    def _show_overlay_phantom(self, html_body: str, color: str = "color(var(--foreground) alpha(0.5))") -> None:
         ps = self._get_overlay_phantom_set()
         if not ps or not self.output or not self.output.view:
             return
@@ -1112,7 +1118,7 @@ class Session:
         content = view.substr(sublime.Region(0, view.size()))
         last_nl = content.rfind("\n")
         pt = last_nl if last_nl >= 0 else 0
-        html = f'<body style="margin: 8px 0; color: color(var(--foreground) alpha(0.5));">{html_body}</body>'
+        html = f'<body style="margin: 8px 0; color: {color};">{html_body}</body>'
         ps.update([sublime.Phantom(sublime.Region(pt, pt), html, sublime.LAYOUT_BLOCK)])
         view.sel().clear()
         view.sel().add(sublime.Region(view.size(), view.size()))

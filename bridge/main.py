@@ -223,11 +223,14 @@ You are subsession **{subsession_id}**. Call signal_complete(session_id={view_id
             "cli_path": "claude",
         }
 
-        # Profile config: model, betas
+        # Profile config: model, betas, effort
         if params.get("model"):
             options_dict["model"] = params["model"]
         if params.get("betas"):
             options_dict["betas"] = params["betas"]
+        effort = params.get("effort", "high")
+        if effort:
+            options_dict["effort"] = effort
 
         # Sandbox settings from project config
         sandbox = self._load_sandbox_settings(cwd)
