@@ -576,6 +576,35 @@ class ClaudeCodeUsageCommand(sublime_plugin.WindowCommand):
         self.window.run_command("show_panel", {"panel": "output.claude_usage"})
 
 
+class ClaudeSelectEffortCommand(sublime_plugin.WindowCommand):
+    """Change reasoning effort for current session (persists via settings, applied on next restart)."""
+    LEVELS = ["low", "medium", "high", "max"]
+
+    def run(self) -> None:
+        s = get_active_session(self.window)
+        if not s:
+            sublime.status_message("No active session")
+            return
+        if s.backend != "claude":
+            sublime.status_message("Effort only supported for claude backend")
+            return
+
+        def on_select(idx):
+            if idx < 0:
+                return
+            level = self.LEVELS[idx]
+            settings = sublime.load_settings("ClaudeCode.sublime-settings")
+            settings.set("effort", level)
+            sublime.save_settings("ClaudeCode.sublime-settings")
+            sublime.status_message(f"Effort set to {level} — takes effect on next session restart")
+
+        self.window.show_quick_panel(self.LEVELS, on_select)
+
+    def is_enabled(self):
+        s = get_active_session(self.window)
+        return s is not None and s.backend == "claude"
+
+
 class ClaudeSelectModelCommand(sublime_plugin.WindowCommand):
     """Quick panel to select model for current session."""
     def run(self) -> None:

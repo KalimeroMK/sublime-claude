@@ -184,11 +184,15 @@ class Session:
         # Pass subsession_id if this is a subsession
         if hasattr(self, 'subsession_id') and self.subsession_id:
             init_params["subsession_id"] = self.subsession_id
-        # Effort setting (default "high", overridable via settings or profile)
-        effort = settings.get("effort", "high")
-        if self.profile and self.profile.get("effort"):
-            effort = self.profile["effort"]
-        init_params["effort"] = effort
+        # Effort setting — only apply on fresh session (resume keeps CLI's saved value)
+        if not self.resume_id:
+            effort = settings.get("effort", "high")
+            if self.profile and self.profile.get("effort"):
+                effort = self.profile["effort"]
+            init_params["effort"] = effort
+        elif self.profile and self.profile.get("effort"):
+            # Profile explicitly sets effort — honor it even on resume
+            init_params["effort"] = self.profile["effort"]
 
         # Apply profile config or default model
         if self.profile:
@@ -1528,8 +1532,10 @@ class Session:
         label = self.backend.title() if self.backend != "claude" else "Claude"
         prefix = "[PLAN] " if self.plan_mode else ""
         parts = [f"{prefix}{text}"]
-        if self.name:
-            parts.append(self.name)
+        if self.backend == "claude":
+            settings = sublime.load_settings("ClaudeCode.sublime-settings")
+            effort = settings.get("effort", "high")
+            parts.append(f"effort:{effort}")
         if self.total_cost > 0:
             parts.append(f"${self.total_cost:.4f}")
         if self.query_count > 0:

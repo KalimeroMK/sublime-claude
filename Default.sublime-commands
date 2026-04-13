@@ -92,6 +92,10 @@
         "command": "claude_search_sessions"
     },
     {
+        "caption": "Claude: Select Effort",
+        "command": "claude_select_effort"
+    },
+    {
         "caption": "Claude: Select Model",
         "command": "claude_select_model"
     },
