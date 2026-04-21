@@ -175,8 +175,8 @@ class CodexBridge:
         codex_policy = perm_map.get(permission_mode, "on-request")
         config.append(f'approval_policy="{codex_policy}"')
 
-        # Disable sandbox to avoid shared memory / file lock permission errors
-        config.append('sandbox="none"')
+        # Full filesystem access to avoid shared memory / file lock permission errors
+        config.append('sandbox_mode="danger-full-access"')
 
         # Configure Sublime MCP server so Codex can use editor tools
         mcp_server_path = os.path.join(
@@ -215,9 +215,14 @@ class CodexBridge:
         if system_prompt:
             thread_params["developerInstructions"] = system_prompt
 
-        # Resume if session_id provided
+        # Resume if session_id provided (must be valid UUID)
         resume_id = params.get("resume")
         if resume_id:
+            import re as _re
+            if not _re.match(r'^[0-9a-fA-F\-]{36}$', resume_id):
+                log(f"Invalid thread ID for resume (not UUID): {resume_id}")
+                send_error(req_id, -32000, f"Cannot resume: invalid thread ID '{resume_id}'")
+                return
             thread_params["threadId"] = resume_id
             start_id = await self.codex_request("thread/resume", thread_params)
         else:
@@ -229,7 +234,13 @@ class CodexBridge:
             thread = thread_result.get("thread", thread_result)
             self.thread_id = thread.get("id") or thread_result.get("threadId")
 
-        self.session_id = self.thread_id or "codex-session"
+        if not self.thread_id:
+            err_msg = f"Failed to {'resume' if resume_id else 'start'} codex thread"
+            log(err_msg)
+            send_error(req_id, -32000, err_msg)
+            return
+
+        self.session_id = self.thread_id
         log(f"Initialized: thread_id={self.thread_id}")
 
         send_result(req_id, {
@@ -341,8 +352,9 @@ class CodexBridge:
 
         # Is it a response to our request?
         if "id" in msg and ("result" in msg or "error" in msg):
-            # Store for _wait_for_response
             req_id = msg["id"]
+            if "error" in msg:
+                log(f"Codex error response for req {req_id}: {msg['error']}")
             if req_id in self._pending_responses:
                 self._pending_responses[req_id].set_result(msg.get("result"))
             return

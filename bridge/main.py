@@ -78,6 +78,10 @@ class Bridge:
         # Queue for injected prompts that arrive when query completes
         self.pending_injects: list[str] = []
 
+        # Track active background tasks
+        self._pending_bg_tasks: set[str] = set()
+        self._bg_tool_use_ids: set[str] = set()
+
         # Notification system (notalone2)
         # notalone handled by global client in plugin
 
@@ -864,15 +868,36 @@ You are subsession **{subsession_id}**. Call signal_complete(session_id={view_id
                 await self.client.query(prompt)
             # Drain stale messages before reading response
             await _drain_stale()
-            # Stream responses (stop emitting if interrupted)
-            async for message in self.client.receive_response():
-                if self.interrupted:
-                    continue  # Drain remaining messages without emitting
-                await self.emit_message(message)
-            status = "interrupted" if self.interrupted else "complete"
-            with open("/tmp/claude_bridge.log", "a") as f:
-                f.write(f"query complete: status={status}\n")
-            send_result(id, {"status": status})
+            turn_done = False
+            async for message in self.client.receive_messages():
+                # Track background tasks
+                if isinstance(message, SystemMessage):
+                    data = message.data or {}
+                    if message.subtype == "task_started":
+                        tool_use_id = data.get("tool_use_id", "")
+                        task_id = data.get("task_id", "")
+                        if tool_use_id in self._bg_tool_use_ids:
+                            self._pending_bg_tasks.add(task_id)
+                    elif message.subtype == "task_updated" and (data.get("patch") or {}).get("is_backgrounded"):
+                        self._pending_bg_tasks.add(data.get("task_id", ""))
+                    elif message.subtype == "task_notification":
+                        self._pending_bg_tasks.discard(data.get("task_id", ""))
+                if not turn_done:
+                    if self.interrupted and not isinstance(message, ResultMessage):
+                        continue
+                    await self.emit_message(message)
+                    if isinstance(message, ResultMessage):
+                        status = "interrupted" if self.interrupted else "complete"
+                        send_result(id, {"status": status})
+                        turn_done = True
+                        if not self._pending_bg_tasks:
+                            break
+                else:
+                    # Post-turn: forward system messages for background task updates
+                    if isinstance(message, SystemMessage):
+                        await self.emit_message(message)
+                    if not self._pending_bg_tasks:
+                        break
 
         self.current_task = asyncio.create_task(run_query())
         try:
@@ -939,12 +964,15 @@ You are subsession **{subsession_id}**. Call signal_complete(session_id={view_id
                     pass
                 elif isinstance(block, ToolUseBlock):
                     tool_input = block.input or {}
+                    is_bg = bool(tool_input.get("run_in_background") if isinstance(tool_input, dict) else False)
+                    if is_bg:
+                        self._bg_tool_use_ids.add(block.id)
                     send_notification("message", {
                         "type": "tool_use",
                         "id": block.id,
                         "name": block.name,
                         "input": tool_input,
-                        "background": bool(tool_input.get("run_in_background") if isinstance(tool_input, dict) else False),
+                        "background": is_bg,
                     })
                 elif isinstance(block, ToolResultBlock):
                     with open("/tmp/claude_bridge.log", "a") as f:

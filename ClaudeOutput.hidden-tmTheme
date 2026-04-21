@@ -55,6 +55,19 @@
             </dict>
         </dict>
 
+        <!-- Claude-specific: Tool background -->
+        <dict>
+            <key>name</key>
+            <string>Tool Background</string>
+            <key>scope</key>
+            <string>claude.tool.background</string>
+            <key>settings</key>
+            <dict>
+                <key>foreground</key>
+                <string>#7a8a9a</string>
+            </dict>
+        </dict>
+
         <!-- Claude-specific: Tool done -->
         <dict>
             <key>name</key>

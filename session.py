@@ -88,6 +88,8 @@ class Session:
         # Draft prompt (persists across input panel open/close)
         self.draft_prompt: str = ""
         self._pending_resume_at: Optional[str] = None  # Set by undo, consumed by next query
+        # Background task tracking: task_id → tool_use_id
+        self._task_tool_map: Dict[str, str] = {}
         # Track if we've entered input mode after last query
         self._input_mode_entered: bool = False
         # Callback for channel mode responses
@@ -272,8 +274,7 @@ class Session:
         self.working = False
         self.current_tool = None
         self.last_activity = time.time()
-        if self._pending_resume_at:
-            self._pending_resume_at = None
+        # Keep _pending_resume_at alive for consecutive undo support
         self._input_mode_entered = False  # Reset for fresh start after init
         # Capture session_id from initialize response (set via --session-id CLI arg)
         if result.get("session_id"):
@@ -794,6 +795,7 @@ class Session:
         self.working = True
         self.query_count += 1
         self.draft_prompt = ""  # Clear draft — query submitted
+        self._pending_resume_at = None  # New query advances past any rewind point
         self._input_mode_entered = False  # Reset so input mode can be entered when query completes
 
         # Mark this session as the currently executing session for MCP tools
@@ -986,6 +988,7 @@ class Session:
             self.output.view.sel().clear()
             self.output.view.sel().add(sublime.Region(end, end))
 
+
     def queue_prompt(self, prompt: str) -> None:
         """Inject a prompt into the current query stream."""
         self._status(f"injected: {prompt[:30]}...")
@@ -1158,6 +1161,14 @@ class Session:
 
     def _show_connecting_phantom(self) -> None:
         self._show_overlay_phantom("◎ Connecting...")
+
+    def restart(self) -> None:
+        """Restart session — sleep then immediately wake."""
+        def do_wake():
+            if self.output and self.output.view and self.output.view.settings().get("claude_sleeping"):
+                self.wake()
+        self.sleep()
+        sublime.set_timeout(do_wake, 600)
 
     def wake(self) -> None:
         """Wake a sleeping session — re-spawn bridge with resume."""
@@ -1477,6 +1488,11 @@ class Session:
                 self.current_tool = None
                 return
 
+            if was_background:
+                # Background tool_result is just an ack ("running in background..."),
+                # not the final result. Status change comes from task_notification.
+                return
+
             if tool_name in ("Edit", "Write") and not is_error:
                 self._record_edit(tool_name)
 
@@ -1485,8 +1501,7 @@ class Session:
             else:
                 self.output.tool_done(tool_name, content, tool_id=tool_use_id)
 
-            # Only clear current_tool if this was the foreground tool
-            if not was_background and tool_name == self.current_tool:
+            if tool_name == self.current_tool:
                 self.current_tool = None
             self._update_status_bar()
         elif t in ("text_delta", "text"):
@@ -1515,10 +1530,56 @@ class Session:
         elif t == "system":
             subtype = params.get("subtype", "")
             data = params.get("data", {})
+
             if subtype == "compact_boundary":
                 self.context_usage = None
                 self._update_status_bar()
                 self._inject_retain_midquery()
+            elif subtype == "task_started":
+                task_id = data.get("task_id", "")
+                tool_use_id = data.get("tool_use_id", "")
+                if task_id and tool_use_id:
+                    self._task_tool_map[task_id] = tool_use_id
+            elif subtype == "task_updated":
+                task_id = data.get("task_id", "")
+                patch = data.get("patch", {})
+                if patch.get("is_backgrounded"):
+                    tool_use_id = self._task_tool_map.get(task_id)
+                    if tool_use_id:
+                        tool = self.output.find_tool_by_id(tool_use_id)
+                        if tool and tool.status != "background":
+                            from .output import BACKGROUND
+                            tool.status = BACKGROUND
+                            if self.output._is_in_current(tool):
+                                self.output._render_current()
+                            else:
+                                self.output._patch_tool_symbol(tool, "pending")
+            elif subtype == "task_notification":
+                task_id = data.get("task_id", "")
+                status = data.get("status", "")
+                tool_use_id = self._task_tool_map.pop(task_id, None)
+                if tool_use_id and status == "completed":
+                    tool = self.output.find_tool_by_id(tool_use_id)
+                    if tool and tool.status == "background":
+                        from .output import DONE
+                        old_status = tool.status
+                        tool.status = DONE
+                        self.output._patch_tool_symbol(tool, old_status)
+                        # Feed result back to agent
+                        output = ""
+                        output_file = data.get("output_file", "")
+                        if output_file:
+                            try:
+                                with open(output_file, "r") as f:
+                                    output = f.read().strip()
+                            except Exception:
+                                pass
+                        summary = data.get("summary", "")
+                        wake_prompt = f"<task-notification>{summary}\n{output}</task-notification>" if output else f"<task-notification>{summary}</task-notification>"
+                        if self.working:
+                            self._queued_prompts.append(wake_prompt)
+                        else:
+                            self.query(wake_prompt, display_prompt=f"⚙ {summary}", silent=True)
 
     def _set_name(self, name: str) -> None:
         """Set session name and update UI."""
@@ -1577,9 +1638,6 @@ class Session:
             parts.append(f"${self.total_cost:.4f}")
         if self.query_count > 0:
             parts.append(f"{self.query_count}q")
-        bg_count = self.output.background_tool_count() if self.output else 0
-        if bg_count:
-            parts.append(f"bg:{bg_count}")
         if self.context_usage:
             ctx_k = self._context_tokens_k()
             if ctx_k is not None:

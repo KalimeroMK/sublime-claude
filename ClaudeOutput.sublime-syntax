@@ -33,6 +33,10 @@ contexts:
     - match: '^\s*☐ .+$'
       scope: claude.tool.pending
 
+    # Tool background
+    - match: '^\s*⚙ .+$'
+      scope: claude.tool.background
+
     # Tool done
     - match: '^\s*✔ .+$'
       scope: claude.tool.done

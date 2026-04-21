@@ -310,8 +310,9 @@ class OutputView:
                 is_input_marker = line.startswith(self._input_marker) and ' ▶' not in line
                 # Context line: only treat as stale if we don't have actual pending context
                 is_context_line = line.startswith('📎 ') and not has_pending_context
-                # print(f"[Claude] enter_input_mode: line[{i}]={repr(line)}, is_input_marker={is_input_marker}, is_context_line={is_context_line}")
-                if is_input_marker or is_context_line:
+                # Background task hint lines from previous input mode
+                is_bg_hint = line.strip().startswith(('⚙ ', '✔ ', '✘ '))
+                if is_input_marker or is_context_line or is_bg_hint:
                     cleanup_start = len('\n'.join(lines[:i]))
                     if i > 0:
                         cleanup_start += 1
@@ -360,6 +361,13 @@ class OutputView:
             # print(f"[Claude] enter_input_mode: adding newline prefix")
             self.view.run_command("append", {"characters": prefix})
         self._input_area_start = self.view.size()
+
+        # Add background task hints
+        bg_tools = self.active_background_tools()
+        if bg_tools:
+            for bt in bg_tools:
+                detail = self._format_tool_detail(bt)
+                self.view.run_command("append", {"characters": f"  ⚙ {bt.name}{detail}\n"})
 
         # Add context line if any
         from . import claude_code
@@ -635,9 +643,13 @@ class OutputView:
         self._render_current()
 
     def _find_pending_or_background_by_id(self, tool_id: str) -> Optional[ToolCall]:
-        """Find a ToolCall by id across ALL conversations (background may span turns)."""
+        """Find a ToolCall by id across ALL conversations including current."""
         if not tool_id:
             return None
+        if self.current:
+            for event in self.current.events:
+                if isinstance(event, ToolCall) and event.id == tool_id:
+                    return event
         for conv in self.conversations:
             for event in conv.events:
                 if isinstance(event, ToolCall) and event.id == tool_id:
@@ -647,13 +659,40 @@ class OutputView:
     def find_tool_by_id(self, tool_id: str) -> Optional[ToolCall]:
         return self._find_pending_or_background_by_id(tool_id)
 
-    def background_tool_count(self) -> int:
-        n = 0
+    def active_background_tools(self) -> list:
+        """Get all currently running background tools."""
+        result = []
         for conv in self.conversations:
             for event in conv.events:
                 if isinstance(event, ToolCall) and event.status == BACKGROUND:
-                    n += 1
-        return n
+                    result.append(event)
+        if self.current:
+            for event in self.current.events:
+                if isinstance(event, ToolCall) and event.status == BACKGROUND:
+                    result.append(event)
+        return result
+
+    def _is_in_current(self, target: ToolCall) -> bool:
+        """Check if a tool call belongs to the current conversation."""
+        if not self.current:
+            return False
+        return any(e is target for e in self.current.events)
+
+    def _patch_tool_symbol(self, target: ToolCall, old_status: str) -> None:
+        """Patch a tool's symbol in-place in the view (for previous conversations)."""
+        if not self.view:
+            return
+        old_sym = self.SYMBOLS.get(old_status, "☐")
+        new_sym = self.SYMBOLS.get(target.status, "☐")
+        if old_sym == new_sym:
+            return
+        content = self.view.substr(sublime.Region(0, self.view.size()))
+        # Find the tool line: "  ⚙ ToolName: ..." and replace the symbol
+        import re
+        pattern = re.escape(f"  {old_sym} {target.name}")
+        for m in re.finditer(pattern, content):
+            self._replace(m.start() + 2, m.start() + 2 + len(old_sym), new_sym)
+            return
 
     def tool_done(self, name: str, result: str = None, tool_id: str = None) -> None:
         """Mark tool as done. Prefer tool_id match, fall back to name+PENDING."""
@@ -668,9 +707,13 @@ class OutputView:
                 self.current.events.append(ToolCall(name=name, tool_input={}, status=DONE, result=result, id=tool_id))
                 self._render_current()
             return
+        old_status = target.status
         target.status = DONE
         target.result = result
-        self._render_current()
+        if self._is_in_current(target):
+            self._render_current()
+        else:
+            self._patch_tool_symbol(target, old_status)
 
     def tool_error(self, name: str, result: str = None, tool_id: str = None) -> None:
         """Mark tool as error. Prefer tool_id match, fall back to name+PENDING."""
@@ -685,9 +728,13 @@ class OutputView:
                 self.current.events.append(ToolCall(name=name, tool_input={}, status=ERROR, result=result, id=tool_id))
                 self._render_current()
             return
+        old_status = target.status
         target.status = ERROR
         target.result = result
-        self._render_current()
+        if self._is_in_current(target):
+            self._render_current()
+        else:
+            self._patch_tool_symbol(target, old_status)
 
     def text(self, content: str) -> None:
         """Add response text."""

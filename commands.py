@@ -642,11 +642,20 @@ class ClaudeSelectModelCommand(sublime_plugin.WindowCommand):
             mid = model_ids[idx]
             from .session import _resolve_model_id
             real_model, ctx = _resolve_model_id(mid)
+            if ctx:
+                if sublime.ok_cancel_dialog(
+                    f"Context limit ({ctx // 1000}K) requires session restart.\n\nRestart session with {mid}?",
+                    "Restart"
+                ):
+                    settings = sublime.load_settings("ClaudeCode.sublime-settings")
+                    default_models = settings.get("default_models", {})
+                    default_models[s.backend] = mid
+                    settings.set("default_models", default_models)
+                    sublime.save_settings("ClaudeCode.sublime-settings")
+                    s.restart()
+                return
             if s.client:
-                params = {"model": real_model}
-                if ctx:
-                    params["max_context_tokens"] = ctx
-                s.client.send("set_model", params)
+                s.client.send("set_model", {"model": real_model})
             sublime.status_message(f"Model: {mid}")
 
         self.window.show_quick_panel(items, on_select)
