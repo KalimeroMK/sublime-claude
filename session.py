@@ -146,7 +146,7 @@ class Session:
 
         # Resolve virtual model ID (e.g. @400k suffix) → real model + context limit
         default_models = settings.get("default_models", {})
-        _backend_fallback_models = {"deepseek": "deepseek-v4-pro"}
+        _backend_fallback_models = {"deepseek": "deepseek-v4-pro", "codex": "gpt-5.5"}
         default_model = default_models.get(self.backend) or _backend_fallback_models.get(self.backend) or settings.get("default_model")
         model_for_env = (self.profile.get("model") if self.profile else None) or default_model
         if model_for_env:
