@@ -493,7 +493,7 @@ Agents run with separate context, preventing conversation bloat. Custom agents o
 ```
 ┌─────────────────┐     JSON-RPC/stdio     ┌─────────────────┐
 │  Sublime Text   │ ◄────────────────────► │  bridge/main.py │ (Kimi/Claude)
-│  (Python 3.8)   │                        │  claude CLI wrapper│
+│  (Python 3.8)   │                        │  (CLI wrapper)  │
 │                 │                        └─────────────────┘
 │                 │     JSON-RPC/stdio     ┌─────────────────┐
 │                 │ ◄────────────────────► │  bridge/openai_ │ (Ollama/OpenAI)
