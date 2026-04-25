@@ -104,7 +104,8 @@ class ClaudeCodeStartCommand(sublime_plugin.WindowCommand):
 
         # If profile specified directly, use it
         if profile:
-            profile_config = profiles.get(profile, {})
+            profile_config = profiles.get(profile, {}).copy()
+            profile_config["_name"] = profile  # Store name for status bar
             create_session(self.window, profile=profile_config, backend=backend)
             return
 
@@ -147,7 +148,8 @@ class ClaudeCodeStartCommand(sublime_plugin.WindowCommand):
             elif opt_type == "persona":
                 self._show_persona_picker(opt_name, backend=backend)  # opt_name contains the URL
             elif opt_type == "profile":
-                profile_config = profiles.get(opt_name, {})
+                profile_config = profiles.get(opt_name, {}).copy()
+                profile_config["_name"] = opt_name  # Store name for status bar
                 create_session(self.window, profile=profile_config, backend=backend)
             elif opt_type == "checkpoint":
                 checkpoint = checkpoints.get(opt_name, {})
@@ -1410,7 +1412,9 @@ class ClaudeCodeSwitchCommand(sublime_plugin.WindowCommand):
         for name, config in profiles.items():
             desc = config.get("description", f"{config.get('model', 'default')} model")
             items.append([f"😶 {backend_prefix}{name}", desc])
-            actions.append(("profile", config))
+            config_with_name = config.copy()
+            config_with_name["_name"] = name
+            actions.append(("profile", config_with_name))
 
         if backend == "claude":
             for name, config in checkpoints.items():
@@ -1619,7 +1623,9 @@ class ClaudeCodeSwitchCommand(sublime_plugin.WindowCommand):
         for name, config in profiles.items():
             desc = config.get("description", f"{config.get('model', 'default')} model")
             items.append([f"📋 {name}", desc])
-            actions.append(("profile", config))
+            config_with_name = config.copy()
+            config_with_name["_name"] = name
+            actions.append(("profile", config_with_name))
 
         # Checkpoints
         for name, config in checkpoints.items():

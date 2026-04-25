@@ -811,7 +811,8 @@ class MCPSocketServer:
         if profile:
             if profile not in profiles:
                 return {"error": f"Profile '{profile}' not found"}
-            profile_config = profiles[profile]
+            profile_config = profiles[profile].copy()
+            profile_config["_name"] = profile  # Store name for status bar
 
         # Load persona config if specified (overrides profile)
         if persona_id:
