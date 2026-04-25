@@ -316,22 +316,56 @@ You are subsession **{subsession_id}**. Call signal_complete(session_id={view_id
 
 
     def _load_mcp_servers(self, cwd: str) -> dict:
-        """Return built-in sublime MCP server only.
-
-        Other MCP servers are loaded by SDK via setting_sources: ["user", "project"].
-        """
+        """Load MCP servers from global config (~/.claude.json), project config,
+        and built-in sublime MCP server."""
         servers = {}
 
-        # Always include the built-in sublime MCP server
+        # 1. Global MCP servers from ~/.claude.json (Claude CLI global config)
+        global_mcp_path = os.path.expanduser("~/.claude.json")
+        if os.path.exists(global_mcp_path):
+            try:
+                with open(global_mcp_path) as f:
+                    global_config = json.load(f)
+                global_servers = global_config.get("mcpServers", {})
+                servers.update(global_servers)
+                _logger.info(f"  Loaded global MCP servers from ~/.claude.json: {list(global_servers.keys())}")
+            except Exception as e:
+                _logger.warning(f"  Failed to load ~/.claude.json: {e}")
+
+        # 2. Project MCP servers from .claude/settings.json
+        if cwd:
+            project_settings_path = os.path.join(cwd, ".claude", "settings.json")
+            if os.path.exists(project_settings_path):
+                try:
+                    with open(project_settings_path) as f:
+                        project_config = json.load(f)
+                    project_servers = project_config.get("mcpServers", {})
+                    servers.update(project_servers)
+                    _logger.info(f"  Loaded project MCP servers from .claude/settings.json: {list(project_servers.keys())}")
+                except Exception as e:
+                    _logger.warning(f"  Failed to load project settings: {e}")
+
+            # 3. Fallback: .mcp.json in project root
+            mcp_fallback_path = os.path.join(cwd, ".mcp.json")
+            if os.path.exists(mcp_fallback_path):
+                try:
+                    with open(mcp_fallback_path) as f:
+                        fallback_config = json.load(f)
+                    fallback_servers = fallback_config.get("mcpServers", {})
+                    servers.update(fallback_servers)
+                    _logger.info(f"  Loaded project MCP servers from .mcp.json: {list(fallback_servers.keys())}")
+                except Exception as e:
+                    _logger.warning(f"  Failed to load .mcp.json: {e}")
+
+        # 4. Always include the built-in sublime MCP server
         bridge_dir = os.path.dirname(os.path.abspath(__file__))
         plugin_dir = os.path.dirname(bridge_dir)
         mcp_server_path = os.path.join(plugin_dir, "mcp", "server.py")
 
         if os.path.exists(mcp_server_path):
-            # Pass view_id so MCP server can inject it into spawn_session calls
             view_id_arg = f"--view-id={self._view_id}" if self._view_id else ""
             servers["sublime"] = {
-                "command": sys.executable,  # Use same python as bridge
+                "command": sys.executable,
                 "args": [mcp_server_path, view_id_arg] if view_id_arg else [mcp_server_path]
             }
 
