@@ -1,15 +1,6 @@
 [
     {
         "button": "button1",
-        "count": 2,
-        "modifiers": [],
-        "press_command": "claude_order_goto",
-        "context": [
-            { "key": "setting.order_table_view", "operator": "equal", "operand": true }
-        ]
-    },
-    {
-        "button": "button1",
         "count": 1,
         "modifiers": ["super"],
         "command": "claude_open_link",

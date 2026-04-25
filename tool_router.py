@@ -232,47 +232,6 @@ def create_sublime_router() -> ToolRouter:
     router.register("chatroom", chatroom_handler)
 
     # ─── Order Table ───────────────────────────────────────────────────────
-    def order_handler(args: Dict[str, Any]) -> str:
-        import shlex
-        cmd = args.get("cmd", "").strip()
-        if not cmd:
-            return "return {'error': 'Empty command'}"
-
-        try:
-            parts = shlex.split(cmd)
-        except ValueError as e:
-            return f"return {{'error': 'Parse error: {e}'}}"
-
-        if not parts:
-            return "return {'error': 'Empty command'}"
-
-        action = parts[0].lower()
-
-        if action == 'list':
-            state = parts[1] if len(parts) > 1 else None
-            return f"return order_table_cmd('list', state={state!r})"
-        elif action == 'complete':
-            if len(parts) < 2:
-                return "return {'error': 'Usage: complete <order_id>'}"
-            return f"return order_table_cmd('complete', order_id={parts[1]!r})"
-        elif action == 'pending':
-            return "return order_table_cmd('list', state='pending')"
-        elif action == 'subscribe':
-            wake_prompt = ' '.join(parts[1:]) if len(parts) > 1 else None
-            return f"return order_table_cmd('subscribe', wake_prompt={wake_prompt!r})"
-        elif action == 'claim':
-            if len(parts) < 2:
-                return "return {'error': 'Usage: claim <order_id>'}"
-            return f"return order_table_cmd('claim', order_id={parts[1]!r})"
-        elif action == 'release':
-            if len(parts) < 2:
-                return "return {'error': 'Usage: release <order_id>'}"
-            return f"return order_table_cmd('release', order_id={parts[1]!r})"
-        else:
-            return f"return {{'error': 'Unknown command: {action}. Try: list, pending, complete <id>, claim <id>, release <id>, subscribe'}}"
-
-    router.register("order", order_handler)
-
     # ─── LSP ──────────────────────────────────────────────────────────────
     def lsp_handler(args: Dict[str, Any]) -> str:
         cmd = args.get("cmd", "").strip()
@@ -309,10 +268,6 @@ def create_sublime_router() -> ToolRouter:
             return f"return {{'error': 'Unknown lsp command: {action}. Try: hover, definition, references, symbols, workspace_symbols, diagnostics'}}"
 
     router.register("lsp", lsp_handler)
-
-    # ─── Garage Session Search ────────────────────────────────────────────
-    router.register("garage_search", lambda args:
-        f"return garage_search({args.get('query', '')!r}, {args.get('k', 5)})")
 
     return router
 

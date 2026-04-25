@@ -79,10 +79,6 @@ All commands available via Command Palette (`Cmd+Shift+P`): type "Claude"
 | Clear Context | - | Clear pending context |
 | New Session | - | Start a fresh session (auto-detects backend) |
 | New Session with Backend... | - | Pick backend manually |
-| OpenAI: New Session | - | Force Ollama/OpenAI backend |
-| Codex: New Session | - | Start a fresh Codex session |
-| Copilot: New Session | - | Start a fresh Copilot session |
-| DeepSeek: New Session | - | Start a fresh DeepSeek session |
 | Configure Settings | - | Open settings file |
 | Undo Message | - | Rewind last conversation turn |
 | Search Sessions | - | Search all sessions by title |
@@ -268,7 +264,6 @@ Supports wildcards (`*`) for pattern matching. User-level settings apply to all 
       "/path/to/extra/dir",
       "~/another/dir"
     ],
-    "claude_retain": "Important context to preserve across compactions",
     "claude_env": {
       "MY_VAR": "value"
     }
@@ -277,7 +272,6 @@ Supports wildcards (`*`) for pattern matching. User-level settings apply to all 
 ```
 
 - **claude_additional_dirs** — Extra `--add-dir` paths for CLI access
-- **claude_retain** — Content preserved across context compactions
 - **claude_env** — Environment variables passed to bridge
 
 ## Context
@@ -311,44 +305,6 @@ Sessions can be put to sleep to free bridge subprocess resources while keeping t
 - **Wake** — press Enter in a sleeping view, or use **Wake Session** command
 - Switch panel shows sleeping sessions with `⏸` indicator
 - `auto_sleep_minutes` setting auto-sleeps idle sessions (default: 60, 0 = disabled)
-
-## Order Table
-
-A simple TODO list for human→agent task assignments. Add orders (tasks) that agents can subscribe to and complete.
-
-### Commands
-
-| Command | Keybinding | Description |
-|---------|------------|-------------|
-| Add Order at Cursor | `Cmd+Shift+O` | Pin an order at current cursor location |
-| Add Order | - | Add order without file location |
-| Show Order Table | `Cmd+Alt+O` | Open the order table view |
-
-### Order Table View
-
-The order table shows pending and completed orders:
-
-| Key | Action |
-|-----|--------|
-| `Enter` / `g` | Go to order location |
-| `Cmd+Backspace` | Delete order |
-| `u` / `Cmd+Z` | Undo deletion |
-| `a` | Add new order |
-
-Orders pinned at cursor positions show a bookmark icon in the gutter.
-
-### Agent Subscription
-
-Agents can subscribe to order notifications via MCP:
-
-```
-order("subscribe Check for new orders")  # Subscribe with wake prompt
-order("list")                            # List all orders
-order("pending")                         # List pending orders only
-order("complete order_1")                # Mark order as done
-```
-
-When a new order is added, subscribed agents receive a notification with order details.
 
 ## Output View
 

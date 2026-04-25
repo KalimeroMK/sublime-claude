@@ -202,11 +202,6 @@ class Session:
         # Activity tracking for auto-sleep
         self.last_activity: float = time.time()
 
-        # Terminal mode state
-        self.terminal_mode: bool = False
-        self._terminal_tag: Optional[str] = None
-        self._terminal_poll_active: bool = False
-
         # Plan mode state
         self.plan_mode: bool = False
         self.plan_file: Optional[str] = None
@@ -600,78 +595,6 @@ class Session:
             # Store retain content to send after interrupt completes
             self._pending_retain = f"[retain context]\n\n{content}"
             self.interrupt(break_channel=False)
-
-    def _record_edit(self, tool_name: str):
-        """Record an Edit/Write operation to the order table's edit log."""
-        from .order_table import get_table, refresh_order_table
-
-        # Get tool input from current conversation
-        if not self.output.current:
-            return
-        tools = self.output.current.tools
-        if not tools:
-            return
-
-        # Find the most recent tool of this type that's still pending
-        tool_input = None
-        for tool in reversed(tools):
-            if tool.name == tool_name and tool.status == "pending":
-                tool_input = tool.tool_input
-                break
-        if not tool_input:
-            return
-
-        file_path = tool_input.get("file_path") or tool_input.get("notebook_path")
-        if not file_path:
-            return
-
-        # Calculate line number, diff stats, and context
-        if tool_name == "Edit":
-            old = tool_input.get("old_string", "")
-            new = tool_input.get("new_string", "")
-            line_num = self._find_edit_line(file_path, new or old)
-            lines_added = len(new.splitlines()) if new else 0
-            lines_removed = len(old.splitlines()) if old else 0
-            context = self._extract_edit_context(new)
-        else:  # Write
-            content = tool_input.get("content", "")
-            line_num = 1
-            lines_added = len(content.splitlines())
-            lines_removed = 0
-            context = os.path.basename(file_path)
-
-        table = get_table(self.window)
-        if table:
-            agent_name = self.name or f"view_{self.output.view.id()}" if self.output.view else "unknown"
-            view_id = self.output.view.id() if self.output.view else 0
-            table.add_edit(agent_name, view_id, file_path, line_num or 1,
-                          lines_added, lines_removed, tool_name, context)
-            refresh_order_table(self.window)
-
-    def _extract_edit_context(self, text: str) -> str:
-        """Extract first meaningful line as context."""
-        if not text:
-            return ""
-        for line in text.split('\n'):
-            line = line.strip()
-            if line and not line.startswith('#') and not line.startswith('//'):
-                # Truncate and clean
-                return line[:50].strip()
-        return ""
-
-    def _find_edit_line(self, file_path: str, search: str) -> int:
-        """Find line number where content occurs in file."""
-        if not search or not os.path.exists(file_path):
-            return None
-        try:
-            with open(file_path, 'r', encoding='utf-8', errors='replace') as f:
-                content = f.read()
-            pos = content.find(search)
-            if pos >= 0:
-                return content[:pos].count('\n') + 1
-        except Exception:
-            pass
-        return None
 
     def _build_profile_docs_list(self) -> None:
         """Build list of available docs from profile preload_docs patterns (no reading yet)."""
@@ -1194,15 +1117,6 @@ class Session:
         # Persist closed state before cleanup
         self._persist_state("closed")
 
-        # Clean up terminal mode if active
-        if self.terminal_mode:
-            self._terminal_poll_active = False
-            tv = self._find_terminal_view()
-            if tv and tv.is_valid():
-                tv.close()
-            self.terminal_mode = False
-            self._terminal_tag = None
-
         # Release persona if acquired
         if self.persona_session_id and self.persona_url:
             self._release_persona()
@@ -1315,9 +1229,6 @@ class Session:
             return
         if not self.session_id:
             return
-        self.terminal_mode = False
-        self._terminal_poll_active = False
-        self._terminal_tag = None
         self._clear_overlay_phantom()
         if self.output and self.output.view:
             view = self.output.view
@@ -1334,155 +1245,6 @@ class Session:
         self._persist_state("open")
         if self.output and self.output.view:
             self.output.set_name(self.display_name)
-
-    # ─── Terminal Mode ─────────────────────────────────────────────────
-
-    def enter_terminal_mode(self) -> bool:
-        """Switch from bridge mode to CLI terminal mode."""
-        if not self.session_id or self.terminal_mode:
-            return False
-        if self.working:
-            sublime.status_message("Can't switch to terminal mode while working")
-            return False
-        cli_cmd = self._resolve_cli_command()
-        if not cli_cmd:
-            sublime.status_message("No CLI available for this backend")
-            return False
-
-        # Record JSONL position so we can replay new entries on return
-        jsonl_path = self._find_jsonl_path()
-        self._terminal_jsonl_pos = os.path.getsize(jsonl_path) if jsonl_path else 0
-
-        self.sleep()
-        self.terminal_mode = True
-        self._terminal_tag = f"claude-terminal-{self.session_id[:12]}"
-        self._show_overlay_phantom("\u2b1b Terminal mode \u2014 CLI running in terminal")
-        self._persist_state("terminal")
-        self._open_terminal(cli_cmd)
-        self._poll_terminal_exit()
-        return True
-
-    def _resolve_cli_command(self) -> list:
-        import shutil
-        settings = sublime.load_settings("ClaudeCode.sublime-settings")
-        if self.backend == "codex":
-            cli = settings.get("codex_cli_path") or shutil.which("codex") or "codex"
-            return [cli, "resume", self.session_id]
-        elif self.backend == "copilot":
-            return None  # No CLI available
-        else:
-            cli = settings.get("claude_cli_path") or shutil.which("claude") or "claude"
-            return [cli, "--resume", self.session_id]
-
-    def _open_terminal(self, cli_cmd: list) -> None:
-        cwd = self._cwd()
-        tag = self._terminal_tag
-        name = self.display_name
-        window_id = self.window.id()
-
-        def do_open():
-            for w in sublime.windows():
-                if w.id() == window_id:
-                    w.run_command("terminus_open", {
-                        "tag": tag,
-                        "title": f"CLI: {name}",
-                        "cmd": cli_cmd,
-                        "cwd": cwd,
-                        "focus": True,
-                    })
-                    break
-        sublime.set_timeout(do_open, 50)
-
-    def _poll_terminal_exit(self) -> None:
-        self._terminal_poll_active = True
-
-        def check():
-            if not self.terminal_mode or not self._terminal_poll_active:
-                return
-            tv = self._find_terminal_view()
-            if tv is None or tv.settings().get("terminus_view.finished"):
-                self._on_terminal_exit()
-                return
-            sublime.set_timeout(check, 500)
-
-        sublime.set_timeout(check, 500)
-
-    def _find_terminal_view(self):
-        if not self._terminal_tag:
-            return None
-        for view in self.window.views():
-            if view.settings().get("terminus_view.tag") == self._terminal_tag:
-                return view
-        return None
-
-    def _on_terminal_exit(self) -> None:
-        self._terminal_poll_active = False
-        self.terminal_mode = False
-        tv = self._find_terminal_view()
-        if tv and tv.settings().get("terminus_view.finished"):
-            sublime.set_timeout(lambda: tv.close() if tv.is_valid() else None, 200)
-        self._terminal_tag = None
-        if self.output and self.output.view and self.output.view.is_valid():
-            self._replay_terminal_history()
-            self.wake()
-        else:
-            self._persist_state("closed")
-
-    def _replay_terminal_history(self) -> None:
-        """Render conversation entries added during terminal mode."""
-        jsonl_path = self._find_jsonl_path()
-        start_pos = getattr(self, '_terminal_jsonl_pos', 0)
-        if not jsonl_path or not os.path.exists(jsonl_path):
-            return
-        try:
-            with open(jsonl_path, "r") as f:
-                f.seek(start_pos)
-                new_lines = f.readlines()
-        except Exception:
-            return
-        if not new_lines:
-            return
-        # Parse and render new conversation turns
-        for line in new_lines:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                entry = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if entry.get("isSidechain") or entry.get("isMeta"):
-                continue
-            etype = entry.get("type")
-            if etype == "user":
-                msg = entry.get("message", {})
-                content = msg.get("content", [])
-                # Skip tool_result messages
-                if isinstance(content, list) and any(
-                    isinstance(b, dict) and b.get("type") == "tool_result" for b in content
-                ):
-                    continue
-                prompt = ""
-                if isinstance(content, str):
-                    prompt = content
-                elif isinstance(content, list):
-                    for block in content:
-                        if isinstance(block, dict) and block.get("type") == "text":
-                            prompt += block.get("text", "")
-                if prompt:
-                    self.output.text(f"\n◎ {prompt} ▶\n\n")
-            elif etype == "assistant":
-                msg = entry.get("message", {})
-                content = msg.get("content", [])
-                if isinstance(content, list):
-                    for block in content:
-                        if isinstance(block, dict) and block.get("type") == "text":
-                            text = block.get("text", "")
-                            if text:
-                                self.output.text(text)
-                elif isinstance(content, str) and content:
-                    self.output.text(content)
-        self.output.text("\n")
 
     def _persist_state(self, state: str) -> None:
         """Save session with explicit state override."""
@@ -1631,9 +1393,6 @@ class Session:
                 # Background tool_result is just an ack ("running in background..."),
                 # not the final result. Status change comes from task_notification.
                 return
-
-            if tool_name in ("Edit", "Write") and not is_error:
-                self._record_edit(tool_name)
 
             if is_error:
                 self.output.tool_error(tool_name, content, tool_id=tool_use_id)

@@ -78,13 +78,6 @@ def plugin_loaded() -> None:
 
     sublime.set_timeout(register_orphans, 500)
 
-    # Sync order table bookmarks after windows are ready
-    def sync_orders():
-        from .order_table import sync_bookmarks
-        for window in sublime.windows():
-            sync_bookmarks(window)
-
-    sublime.set_timeout(sync_orders, 1000)
 
 
 def plugin_unloaded() -> None:

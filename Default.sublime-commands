@@ -4,22 +4,6 @@
         "command": "claude_code_query"
     },
     {
-        "caption": "Codex: New Session",
-        "command": "codex_start"
-    },
-    {
-        "caption": "Copilot: New Session",
-        "command": "copilot_start"
-    },
-    {
-        "caption": "OpenAI: New Session",
-        "command": "openai_start"
-    },
-    {
-        "caption": "OpenAI: Configure Settings",
-        "command": "openai_settings"
-    },
-    {
         "caption": "Claude: Query Selection",
         "command": "claude_code_query_selection"
     },
@@ -136,10 +120,6 @@
         "command": "claude_code_toggle_permission_mode"
     },
     {
-        "caption": "Claude: Add MCP Tools to Project",
-        "command": "claude_code_add_mcp"
-    },
-    {
         "caption": "Claude: Manage Auto-Allowed Tools...",
         "command": "claude_code_manage_auto_allowed_tools"
     },
@@ -164,51 +144,8 @@
         "command": "claude_code_usage"
     },
     {
-        "caption": "Claude: Add Order at Cursor",
-        "command": "claude_add_order"
-    },
-    {
-        "caption": "Claude: Add Order",
-        "command": "claude_add_plain_order"
-    },
-    {
-        "caption": "Claude: Show Order Table",
-        "command": "claude_show_order_table"
-    },
-    {
-        "caption": "Claude: Clear Edits for Current File",
-        "command": "claude_clear_file_edits"
-    },
-    {
-        "caption": "Claude: View Retain Content",
-        "command": "claude_retain",
-        "args": {"action": "view"}
-    },
-    {
-        "caption": "Claude: Edit Retain Content",
-        "command": "claude_retain",
-        "args": {"action": "edit"}
-    },
-    {
-        "caption": "Claude: Clear Retain Content",
-        "command": "claude_retain",
-        "args": {"action": "clear"}
-    },
-    {
-        "caption": "Claude: Edit Project Retain",
-        "command": "claude_project_retain"
-    },
-    {
         "caption": "Claude: Open Link at Cursor",
         "command": "claude_open_link"
-    },
-    {
-        "caption": "Claude: Search Sessions (Garage)...",
-        "command": "claude_garage_search"
-    },
-    {
-        "caption": "Claude: Terminal Mode",
-        "command": "claude_terminal_mode"
     },
     {
         "caption": "Claude: Sleep Session",

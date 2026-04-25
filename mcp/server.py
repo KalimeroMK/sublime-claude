@@ -525,61 +525,6 @@ Examples:
                         "required": ["cmd"]
                     }
                 },
-                # ─── Garage Session Search ──────────────────────────────────
-                {
-                    "name": "garage_search",
-                    "description": """Search indexed Claude sessions using semantic search.
-Returns session IDs that can be used with spawn_session to fork/resume.
-
-Requires garage CLI to be installed. Sessions are indexed from ~/.claude/projects/.
-
-Example response:
-  [{"session_id": "f400b570-...", "short_id": "f400b570", "score": 0.68, "project": "sublime-claude", "turns": 334, "summary": "Add slash command support..."}]""",
-                    "inputSchema": {
-                        "type": "object",
-                        "properties": {
-                            "query": {
-                                "type": "string",
-                                "description": "Search query (semantic)"
-                            },
-                            "k": {
-                                "type": "integer",
-                                "description": "Number of results (default: 5)"
-                            }
-                        },
-                        "required": ["query"]
-                    }
-                },
-                # ─── Order Table ─────────────────────────────────────────────
-                {
-                    "name": "order",
-                    "description": """Order table - human→agent task assignments. Commands:
-- list [state]         → list orders (optional: pending/done)
-- pending              → list pending orders only
-- claim <order_id>     → claim order (prevents other agents working on it)
-- release <order_id>   → release claimed order
-- complete <order_id>  → mark order as done (auto-releases claim)
-- subscribe [prompt]   → subscribe to new order notifications
-
-Claims auto-expire after 10 minutes or when agent session ends.
-Orders are created by user via Cmd+Shift+O at cursor position.
-
-Examples:
-  order("pending")
-  order("claim order_1")
-  order("complete order_1")
-  order("subscribe New order: {context[prompt]}")""",
-                    "inputSchema": {
-                        "type": "object",
-                        "properties": {
-                            "cmd": {
-                                "type": "string",
-                                "description": "Command string, e.g. 'pending' or 'complete order_1'"
-                            }
-                        },
-                        "required": ["cmd"]
-                    }
-                }
             ]
         })
 

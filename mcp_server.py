@@ -343,8 +343,6 @@ class MCPSocketServer:
             "signal_subsession_complete": self._signal_subsession_complete,
             "list_notifications": self._list_notifications,
             "discover_services": self._discover_services,
-            # Order table
-            "order_table_cmd": self._order_table_cmd,
             # LSP tools
             "lsp_hover": self._lsp_hover,
             "lsp_definition": self._lsp_definition,
@@ -2114,82 +2112,6 @@ class MCPSocketServer:
         except Exception as e:
             return {"services": services, "error": str(e)}
 
-    # ─── Order Table ───────────────────────────────────────────────────────
-
-    def _order_table_cmd(self, action: str, **kwargs) -> str:
-        """Dispatch order table commands."""
-        from .order_table import get_table_for_cwd, refresh_order_table
-
-        window = self._get_window()
-        cwd = window.folders()[0] if window and window.folders() else None
-        if not cwd:
-            return "error: No project folder"
-
-        table = get_table_for_cwd(cwd)
-        agent_id = str(self._caller_view_id) if self._caller_view_id else None
-
-        if action == "list":
-            state = kwargs.get("state")
-            orders = table.list(state)
-            if not orders:
-                return "No orders" + (f" ({state})" if state else "")
-            lines = []
-            for o in orders:
-                loc = ""
-                if o.get("file_path"):
-                    loc = f" @ {o['file_path']}:{o.get('row', 0)+1}"
-                if o["state"] == "done":
-                    status = "✓"
-                elif o.get("claimed_by"):
-                    status = f"⏳({o['claimed_by']})"
-                else:
-                    status = "○"
-                lines.append(f"{status} [{o['id']}]{loc} {o['prompt']}")
-            return "\n".join(lines)
-
-        elif action == "complete":
-            order_id = kwargs.get("order_id")
-            if not order_id:
-                return "error: Missing order_id"
-            ok, msg = table.complete(order_id, agent_id)
-            if ok:
-                sublime.set_timeout(lambda: refresh_order_table(window), 100)
-            return f"✓ {order_id} done" if ok else f"error: {msg}"
-
-        elif action == "subscribe":
-            # Local subscription (no daemon needed)
-            from .order_table import subscribe_to_orders
-            wake_prompt = kwargs.get("wake_prompt") or "New order [{context[order_id]}]{context[location]}: {context[prompt]}"
-            view_id = self._caller_view_id
-            if not view_id:
-                return "error: No session view"
-            sub_id = subscribe_to_orders(cwd, view_id, wake_prompt)
-            return f"Subscribed to orders (id: {sub_id})"
-
-        elif action == "claim":
-            order_id = kwargs.get("order_id")
-            if not order_id:
-                return "error: Missing order_id"
-            if not agent_id:
-                return "error: No agent context"
-            ok, msg = table.claim(order_id, agent_id)
-            if ok:
-                sublime.set_timeout(lambda: refresh_order_table(window), 100)
-            return f"✓ Claimed {order_id}" if ok else f"error: {msg}"
-
-        elif action == "release":
-            order_id = kwargs.get("order_id")
-            if not order_id:
-                return "error: Missing order_id"
-            ok, msg = table.release(order_id, agent_id)
-            if ok:
-                sublime.set_timeout(lambda: refresh_order_table(window), 100)
-            return f"✓ Released {order_id}" if ok else f"error: {msg}"
-
-        else:
-            return f"error: Unknown action: {action}"
-
-
 # ============================================================================
 # Chatroom functions
 # ============================================================================
@@ -2276,80 +2198,3 @@ def chatroom_history(room_id: str, limit: int = 50, before_id: int = 0) -> dict:
     return _chatroom_command(req)
 
 
-def garage_search(query: str, k: int = 5) -> list:
-    """Search indexed sessions with garage CLI."""
-    import subprocess
-    import re
-
-    try:
-        result = subprocess.run(
-            ["garage", "search", query, "--k", str(k)],
-            capture_output=True,
-            text=True,
-            timeout=10
-        )
-    except FileNotFoundError:
-        return {"error": "garage CLI not found"}
-    except subprocess.TimeoutExpired:
-        return {"error": "garage search timed out"}
-
-    # Parse output - handles both old and new format
-    results = []
-    lines = result.stdout.strip().split("\n")
-    i = 0
-    while i < len(lines):
-        # New format: 1. [0.696] 2ccb865b  [pil]  Turns: 268
-        new_match = re.match(r'\d+\.\s+\[([0-9.]+)\]\s+([a-f0-9]+)\s+\[([^\]]+)\]\s+Turns:\s*(\d+)', lines[i])
-        if new_match:
-            score = float(new_match.group(1))
-            short_id = new_match.group(2)
-            project = new_match.group(3)
-            turns = int(new_match.group(4))
-            summary = ""
-            full_id = short_id
-            while i + 1 < len(lines) and not re.match(r'\d+\.', lines[i + 1]):
-                i += 1
-                line = lines[i].strip()
-                if line.startswith("- "):
-                    summary = line[2:]
-                elif line.startswith("ID: "):
-                    full_id = line[4:]
-            results.append({
-                "session_id": full_id,
-                "short_id": short_id,
-                "score": score,
-                "project": project,
-                "turns": turns,
-                "summary": summary,
-            })
-            i += 1
-            continue
-
-        # Old format: 1. [0.610] f400b570
-        old_match = re.match(r'\d+\.\s+\[([0-9.]+)\]\s+([a-f0-9]+)', lines[i])
-        if old_match:
-            score = float(old_match.group(1))
-            session_id = old_match.group(2)
-            project = ""
-            turns = 0
-            while i + 1 < len(lines) and not re.match(r'\d+\.', lines[i + 1]):
-                i += 1
-                line = lines[i].strip()
-                if line.startswith("Project:"):
-                    project = line.replace("Project:", "").strip()
-                elif "Turns:" in line:
-                    try:
-                        turns = int(line.split("Turns:")[-1].strip())
-                    except:
-                        pass
-            results.append({
-                "session_id": session_id,
-                "short_id": session_id[:8],
-                "score": score,
-                "project": project,
-                "turns": turns,
-                "summary": "",
-            })
-        i += 1
-
-    return results
