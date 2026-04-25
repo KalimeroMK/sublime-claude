@@ -1106,7 +1106,6 @@ class MCPSocketServer:
         elif not tag:
             # Default tag uses active Claude session's view ID for isolation
             # Each session gets its own terminal to avoid state pollution
-            from . import core
             window = self._get_window()
             # Find active session via window's active view setting
             active_view_id = window.settings().get("claude_active_view") if window else None
@@ -1164,7 +1163,6 @@ class MCPSocketServer:
             tag = f"claude-agent-{target_id}"
         elif not tag:
             # Default tag uses active Claude session's view ID for isolation
-            from . import core
             active_view_id = window.settings().get("claude_active_view") if window else None
             if active_view_id and active_view_id in sublime._claude_sessions:
                 tag = f"claude-agent-{active_view_id}"
@@ -1247,7 +1245,6 @@ class MCPSocketServer:
             tag = f"claude-agent-{target_id}"
         elif not tag:
             # Default tag uses active Claude session's view ID for isolation
-            from . import core
             window = self._get_window()
             active_view_id = window.settings().get("claude_active_view") if window else None
             if active_view_id and active_view_id in sublime._claude_sessions:

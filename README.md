@@ -1,35 +1,34 @@
 # Claude Code for Sublime Text
 
-A Sublime Text plugin for [Claude Code](https://claude.ai/claude-code), [Codex CLI](https://github.com/openai/codex), [GitHub Copilot CLI](https://github.com/features/copilot/cli), and [DeepSeek](https://api-docs.deepseek.com/) integration.
+A Sublime Text plugin for [Kimi](https://kimi.ai/), [Claude Code](https://claude.ai/claude-code), [Ollama](https://ollama.com/), [OpenAI](https://openai.com/), [Codex CLI](https://github.com/openai/codex), [GitHub Copilot CLI](https://github.com/features/copilot/cli), and [DeepSeek](https://api-docs.deepseek.com/) integration.
+
+Fork: https://github.com/zoranbogoevskimkd/sublime-claude
 
 ## Requirements
 
 - Sublime Text 4
-- Python 3.10+ (for the bridge process)
-- One or more CLI backends (authenticated):
-  - Claude Code CLI + `claude-agent-sdk`
-  - Codex CLI
-  - GitHub Copilot CLI via `github-copilot-sdk`
-  - DeepSeek API key (uses Claude bridge with Anthropic-compatible endpoint)
+- Python 3.10+ (auto-detected; searches python3.13, 3.12, 3.11, 3.10, uv, pyenv)
+- One or more backends:
+  - **Kimi/Claude** — `claude` CLI (v2.1+, native binary)
+  - **Ollama** — local models (qwen, llama, mistral, etc.)
+  - **OpenAI-compatible** — any OpenAI-compatible API server
+  - **DeepSeek** — API key only
+  - **Codex CLI** — optional
+  - **GitHub Copilot CLI** — optional
 
 ```bash
-# Claude Code
-npm install -g @anthropic-ai/claude-code
-claude  # Follow prompts to authenticate
-pip install claude-agent-sdk
+# Kimi/Claude (required for claude backend)
+claude update   # or install from https://claude.ai/claude-code
+
+# Ollama (optional, for local models)
+brew install ollama
+ollama pull qwen2.5:7b
 
 # Codex CLI (optional)
 npm install -g @openai/codex
-codex  # Follow prompts to authenticate
-
-# GitHub Copilot CLI (optional)
-pip install github-copilot-sdk  # Bundles CLI binary
-
-# DeepSeek (optional) — no extra install, just set API key
-# Get key at https://platform.deepseek.com
 ```
 
-**Note:** Authenticate your chosen CLI before using this plugin. If you see connection errors, run the CLI in terminal to login.
+**Note:** Authenticate your chosen CLI before using this plugin. For Kimi/Claude, run `claude` once to authenticate.
 
 ## Installation
 
@@ -46,7 +45,21 @@ pip install github-copilot-sdk  # Bundles CLI binary
    mklink /D "%APPDATA%\Sublime Text\Packages\ClaudeCode" C:\path\to\sublime-claude
    ```
 
-2. Configure your Python path if needed (see Settings below)
+2. Configure your backend (see Settings below)
+
+## Backends
+
+The plugin auto-detects which backend to use based on your settings:
+
+| Backend | Trigger | Description |
+|---------|---------|-------------|
+| **Kimi/Claude** | Default (no `openai_base_url` set) | Cloud API via `claude` CLI |
+| **Ollama** | `openai_base_url` is set | Local models via Ollama |
+| **OpenAI-compatible** | `openai_base_url` is set | Any OpenAI-compatible server |
+| **DeepSeek** | `deepseek_api_key` is set | Anthropic-compatible endpoint |
+| **Codex** | `default_backend: "codex"` | OpenAI Codex CLI |
+
+You can also force a backend with `"default_backend": "claude" | "openai" | "deepseek" | "codex"`.
 
 ## Usage
 
@@ -64,10 +77,13 @@ All commands available via Command Palette (`Cmd+Shift+P`): type "Claude"
 | Add Open Files | - | Add all open files to context |
 | Add Current Folder | - | Add folder path to context |
 | Clear Context | - | Clear pending context |
-| New Session | - | Start a fresh Claude session |
+| New Session | - | Start a fresh session (auto-detects backend) |
+| New Session with Backend... | - | Pick backend manually |
+| OpenAI: New Session | - | Force Ollama/OpenAI backend |
 | Codex: New Session | - | Start a fresh Codex session |
-| Copilot: New Session | - | Start a fresh GitHub Copilot session |
+| Copilot: New Session | - | Start a fresh Copilot session |
 | DeepSeek: New Session | - | Start a fresh DeepSeek session |
+| Configure Settings | - | Open settings file |
 | Undo Message | - | Rewind last conversation turn |
 | Search Sessions | - | Search all sessions by title |
 | Clear Notifications | - | List and clear active notifications |
@@ -116,21 +132,68 @@ Right-click selected text and choose "Ask Claude" to query about the selection.
 
 `Preferences > Package Settings > Claude Code > Settings`
 
+### Backend Selection
+
+The plugin auto-detects the backend from what you configure. You can also force one explicitly.
+
+**Kimi / Claude (default):**
 ```json
 {
-    // Path to Python 3.10+ interpreter
-    "python_path": "python3",
-
-    // Tools Claude can use without confirmation
-    "allowed_tools": ["Read", "Write", "Edit", "Bash", "Glob", "Grep"],
-
-    // Permission mode: "default", "acceptEdits", "plan", "bypassPermissions"
-    "permission_mode": "acceptEdits",
-
-    // DeepSeek API key (for deepseek backend)
-    // "deepseek_api_key": "sk-...",
+    "anthropic_base_url": "https://api.kimi.com/coding/",
+    "anthropic_api_key": "sk-ant-api03-...",
+    "anthropic_model": "kimi-for-coding"
 }
 ```
+If left empty, the plugin uses your global `claude` CLI configuration (`~/.claude/settings.json`).
+
+**Ollama (local):**
+```json
+{
+    "openai_base_url": "http://localhost:11434",
+    "openai_model": "qwen2.5:7b"
+}
+```
+
+**OpenAI-compatible (custom server):**
+```json
+{
+    "openai_base_url": "https://api.example.com/v1",
+    "openai_api_key": "sk-...",
+    "openai_model": "gpt-4o"
+}
+```
+
+**DeepSeek:**
+```json
+{
+    "deepseek_api_key": "sk-..."
+}
+```
+
+**Force a specific backend:**
+```json
+{
+    "default_backend": "claude"
+}
+```
+Options: `"claude"`, `"openai"`, `"deepseek"`, `"codex"`
+
+### General Settings
+
+```json
+{
+    "python_path": "python3",
+    "allowed_tools": ["Read", "Write", "Edit", "Bash", "Glob", "Grep", "WebFetch", "WebSearch"],
+    "permission_mode": "acceptEdits",
+    "effort": "high"
+}
+```
+
+- **python_path** — Path to Python 3.10+ interpreter. Leave as `"python3"` for auto-detection.
+- **allowed_tools** — Tools the AI can use without confirmation
+- **permission_mode** — `"default"`, `"acceptEdits"`, `"plan"`, `"bypassPermissions"`
+- **effort** — Reasoning effort: `"low"`, `"high"`, `"max"`
+- **claude_extra_args** — Extra CLI arguments for `claude` (e.g. `"--max-budget-usd 5 --verbose"`)
 
 ### Permission Modes
 
@@ -152,6 +215,28 @@ When in `default` mode, tool actions show an inline prompt:
 - **N** - Deny (marks tool as error)
 - **S** - Allow same tool for 30 seconds
 - **A** - Always allow this tool (saves to project settings)
+
+### Git & SSH Permissions
+
+By default, the AI can run `Bash` commands but may prompt for permission on `git` and `ssh` operations. These permissions **must** be configured in the Claude CLI's own settings file (`~/.claude/settings.json` on macOS) — they cannot be set via the Sublime plugin.
+
+**Location:** `~/.claude/settings.json`
+
+```json
+{
+  "permissions": {
+    "allow": [
+      "Bash(git *)",
+      "Bash(ssh *)",
+      "Bash(scp *)"
+    ]
+  }
+}
+```
+
+This grants the AI automatic permission to run any `git`, `ssh`, or `scp` command without prompting. Restart your Sublime session for changes to take effect.
+
+Alternatively, use **bypassPermissions** mode (see below) to skip all permission checks globally.
 
 ### Auto-Allowed Tools
 
@@ -287,6 +372,7 @@ Non-Claude sessions show backend name in tab title and have distinct background 
 - **Codex** - Green-tinted background
 - **Copilot** - Purple-tinted background
 - **DeepSeek** - Default background
+- **OpenAI** - Default background
 
 Supports markdown formatting and fenced code blocks with language-specific syntax highlighting.
 
@@ -405,10 +491,14 @@ Agents run with separate context, preventing conversation bloat. Custom agents o
 
 ```
 ┌─────────────────┐     JSON-RPC/stdio     ┌─────────────────┐
-│  Sublime Text   │ ◄────────────────────► │  bridge/main.py │ (Claude)
-│  (Python 3.8)   │                        │  claude-agent-sdk│
+│  Sublime Text   │ ◄────────────────────► │  bridge/main.py │ (Kimi/Claude)
+│  (Python 3.8)   │                        │  claude CLI wrapper│
 │                 │                        └─────────────────┘
 │                 │     JSON-RPC/stdio     ┌─────────────────┐
+│                 │ ◄────────────────────► │  bridge/openai_ │ (Ollama/OpenAI)
+│                 │                        │  main.py        │
+│                 │                        └────────┬────────┘
+│                 │     JSON-RPC/stdio     ┌────────┴────────┐
 │                 │ ◄────────────────────► │  bridge/codex_  │ (Codex)
 │                 │                        │  main.py        │
 │                 │                        └────────┬────────┘
@@ -425,10 +515,9 @@ Agents run with separate context, preventing conversation bloat. Custom agents o
 └─────────────────┘              └─────────────────┘
 ```
 
-The plugin runs in Sublime's Python 3.8 environment and spawns a separate
-bridge process using Python 3.10+. Each bridge translates between Sublime's
-JSON-RPC protocol and the backend CLI:
-- **Claude**: `bridge/main.py` — Claude Agent SDK
+The plugin runs in Sublime's Python 3.8 environment and spawns a separate bridge process using Python 3.10+. Each bridge translates between Sublime's JSON-RPC protocol and the backend CLI:
+- **Kimi/Claude**: `bridge/main.py` — Wraps `claude` CLI v2.1+ with `--output-format=stream-json`
+- **Ollama/OpenAI**: `bridge/openai_main.py` — Native Ollama `/api/chat` + OpenAI-compatible
 - **Codex**: `bridge/codex_main.py` — Codex app-server protocol
 - **Copilot**: `bridge/copilot_main.py` — GitHub Copilot SDK
 - **DeepSeek**: `bridge/main.py` — Same Claude bridge, Anthropic-compatible endpoint
@@ -444,7 +533,8 @@ sublime-claude/
 ├── rpc.py                 # JSON-RPC client
 ├── mcp_server.py          # MCP socket server
 ├── bridge/
-│   ├── main.py            # Claude bridge (Agent SDK)
+│   ├── main.py            # Claude bridge (Claude CLI wrapper)
+│   ├── openai_main.py     # Ollama/OpenAI bridge
 │   ├── codex_main.py      # Codex bridge (app-server)
 │   ├── copilot_main.py    # Copilot bridge (Copilot SDK)
 │   └── rpc_helpers.py     # Shared JSON-RPC helpers
@@ -461,7 +551,7 @@ sublime-claude/
     └── context_parser.py  # Context menus
 ```
 
-Both bridges emit identical JSON-RPC notifications to Sublime, so the output view, permissions, and MCP tools work the same regardless of backend.
+All bridges emit identical JSON-RPC notifications to Sublime, so the output view, permissions, and MCP tools work the same regardless of backend.
 
 ## License
 

@@ -9,7 +9,7 @@ sublime-claude/
 ├── rpc.py                 # JSON-RPC client
 ├── output.py              # Structured output view with region tracking
 ├── bridge/
-│   └── main.py            # Python 3.10+ bridge using claude-agent-sdk
+│   └── main.py            # Python 3.10+ bridge wrapping claude CLI v2.1+
 ├── mcp/
 │   └── server.py          # MCP protocol server (stdio)
 ├── mcp_server.py          # MCP socket server (Sublime context)
@@ -55,31 +55,21 @@ sublime-claude/
 - Enum classes cause issues when cached - switched to plain string constants
 - Dataclass definitions also get cached
 
-### Claude Agent SDK
+### Claude CLI Wrapper
 
-**Installation:**
-```bash
-pip install claude-agent-sdk
-```
+The plugin no longer depends on the private `claude-agent-sdk` PyPI package. Instead, it wraps the official `claude` CLI binary (v2.1+) which supports `--output-format=stream-json` and `--input-format=stream-json`.
 
-**Basic Usage:**
-```python
-from claude_agent_sdk import ClaudeAgent, ClaudeAgentOptions
+**Wrapper:** `claude_agent_sdk/__init__.py` provides a compatibility shim that:
+- Spawns `claude -p --output-format=stream-json --input-format=stream-json`
+- Converts CLI JSON stream events into SDK-compatible dataclass objects
+- Supports the same message types: AssistantMessage, ToolUseBlock, ToolResultBlock, etc.
 
-options = ClaudeAgentOptions(
-    cwd="/path/to/project",
-    allowed_tools=["Read", "Write", "Edit", "Bash", "Glob", "Grep"],
-    permission_mode="default",  # or "acceptEdits", "bypassPermissions"
-    can_use_tool=my_permission_callback,  # async callback
-    resume=session_id,  # optional: resume from previous session
-    agents=my_agents_dict,  # optional: custom subagents
-)
-
-agent = ClaudeAgent(options)
-async for msg in agent.query("Your prompt here"):
-    # Handle messages
-    pass
-```
+**Claude CLI v2.1+ features:**
+- Native binary (no Node.js/npm required)
+- `--model` flag for model selection
+- `--permission-mode` for automated permission handling
+- `--settings` for JSON config injection
+- `--max-budget-usd` for cost control
 
 **Message Flow:**
 ```

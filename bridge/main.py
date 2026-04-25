@@ -16,7 +16,7 @@ from typing import Any, Optional
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from settings import load_project_settings
 from logger import get_bridge_logger, ContextLogger
-from constants import BRIDGE_BUFFER_SIZE
+
 
 # Import notalone2 client for daemon-based notifications
 # notalone2 client removed - using global client in plugin instead
@@ -266,6 +266,10 @@ You are subsession **{subsession_id}**. Call signal_complete(session_id={view_id
             additional_dirs = params.get("additional_dirs", [])
             if additional_dirs:
                 extra_args["add-dir"] = additional_dirs
+            # Merge extra args from settings (e.g. max-budget-usd)
+            user_extra = params.get("extra_args")
+            if user_extra and isinstance(user_extra, dict):
+                extra_args.update(user_extra)
             options_dict["extra_args"] = extra_args
         else:
             # Resume mode — check for rewind point

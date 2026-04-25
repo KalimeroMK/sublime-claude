@@ -38,6 +38,16 @@ DEFAULT_MODELS = {
         ["deepseek-v4-pro", "DeepSeek V4 Pro"],
         ["deepseek-v4-flash", "DeepSeek V4 Flash"],
     ],
+    "openai": [
+        ["gpt-4o", "GPT-4o"],
+        ["gpt-4o-mini", "GPT-4o Mini"],
+        ["gpt-4-turbo", "GPT-4 Turbo"],
+        ["o3-mini", "O3 Mini"],
+        ["llama3.1", "Ollama: Llama 3.1"],
+        ["qwen2.5", "Ollama: Qwen 2.5"],
+        ["mistral", "Ollama: Mistral"],
+        ["phi4", "Ollama: Phi-4"],
+    ],
 }
 
 
@@ -47,9 +57,35 @@ class ClaudeCodeStartCommand(sublime_plugin.WindowCommand):
         from .settings import load_profiles_and_checkpoints, load_project_settings
         import os
 
-        # Default to claude — use "codex" backend via explicit arg or separate command
+        # Auto-detect backend from config if not explicitly specified
         if backend is None:
-            backend = "claude"
+            sublime_settings = sublime.load_settings("ClaudeCode.sublime-settings")
+            backend = sublime_settings.get("default_backend")
+            if not backend:
+                # Auto-detect based on what's configured
+                has_openai = bool(sublime_settings.get("openai_base_url") or os.environ.get("OPENAI_BASE_URL"))
+                has_deepseek = bool(sublime_settings.get("deepseek_api_key") or os.environ.get("DEEPSEEK_API_KEY"))
+                if has_openai:
+                    backend = "openai"
+                elif has_deepseek:
+                    backend = "deepseek"
+                else:
+                    backend = "claude"
+
+        # Validate backend-specific settings
+        if backend == "openai":
+            base_url = sublime_settings.get("openai_base_url") or os.environ.get("OPENAI_BASE_URL", "")
+            model = sublime_settings.get("openai_model") or os.environ.get("OPENAI_MODEL", "")
+            if not base_url:
+                sublime.error_message("OpenAI base URL not set. Add 'openai_base_url' to ClaudeCode settings.")
+                return
+            if not model:
+                sublime.error_message("OpenAI model not set. Add 'openai_model' to ClaudeCode settings.")
+                return
+        elif backend == "deepseek":
+            if not sublime_settings.get("deepseek_api_key") and not os.environ.get("DEEPSEEK_API_KEY"):
+                sublime.error_message("DeepSeek API key not set. Add 'deepseek_api_key' to ClaudeCode settings.")
+                return
 
         # If persona_id specified, acquire and start
         if persona_id:
@@ -250,6 +286,131 @@ class DeepSeekStartCommand(sublime_plugin.WindowCommand):
             sublime.error_message("DeepSeek API key not set. Add \"deepseek_api_key\" to ClaudeCode settings or set DEEPSEEK_API_KEY env var.")
             return
         create_session(self.window, backend="deepseek")
+
+
+class OpenaiStartCommand(sublime_plugin.WindowCommand):
+    """Start a new OpenAI-compatible API session (Ollama, OpenAI, Groq, etc.)."""
+    def run(self) -> None:
+        import os
+        settings = sublime.load_settings("ClaudeCode.sublime-settings")
+        base_url = settings.get("openai_base_url") or os.environ.get("OPENAI_BASE_URL", "")
+        model = settings.get("openai_model") or os.environ.get("OPENAI_MODEL", "")
+        if not base_url:
+            sublime.error_message("OpenAI base URL not set. Run 'OpenAI: Configure Settings' first.")
+            return
+        if not model:
+            sublime.error_message("OpenAI model not set. Run 'OpenAI: Configure Settings' first.")
+            return
+        create_session(self.window, backend="openai")
+
+
+class OpenaiSettingsCommand(sublime_plugin.WindowCommand):
+    """Open ClaudeCode settings file for editing."""
+    def run(self) -> None:
+        self.window.run_command("edit_settings", {
+            "base_file": "${packages}/ClaudeCode/ClaudeCode.sublime-settings",
+            "default": (
+                "{\n"
+                '    // OpenAI / Ollama settings\n'
+                '    "openai_base_url": "http://localhost:11434",\n'
+                '    "openai_model": "qwen2.5:7b",\n'
+                '    "openai_api_key": "",\n'
+                "\n"
+                '    // Claude / Kimi settings\n'
+                '    "default_model": "kimi-for-coding",\n'
+                '    "anthropic_api_key": "",\n'
+                '    "claude_extra_args": "",\n'
+                "\n"
+                '    "allowed_tools": ["Read", "Write", "Edit", "Bash", "Glob", "Grep"],\n'
+                '    "permission_mode": "acceptEdits"\n'
+                "}\n"
+            )
+        })
+
+
+class ClaudeSettingsCommand(sublime_plugin.WindowCommand):
+    """Open ClaudeCode settings file for editing."""
+    def run(self) -> None:
+        self.window.run_command("edit_settings", {
+            "base_file": "${packages}/ClaudeCode/ClaudeCode.sublime-settings",
+            "default": (
+                "{\n"
+                '    // Claude / Kimi settings\n'
+                '    "default_model": "kimi-for-coding",\n'
+                '    "anthropic_api_key": "",\n'
+                '    "claude_extra_args": "",\n'
+                "\n"
+                '    // OpenAI / Ollama settings\n'
+                '    "openai_base_url": "http://localhost:11434",\n'
+                '    "openai_model": "qwen2.5:7b",\n'
+                '    "openai_api_key": "",\n'
+                "\n"
+                '    "allowed_tools": ["Read", "Write", "Edit", "Bash", "Glob", "Grep"],\n'
+                '    "permission_mode": "acceptEdits"\n'
+                "}\n"
+            )
+        })
+
+
+class ClaudeCodeStartWithBackendCommand(sublime_plugin.WindowCommand):
+    """Start a new session with explicit backend/model picker."""
+    def run(self) -> None:
+        settings = sublime.load_settings("ClaudeCode.sublime-settings")
+        self._settings = settings
+
+        # Build list of available backends
+        items = [
+            ["Kimi (Claude CLI)", "Default cloud model — fastest for coding"],
+            ["Claude Opus", "Most capable model for complex tasks"],
+            ["Claude Sonnet", "Balanced speed and capability"],
+            ["Claude Haiku", "Fastest, good for simple tasks"],
+        ]
+        self._backends = [
+            ("claude", "kimi-for-coding"),
+            ("claude", "opus"),
+            ("claude", "sonnet"),
+            ("claude", "haiku"),
+        ]
+
+        # Add Ollama models if available
+        oai_url = settings.get("openai_base_url") or ""
+        oai_model = settings.get("openai_model") or ""
+        if oai_url:
+            items.append([f"Ollama: {oai_model or 'default'}", f"Local @ {oai_url}"])
+            self._backends.append(("openai", None))
+
+        # Add DeepSeek if configured
+        ds_key = settings.get("deepseek_api_key")
+        if ds_key:
+            items.append(["DeepSeek", "Anthropic-compatible API"])
+            self._backends.append(("deepseek", None))
+
+        # Add Codex if available
+        import shutil
+        if shutil.which("codex"):
+            items.append(["OpenAI Codex", "OpenAI's Codex CLI"])
+            self._backends.append(("codex", None))
+
+        self.window.show_quick_panel(items, self._on_select)
+
+    def _on_select(self, idx: int) -> None:
+        if idx < 0:
+            return
+        backend, model = self._backends[idx]
+        if backend == "openai":
+            create_session(self.window, backend="openai")
+        elif backend == "deepseek":
+            create_session(self.window, backend="deepseek")
+        elif backend == "codex":
+            create_session(self.window, backend="codex")
+        else:
+            # Claude backend with specific model override
+            if model:
+                # Create a temporary profile with this model
+                profile = {"model": model}
+                create_session(self.window, backend="claude", profile=profile)
+            else:
+                create_session(self.window, backend="claude")
 
 
 class ClaudeCodeQueryCommand(sublime_plugin.WindowCommand):

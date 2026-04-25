@@ -1,6 +1,7 @@
 """Claude Code session management."""
 import json
 import os
+import shlex
 import time
 from typing import Optional, List, Dict, Callable
 
@@ -13,6 +14,7 @@ from .output import OutputView
 BRIDGE_SCRIPT = os.path.join(os.path.dirname(__file__), "bridge", "main.py")
 CODEX_BRIDGE_SCRIPT = os.path.join(os.path.dirname(__file__), "bridge", "codex_main.py")
 COPILOT_BRIDGE_SCRIPT = os.path.join(os.path.dirname(__file__), "bridge", "copilot_main.py")
+OPENAI_BRIDGE_SCRIPT = os.path.join(os.path.dirname(__file__), "bridge", "openai_main.py")
 SESSIONS_FILE = os.path.join(os.path.dirname(__file__), ".sessions.json")
 
 # @suffix → max context tokens (stripped from model ID before sending to bridge)
@@ -29,6 +31,84 @@ def _resolve_model_id(model_id: str):
         if model_id.endswith(suffix):
             return model_id[:-len(suffix)], tokens
     return model_id, None
+
+
+def _find_python_310_plus() -> str:
+    """Auto-detect a Python 3.10+ interpreter for the bridge process.
+
+    Searches in order:
+    1. python3.13, python3.12, python3.11, python3.10 on PATH
+    2. uv-managed python installations
+    3. pyenv shims
+    4. Fallback to 'python3' (bridge will fail with clear message if < 3.10)
+    """
+    import shutil
+    import subprocess
+
+    # 1. Check explicit versioned binaries on PATH
+    for binary in ("python3.13", "python3.12", "python3.11", "python3.10"):
+        path = shutil.which(binary)
+        if path:
+            try:
+                out = subprocess.run(
+                    [path, "--version"],
+                    capture_output=True, text=True, timeout=5
+                )
+                if out.returncode == 0 and "3." in out.stdout:
+                    return path
+            except Exception:
+                pass
+
+    # 2. Check if python3 itself is 3.10+
+    path = shutil.which("python3")
+    if path:
+        try:
+            out = subprocess.run(
+                [path, "--version"],
+                capture_output=True, text=True, timeout=5
+            )
+            if out.returncode == 0:
+                ver = out.stdout.strip() or out.stderr.strip()
+                # "Python 3.10.0" -> extract major.minor
+                parts = ver.replace("Python ", "").split(".")
+                if len(parts) >= 2:
+                    try:
+                        major, minor = int(parts[0]), int(parts[1])
+                        if major >= 3 and minor >= 10:
+                            return path
+                    except ValueError:
+                        pass
+        except Exception:
+            pass
+
+    # 3. Search uv-managed python installations
+    uv_home = os.path.expanduser("~/.local/share/uv/python")
+    if os.path.isdir(uv_home):
+        for entry in sorted(os.listdir(uv_home), reverse=True):
+            if entry.startswith("cpython-3."):
+                bin_dir = os.path.join(uv_home, entry, "bin")
+                for binary in ("python3.13", "python3.12", "python3.11", "python3.10"):
+                    candidate = os.path.join(bin_dir, binary)
+                    if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+                        return candidate
+
+    # 4. pyenv shims
+    pyenv_shim = shutil.which("pyenv")
+    if pyenv_shim:
+        for binary in ("python3.13", "python3.12", "python3.11", "python3.10"):
+            try:
+                out = subprocess.run(
+                    [pyenv_shim, "which", binary],
+                    capture_output=True, text=True, timeout=5
+                )
+                if out.returncode == 0:
+                    path = out.stdout.strip()
+                    if path and os.path.isfile(path):
+                        return path
+            except Exception:
+                pass
+
+    return "python3"
 
 
 def load_saved_sessions() -> List[Dict]:
@@ -137,6 +217,11 @@ class Session:
 
         settings = sublime.load_settings("ClaudeCode.sublime-settings")
         python_path = settings.get("python_path", "python3")
+        if python_path == "python3":
+            detected = _find_python_310_plus()
+            if detected != python_path:
+                print(f"[Claude] Auto-detected Python 3.10+: {detected}")
+                python_path = detected
 
         # Build profile docs list early (before init) so we can add to system prompt
         self._build_profile_docs_list()
@@ -157,6 +242,18 @@ class Session:
         # Sync sublime project retain content to file for hook
         self._sync_project_retain()
 
+        # Claude/Kimi API settings from Sublime config → passed as env vars to claude CLI
+        if self.backend in ("claude", "kimi", "default", ""):
+            api_key = settings.get("anthropic_api_key")
+            if api_key:
+                env["ANTHROPIC_API_KEY"] = api_key
+            base_url = settings.get("anthropic_base_url")
+            if base_url:
+                env["ANTHROPIC_BASE_URL"] = base_url
+            model = settings.get("anthropic_model")
+            if model:
+                env["ANTHROPIC_MODEL"] = model
+
         # DeepSeek uses the Claude bridge with Anthropic-compatible endpoint
         if self.backend == "deepseek":
             ds_key = settings.get("deepseek_api_key") or os.environ.get("DEEPSEEK_API_KEY", "")
@@ -166,10 +263,23 @@ class Session:
             env.setdefault("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "1")
             env.setdefault("CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK", "1")
 
+        if self.backend == "openai":
+            oai_url = settings.get("openai_base_url") or os.environ.get("OPENAI_BASE_URL", "")
+            oai_key = settings.get("openai_api_key") or os.environ.get("OPENAI_API_KEY", "")
+            oai_model = settings.get("openai_model") or os.environ.get("OPENAI_MODEL", "")
+            if oai_url:
+                env["OPENAI_BASE_URL"] = oai_url
+            if oai_key:
+                env["OPENAI_API_KEY"] = oai_key
+            if oai_model:
+                env["OPENAI_MODEL"] = oai_model
+
         if self.backend == "codex":
             bridge_script = CODEX_BRIDGE_SCRIPT
         elif self.backend == "copilot":
             bridge_script = COPILOT_BRIDGE_SCRIPT
+        elif self.backend == "openai":
+            bridge_script = OPENAI_BRIDGE_SCRIPT
         else:
             bridge_script = BRIDGE_SCRIPT
         self.client = JsonRpcClient(self._on_notification)
@@ -248,6 +358,23 @@ class Session:
             if default_model:
                 real_model, _ = _resolve_model_id(default_model)
                 init_params["model"] = real_model
+
+        # Parse extra CLI args from settings (e.g. "--max-budget-usd 5 --effort high")
+        extra_args_str = settings.get("claude_extra_args", "")
+        if extra_args_str:
+            try:
+                parsed = shlex.split(extra_args_str)
+                extra_dict = {}
+                it = iter(parsed)
+                for arg in it:
+                    key = arg.lstrip("-").replace("-", "_")
+                    val = next(it, "")
+                    extra_dict[key] = val
+                if extra_dict:
+                    init_params["extra_args"] = extra_dict
+            except Exception as e:
+                print(f"[Claude] Failed to parse claude_extra_args: {e}")
+
         self.client.send("initialize", init_params, self._on_init)
 
     def _cwd(self) -> str:

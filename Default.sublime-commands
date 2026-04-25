@@ -12,6 +12,14 @@
         "command": "copilot_start"
     },
     {
+        "caption": "OpenAI: New Session",
+        "command": "openai_start"
+    },
+    {
+        "caption": "OpenAI: Configure Settings",
+        "command": "openai_settings"
+    },
+    {
         "caption": "Claude: Query Selection",
         "command": "claude_code_query_selection"
     },
@@ -42,6 +50,14 @@
     {
         "caption": "Claude: New Session",
         "command": "claude_code_start"
+    },
+    {
+        "caption": "Claude: New Session with Backend...",
+        "command": "claude_code_start_with_backend"
+    },
+    {
+        "caption": "Claude: Configure Settings",
+        "command": "claude_settings"
     },
     {
         "caption": "Claude: Switch Session...",

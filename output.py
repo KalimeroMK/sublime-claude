@@ -2132,7 +2132,6 @@ class OutputView:
         """Format generic MCP tool result."""
         try:
             import re
-            import ast
             import json
 
             # Extract the 'text' field from MCP format: {'type': 'text', 'text': '...'}

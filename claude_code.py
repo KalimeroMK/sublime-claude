@@ -49,6 +49,10 @@ from .commands import (
     ClaudeCodeSaveCheckpointCommand,
     ClaudeCodeUsageCommand,
     ClaudeCodeViewHistoryCommand,
+    OpenaiStartCommand,
+    OpenaiSettingsCommand,
+    ClaudeSettingsCommand,
+    ClaudeCodeStartWithBackendCommand,
 )
 
 # Event listeners

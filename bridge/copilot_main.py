@@ -64,7 +64,7 @@ class CopilotBridge:
             send_error(req_id, -32000, str(e))
 
     async def handle_initialize(self, req_id: int, params: dict) -> None:
-        from copilot import CopilotClient, PermissionHandler
+        from copilot import CopilotClient
 
         cwd = params.get("cwd", os.getcwd())
         model = params.get("model", "claude-sonnet-4-6")
@@ -211,7 +211,7 @@ class CopilotBridge:
                 pass
         send_result(req_id, {"ok": True})
 
-    async def _handle_permission(self, request, invocation=None) -> dict:
+    async def _handle_permission(self, request, _invocation=None) -> dict:
         """Permission callback — send to Sublime, wait for response."""
         self.permission_counter += 1
         perm_id = self.permission_counter

@@ -1,29 +1,67 @@
 {
-    // Path to Python 3.10+ interpreter for the bridge process
-    // Must have claude-agent-sdk installed: pip install claude-agent-sdk
+    // =========================================================================
+    // BACKEND SELECTION (which AI to use)
+    // =========================================================================
+    // The plugin auto-detects the backend from what you configure below:
+    //   - If "openai_base_url" is set     → uses Ollama / OpenAI-compatible
+    //   - If "deepseek_api_key" is set    → uses DeepSeek
+    //   - Otherwise                       → uses Claude / Kimi (default)
+    //
+    // You can also force a backend explicitly:
+    // "default_backend": "claude",   // Options: "claude", "openai", "deepseek", "codex"
+
+    // =========================================================================
+    // CLAUDE / KIMI BACKEND (default — uses the official `claude` CLI)
+    // =========================================================================
+    // These override ~/.claude/settings.json for the Sublime plugin only.
+    // If left empty, the plugin uses your global `claude` CLI configuration.
+    //
+    // "anthropic_base_url": "https://api.kimi.com/coding/",
+    // "anthropic_api_key": "sk-ant-api03-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    // "anthropic_model": "kimi-for-coding",
+
+    // =========================================================================
+    // OLLAMA / OPENAI-COMPATIBLE BACKEND (local or remote)
+    // =========================================================================
+    // Set these to switch to a local Ollama server or any OpenAI-compatible API.
+    // When these are set, "Claude: New Session" will use this backend instead.
+    //
+    // "openai_base_url": "http://localhost:11434",
+    // "openai_api_key": "",              // Optional for local Ollama
+    // "openai_model": "qwen2.5:7b",
+
+    // =========================================================================
+    // DEEPSEEK BACKEND
+    // =========================================================================
+    // "deepseek_api_key": "sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+
+    // =========================================================================
+    // GENERAL PLUGIN SETTINGS
+    // =========================================================================
+
+    // Path to Python 3.10+ interpreter for the bridge process.
+    // Leave as "python3" to auto-detect, or set an explicit path.
     "python_path": "python3",
 
-    // Default model when no profile is selected
-    // Options: "opus", "sonnet", "haiku"
-    "default_model": "opus",
+    // Default model when no profile is selected.
+    // Only used by the claude backend; openai/deepseek use their own model settings.
+    // "default_model": "kimi-for-coding",
 
-    // Tools Claude is allowed to use
-    // Common tools: Read, Write, Edit, Bash, Glob, Grep, WebFetch, WebSearch
-    "allowed_tools": ["Read", "Write", "Edit", "Bash", "Glob", "Grep"],
+    // Tools the AI is allowed to use
+    "allowed_tools": ["Read", "Write", "Edit", "Bash", "Glob", "Grep", "WebFetch", "WebSearch"],
 
     // Permission mode for tool execution
     // Options: "default", "acceptEdits", "plan", "bypassPermissions"
     "permission_mode": "acceptEdits",
 
-    // Persona service URL for identity management
-    "persona_url": "http://localhost:5002/personas",
-
     // Reasoning effort level: "low", "high", "max"
     "effort": "high",
 
-    // DeepSeek API key (for deepseek backend)
-    // Get one at https://platform.deepseek.com
-    // "deepseek_api_key": "",
+    // Persona service URL for identity management
+    "persona_url": "http://localhost:5002/personas",
+
+    // Extra CLI arguments passed to `claude` (e.g. "--max-budget-usd 5 --verbose")
+    // "claude_extra_args": "",
 
     // Default models per backend (overrides built-in defaults)
     // "default_models": {
@@ -33,9 +71,4 @@
 
     // Environment variables passed to bridge process
     // "env": {},
-
-    // Profiles and checkpoints are stored in separate files:
-    //   User-level:    ~/.claude-sublime/profiles.json
-    //   Project-level: {project}/.claude/profiles.json
-    // See docs/profiles.md for configuration guide.
 }
