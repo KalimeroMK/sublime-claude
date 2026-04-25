@@ -194,6 +194,7 @@ Options: `"claude"`, `"openai"`, `"deepseek"`, `"codex"`
 - **permission_mode** — `"default"`, `"acceptEdits"`, `"plan"`, `"bypassPermissions"`
 - **effort** — Reasoning effort: `"low"`, `"high"`, `"max"`
 - **claude_extra_args** — Extra CLI arguments for `claude` (e.g. `"--max-budget-usd 5 --verbose"`)
+- **claude_side_panel** — Show chat in a narrow right-side panel (`true` / `false`). Splits window into 2 columns (78% code, 22% chat) like VS Code. Default: `true`
 
 ### Permission Modes
 

@@ -69,6 +69,10 @@
     //     "deepseek": "deepseek-v4-pro"
     // },
 
+    // Show AI chat in a side panel (right column) like VS Code
+    // When true, splits the window into 2 columns (code left, chat right)
+    "claude_side_panel": true,
+
     // Environment variables passed to bridge process
     // "env": {},
 }

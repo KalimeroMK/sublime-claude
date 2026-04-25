@@ -13,6 +13,31 @@ from .context_parser import ContextParser, ContextMenuItem, ContextMenuHandler
 _last_copy_meta = None  # {file, regions: [(row_start, row_end), ...], text}
 
 class ClaudeCodeEventListener(sublime_plugin.EventListener):
+    def _ensure_left_group(self, view):
+        """Keep non-AI views in the left/center group (group 0).
+        Only AI chat views are allowed in the right side panel (group 1)."""
+        if not view or not view.window():
+            return
+        window = view.window()
+        # Only act if we have a side panel layout (2+ groups)
+        if window.num_groups() < 2:
+            return
+        # Check if this view is the AI chat output
+        is_claude_output = view.settings().get("claude_output")
+        # If it's not AI output and it's in group 1, move it to group 0
+        if not is_claude_output:
+            current_group = window.get_view_index(view)[0]
+            if current_group == 1:
+                window.set_view_index(view, 0, len(window.views_in_group(0)))
+
+    def on_load(self, view):
+        """Move newly opened files to the left/center group."""
+        self._ensure_left_group(view)
+
+    def on_activated(self, view):
+        """Move activated files to the left/center group if they ended up in the right."""
+        self._ensure_left_group(view)
+
     def on_post_text_command(self, view, command_name, args):
         global _last_copy_meta
         if command_name not in ("copy", "cut"):

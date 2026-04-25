@@ -143,6 +143,22 @@ class OutputView:
 
         # Create new view
         self.view = self.window.new_file()
+
+        # Optional: show in side panel (narrow right column) like VS Code
+        settings = sublime.load_settings("ClaudeCode.sublime-settings")
+        if settings.get("claude_side_panel", False):
+            # Ensure 2-column layout exists (editor wide, chat narrow)
+            if self.window.num_groups() == 1:
+                self.window.set_layout({
+                    "cols": [0.0, 0.78, 1.0],
+                    "rows": [0.0, 1.0],
+                    "cells": [[0, 0, 1, 1], [1, 0, 2, 1]]
+                })
+            # Move view to right group (group 1)
+            self.window.set_view_index(self.view, 1, 0)
+            # Focus back to left group so new files open on the left
+            self.window.focus_group(0)
+
         self.view.set_name("Claude")
         self.view.set_scratch(True)
         self.view.set_read_only(True)
