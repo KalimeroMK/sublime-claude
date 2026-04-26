@@ -32,7 +32,23 @@ npm install -g @openai/codex
 
 ## Installation
 
-1. Clone or symlink this folder to your Sublime Text `Packages` directory:
+1. Clone this repo into your Sublime Text `Packages` directory:
+
+   ```bash
+   # macOS
+   cd ~/Library/Application\ Support/Sublime\ Text/Packages
+   git clone https://github.com/zoranbogoevskimkd/sublime-claude ClaudeCode
+
+   # Linux
+   cd ~/.config/sublime-text/Packages
+   git clone https://github.com/zoranbogoevskimkd/sublime-claude ClaudeCode
+
+   # Windows
+   cd "%APPDATA%\Sublime Text\Packages"
+   git clone https://github.com/zoranbogoevskimkd/sublime-claude ClaudeCode
+   ```
+
+   Or symlink an existing clone:
 
    ```bash
    # macOS
