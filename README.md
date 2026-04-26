@@ -69,10 +69,10 @@ All commands available via Command Palette (`Cmd+Shift+P`): type "Claude"
 
 | Command | Keybinding | Description |
 |---------|------------|-------------|
-| Switch Session | `Cmd+Alt+\` | Quick panel: active session, new, or switch |
+| Query | `Cmd+Alt+C` | Send a query to Claude |
 | Query Selection | `Cmd+Shift+Alt+C` | Query about selected code |
 | Query File | - | Query about current file |
-| Add Current File | - | Add file to context |
+| Add Current File | - | Add file to context (+ auto-related files) |
 | Add Selection | - | Add selection to context |
 | Add Open Files | - | Add all open files to context |
 | Add Current Folder | - | Add folder path to context |
@@ -81,22 +81,15 @@ All commands available via Command Palette (`Cmd+Shift+P`): type "Claude"
 | New Session with Backend... | - | Pick backend manually |
 | Configure Settings | - | Open settings file |
 | Undo Message | - | Rewind last conversation turn |
-| Search Sessions | - | Search all sessions by title |
-| Clear Notifications | - | List and clear active notifications |
 | Restart Session | - | Restart current session, keep output view |
 | Resume Session... | - | Resume a previous session |
 | Switch Session... | - | Switch between active sessions |
 | Fork Session | - | Fork current session (branch conversation) |
 | Fork Session... | - | Fork from a saved session |
 | Rename Session... | - | Name the current session |
-| Sleep Session | - | Put session to sleep (free resources) |
-| Wake Session | - | Wake a sleeping session |
 | Stop Session | - | Disconnect and stop |
 | Toggle Output | `Cmd+Alt+C` | Show/hide output view |
-| Clear Output | `Cmd+Ctrl+Alt+C` | Clear output view |
 | Interrupt | `Alt+Escape` | Stop current query |
-| Permission Mode... | - | Change permission settings |
-| Manage Auto-Allowed Tools... | - | Configure tools that skip permission prompts |
 
 ### Inline Input Mode
 
@@ -105,16 +98,10 @@ The output view features an inline input area (marked with `◎`) where you type
 - **Enter** - Submit prompt
 - **Shift+Enter** - Insert newline (multiline prompts)
 - **@** - Open context menu (add files, selection, folder, or clear context)
-- **Cmd+K** - Clear output
 - **Alt+Escape** - Interrupt current query
 
 When a permission prompt appears:
-- **Y/N/S/A** - Respond to permission prompts
-
-When viewing plan approval:
-- **Y** - Approve plan
-- **N** - Reject plan
-- **V** - View plan file
+- **Y/N** - Allow or deny the tool
 
 ### Menu
 
@@ -196,64 +183,7 @@ Options: `"claude"`, `"openai"`, `"deepseek"`, `"codex"`
 
 - `default` - Prompt for all tool actions
 - `acceptEdits` - Auto-accept file operations
-- `auto` - AI classifier auto-approves (Team/Enterprise plan, Sonnet 4.6+)
 - `bypassPermissions` - Skip all permission checks
-
-### Permission Prompt
-
-When in `default` mode, tool actions show an inline prompt:
-
-```
-⚠ Allow Bash: rm file.txt?
-  [Y] Allow  [N] Deny  [S] Allow 30s  [A] Always
-```
-
-- **Y** - Allow this action
-- **N** - Deny (marks tool as error)
-- **S** - Allow same tool for 30 seconds
-- **A** - Always allow this tool (saves to project settings)
-
-### Git & SSH Permissions
-
-By default, the AI can run `Bash` commands but may prompt for permission on `git` and `ssh` operations. These permissions **must** be configured in the Claude CLI's own settings file (`~/.claude/settings.json` on macOS) — they cannot be set via the Sublime plugin.
-
-**Location:** `~/.claude/settings.json`
-
-```json
-{
-  "permissions": {
-    "allow": [
-      "Bash(git *)",
-      "Bash(ssh *)",
-      "Bash(scp *)"
-    ]
-  }
-}
-```
-
-This grants the AI automatic permission to run any `git`, `ssh`, or `scp` command without prompting. Restart your Sublime session for changes to take effect.
-
-Alternatively, use **bypassPermissions** mode (see below) to skip all permission checks globally.
-
-### Auto-Allowed Tools
-
-Automatically allow specific tools without permission prompts. Configure via:
-
-**Command:** `Claude: Manage Auto-Allowed Tools...` - UI to add/remove patterns
-
-**Settings:** Add to project `.claude/settings.json` or user `~/.claude/settings.json`:
-```json
-{
-  "autoAllowedMcpTools": [
-    "mcp__*__*",        // All MCP tools
-    "mcp__plugin_*",    // All plugin MCP tools
-    "Read",             // Specific tool
-    "Bash"
-  ]
-}
-```
-
-Supports wildcards (`*`) for pattern matching. User-level settings apply to all projects, project settings override.
 
 ### Project Settings (.sublime-project)
 
@@ -284,6 +214,18 @@ Add files, selections, or folders as context before your query:
 
 Requires an active session (use **New Session** first).
 
+### Smart Context
+
+When you add a file, related files are automatically included (up to 5):
+
+- **Test/sibling files** — `user.py` → `user_test.py`, `test_user.py`
+- **Imported modules** — parsed from `import` / `from` / `require` / `use` statements in the first 30 lines
+- **Convention-based paths** — `User.php` → `controllers/UserController.php`
+
+Supported: Python, JavaScript/TypeScript, PHP, Go.
+
+Disable by removing the `_add_related_files` call in `session.py` if you prefer manual context only.
+
 ## Sessions
 
 Sessions are automatically saved and can be resumed later. Each session tracks:
@@ -296,15 +238,6 @@ Sessions are automatically saved and can be resumed later. Each session tracks:
 Use **Claude: Resume Session...** to pick and continue a previous conversation.
 
 After Sublime restarts, orphaned output views are registered as sleeping sessions. Press Enter or use **Wake Session** to reconnect.
-
-### Sleep/Wake
-
-Sessions can be put to sleep to free bridge subprocess resources while keeping the view:
-
-- **Sleep** — kills the bridge process, view shows `⏸` prefix
-- **Wake** — press Enter in a sleeping view, or use **Wake Session** command
-- Switch panel shows sleeping sessions with `⏸` indicator
-- `auto_sleep_minutes` setting auto-sleeps idle sessions (default: 60, 0 = disabled)
 
 ## Output View
 
@@ -497,15 +430,9 @@ sublime-claude/
 │   └── rpc_helpers.py     # Shared JSON-RPC helpers
 ├── mcp/server.py          # MCP protocol server
 │
-└── Core Utilities:
+└── Utilities:
     ├── constants.py       # Config & magic strings
-    ├── logger.py          # Unified logging
-    ├── error_handler.py   # Error handling
-    ├── session_state.py   # State machine
-    ├── settings.py        # Settings loader
-    ├── prompt_builder.py  # Prompt utilities
-    ├── tool_router.py     # Tool dispatch
-    └── context_parser.py  # Context menus
+    └── context_parser.py  # Context menus & @ picker
 ```
 
 All bridges emit identical JSON-RPC notifications to Sublime, so the output view, permissions, and MCP tools work the same regardless of backend.
