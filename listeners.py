@@ -34,10 +34,6 @@ class ClaudeCodeEventListener(sublime_plugin.EventListener):
         """Move newly opened files to the left/center group."""
         self._ensure_left_group(view)
 
-    def on_activated(self, view):
-        """Move activated files to the left/center group if they ended up in the right."""
-        self._ensure_left_group(view)
-
     def on_post_text_command(self, view, command_name, args):
         global _last_copy_meta
         if command_name not in ("copy", "cut"):
