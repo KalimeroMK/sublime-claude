@@ -1069,9 +1069,6 @@ You are subsession **{subsession_id}**. Call signal_complete(session_id={view_id
                 with open("/tmp/claude_bridge.log", "a") as f:
                     f.write(f"query: safety-net result status={status}\n")
                 send_result(id, {"status": status})
-            else:
-                send_error(id, -32000, f"Query failed: {error_msg}")
-        finally:
             self.query_id = None
             # Process any pending injects that arrived during query
             if self.pending_injects:
