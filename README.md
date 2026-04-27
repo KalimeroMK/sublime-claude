@@ -2,7 +2,7 @@
 
 A Sublime Text plugin for [Kimi](https://kimi.ai/), [Claude Code](https://claude.ai/claude-code), [Ollama](https://ollama.com/), [OpenAI](https://openai.com/), [Codex CLI](https://github.com/openai/codex), [GitHub Copilot CLI](https://github.com/features/copilot/cli), and [DeepSeek](https://api-docs.deepseek.com/) integration.
 
-Fork: https://github.com/zoranbogoevskimkd/sublime-claude
+Fork: https://github.com/KalimeroMK/sublime-claude
 
 ## Requirements
 
@@ -37,15 +37,15 @@ npm install -g @openai/codex
    ```bash
    # macOS
    cd ~/Library/Application\ Support/Sublime\ Text/Packages
-   git clone https://github.com/zoranbogoevskimkd/sublime-claude ClaudeCode
+   git clone https://github.com/KalimeroMK/sublime-claude ClaudeCode
 
    # Linux
    cd ~/.config/sublime-text/Packages
-   git clone https://github.com/zoranbogoevskimkd/sublime-claude ClaudeCode
+   git clone https://github.com/KalimeroMK/sublime-claude ClaudeCode
 
    # Windows
    cd "%APPDATA%\Sublime Text\Packages"
-   git clone https://github.com/zoranbogoevskimkd/sublime-claude ClaudeCode
+   git clone https://github.com/KalimeroMK/sublime-claude ClaudeCode
    ```
 
    Or symlink an existing clone:
