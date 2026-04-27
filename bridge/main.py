@@ -600,18 +600,35 @@ You are subsession **{subsession_id}**. Call signal_complete(session_id={view_id
         # Exact match
         return match_value == specifier
 
+    def _load_guardrails(self) -> dict:
+        """Load guardrails configuration from project settings."""
+        settings = load_project_settings(self.cwd)
+        return settings.get("guardrails", {})
+
     def _validate_bash_command(self, command: str) -> tuple[bool, str]:
-        """Validate bash command for dangerous patterns.
+        """Validate bash command for dangerous patterns and guardrails.
 
         Returns: (is_safe, warning_message)
         """
         import re
 
+        guardrails = self._load_guardrails()
+        blocked_patterns = guardrails.get("blocked_commands", [])
+        require_approval = guardrails.get("require_approval_for", [])
+
+        # Check blocked commands (always denied)
+        for pattern in blocked_patterns:
+            if pattern.lower() in command.lower():
+                return False, f"Command blocked by guardrail: '{pattern}' is not allowed. " \
+                              f"Remove it from 'guardrails.blocked_commands' in .claude/settings.json to allow."
+
+        # Check commands requiring approval (will trigger permission dialog)
+        # This is handled in can_use_tool after validation, but we mark them here
+
         # Check for rm -rf with potentially dangerous paths
         rm_pattern = r'\brm\s+(-[rf]{1,2}\s+|-[a-z]*[rf][a-z]*\s+)'
         if re.search(rm_pattern, command):
             # Extract the path being deleted
-            # Match: rm -rf <path> or rm -f -r <path>, etc.
             path_match = re.search(rm_pattern + r'([^\s;&|]+)', command)
             if path_match:
                 path = path_match.group(2)
@@ -636,6 +653,46 @@ You are subsession **{subsession_id}**. Call signal_complete(session_id={view_id
 
         return True, ""
 
+    def _run_pre_flight_checks(self, command: str) -> tuple[bool, str]:
+        """Run pre-flight checks before allowing certain commands.
+
+        Returns: (passed, message)
+        """
+        import subprocess
+
+        guardrails = self._load_guardrails()
+        checks_config = guardrails.get("pre_flight_checks", {})
+
+        # Find matching check pattern
+        checks_to_run = []
+        for pattern, checks in checks_config.items():
+            if pattern.lower() in command.lower():
+                checks_to_run = checks if isinstance(checks, list) else [checks]
+                break
+
+        if not checks_to_run:
+            return True, ""
+
+        results = []
+        for check in checks_to_run:
+            try:
+                result = subprocess.run(
+                    check, shell=True, capture_output=True, text=True,
+                    cwd=self.cwd, timeout=120
+                )
+                if result.returncode != 0:
+                    results.append(f"❌ {check} FAILED:\n{result.stdout}\n{result.stderr}")
+                else:
+                    results.append(f"✅ {check} passed")
+            except Exception as e:
+                results.append(f"❌ {check} ERROR: {e}")
+
+        failures = [r for r in results if r.startswith("❌")]
+        if failures:
+            return False, "Pre-flight checks failed:\n\n" + "\n\n".join(failures)
+
+        return True, "\n".join(results)
+
     async def can_use_tool(self, tool_name: str, tool_input: dict, context=None):
         """Handle permission request - ask Sublime for approval."""
         # Handle AskUserQuestion - show UI and collect answers
@@ -655,7 +712,7 @@ You are subsession **{subsession_id}**. Call signal_complete(session_id={view_id
         if tool_name.startswith("mcp__sublime__"):
             return PermissionResultAllow(updated_input=tool_input)
 
-        # Validate Bash commands for dangerous patterns
+        # Validate Bash commands for dangerous patterns and guardrails
         if tool_name == "Bash" and "command" in tool_input:
             is_safe, warning = self._validate_bash_command(tool_input["command"])
             if not is_safe:
@@ -664,16 +721,60 @@ You are subsession **{subsession_id}**. Call signal_complete(session_id={view_id
                     f.write(f"  Command: {tool_input['command']}\n")
                 return PermissionResultDeny(message=f"Blocked dangerous command: {warning}")
 
-        # Check auto-allowed tools from settings
-        settings = load_project_settings(self.cwd)
-        auto_allowed = settings.get("autoAllowedMcpTools", [])
-
-        # Check if tool matches any auto-allow pattern (supports fine-grained patterns)
-        for pattern in auto_allowed:
-            if self._match_permission_pattern(tool_name, tool_input, pattern):
+            # Run pre-flight checks for commands that require them
+            passed, message = self._run_pre_flight_checks(tool_input["command"])
+            if not passed:
                 with open("/tmp/claude_bridge.log", "a") as f:
-                    f.write(f"can_use_tool: auto-allowed {tool_name} (matched pattern: {pattern})\n")
-                return PermissionResultAllow(updated_input=tool_input)
+                    f.write(f"PRE-FLIGHT CHECKS FAILED: {message}\n")
+                return PermissionResultDeny(message=f"Pre-flight checks failed:\n{message}")
+
+            # Check guardrails requiring approval
+            guardrails = self._load_guardrails()
+            require_approval = guardrails.get("require_approval_for", [])
+            for pattern in require_approval:
+                if pattern.lower() in tool_input["command"].lower():
+                    # Force permission dialog even if auto-allowed
+                    with open("/tmp/claude_bridge.log", "a") as f:
+                        f.write(f"GUARDRAIL: Requiring approval for '{pattern}' command\n")
+                    break
+            else:
+                # No approval required, continue to auto-allow check
+                pass
+            # If we hit a pattern requiring approval, we fall through to permission dialog below
+            # We use a flag to track this
+            _guardrail_requires_approval = any(
+                pattern.lower() in tool_input["command"].lower()
+                for pattern in require_approval
+            )
+            if _guardrail_requires_approval:
+                # Skip auto-allow and go straight to permission dialog
+                pass  # Fall through below
+            else:
+                # Check auto-allowed tools from settings
+                settings = load_project_settings(self.cwd)
+                auto_allowed = settings.get("autoAllowedMcpTools", [])
+
+                # Check if tool matches any auto-allow pattern (supports fine-grained patterns)
+                for pattern in auto_allowed:
+                    if self._match_permission_pattern(tool_name, tool_input, pattern):
+                        with open("/tmp/claude_bridge.log", "a") as f:
+                            f.write(f"can_use_tool: auto-allowed {tool_name} (matched pattern: {pattern})\n")
+                        return PermissionResultAllow(updated_input=tool_input)
+
+                # No auto-allow match, fall through to permission dialog below
+                pass
+
+        # For non-Bash tools: check auto-allowed tools from settings
+        if tool_name != "Bash":
+            settings = load_project_settings(self.cwd)
+            auto_allowed = settings.get("autoAllowedMcpTools", [])
+
+            # Check if tool matches any auto-allow pattern (supports fine-grained patterns)
+            for pattern in auto_allowed:
+                if self._match_permission_pattern(tool_name, tool_input, pattern):
+                    with open("/tmp/claude_bridge.log", "a") as f:
+                        f.write(f"can_use_tool: auto-allowed {tool_name} (matched pattern: {pattern})\n")
+                    return PermissionResultAllow(updated_input=tool_input)
 
         self.permission_id += 1
         pid = self.permission_id
