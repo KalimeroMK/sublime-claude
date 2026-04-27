@@ -103,9 +103,11 @@ All commands available via Command Palette (`Cmd+Shift+P`): type "Claude"
 | Fork Session | - | Fork current session (branch conversation) |
 | Fork Session... | - | Fork from a saved session |
 | Rename Session... | - | Name the current session |
+| **Tag Session...** | - | Add comma-separated tags to session |
 | Stop Session | - | Disconnect and stop |
 | Toggle Output | `Cmd+Alt+C` | Show/hide output view |
 | Interrupt | `Alt+Escape` | Stop current query |
+| **Show Usage Graph** | - | ASCII bar chart of token usage per query |
 
 ### Inline Input Mode
 
@@ -118,6 +120,12 @@ The output view features an inline input area (marked with `◎`) where you type
 
 When a permission prompt appears:
 - **Y/N** - Allow or deny the tool
+
+### Drag & Drop
+
+Drop files directly onto the **Claude output view**:
+- **Images** (`.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`, `.svg`) → automatically added as image context
+- **Regular files** → automatically added as file context
 
 ### Menu
 
@@ -246,14 +254,38 @@ Disable by removing the `_add_related_files` call in `session.py` if you prefer 
 
 Sessions are automatically saved and can be resumed later. Each session tracks:
 - Session name (auto-generated from first prompt, or manually set)
+- **Tags** — comma-separated labels for organization (e.g. `bugfix, refactor`)
 - Project directory
 - Cumulative cost
+- Per-query token usage history (up to 100 queries)
 
 **Multiple sessions per window** - Each "New Session" creates a separate output view. Switch between them like normal tabs.
 
 Use **Claude: Resume Session...** to pick and continue a previous conversation.
 
 After Sublime restarts, orphaned output views are registered as sleeping sessions. Press Enter or use **Wake Session** to reconnect.
+
+### Session Tags
+
+Tag sessions for organization:
+1. **Claude: Tag Session...** — enter comma-separated tags
+2. Tags appear in status bar as `[tag1,tag2]`
+3. Tags are persisted in `.sessions.json` and restored on reconnect
+
+### Token Usage Graph
+
+**Claude: Show Usage Graph** displays an ASCII bar chart of token usage per query:
+```
+Q  1: in [██████░░░░░░░░░░░░░░] 5,000
+      out [▓░░░░░░░░░░░░░░░░░░░] 1,200
+Q  2: in [██████████░░░░░░░░░░] 8,000
+      out [▓▓▓▓░░░░░░░░░░░░░░░░] 3,000
+...
+**Total: 40,000 in + 13,200 out = 53,200 tokens**
+**Queries: 4 | Est. cost: $0.0234**
+```
+
+Tracks up to 100 queries per session, persisted across restarts.
 
 ## Output View
 
@@ -282,15 +314,25 @@ Non-Claude sessions show backend name in tab title and have distinct background 
 
 Supports markdown formatting and fenced code blocks with language-specific syntax highlighting.
 
+### Context Window Gauge
+
+Status bar shows a visual gauge of context window utilization:
+```
+Claude: ready, effort:high, sonnet.4.5, ctx:45k, 🟡 ████████░░ 75%
+```
+
+- **10-segment bar** (`█` = filled, `░` = empty)
+- **Color coding:** 🟢 <70%, 🟡 70-90%, 🔴 >90%
+- **Model-aware limits:** 200K Claude, 128K GPT-4o, 64K DeepSeek, 32K Mistral
+
 ## MCP Tools (Sublime Integration)
 
 Allow Claude to query Sublime Text's editor state via MCP (Model Context Protocol).
 
 ### Setup
 
-1. Run **Claude: Add MCP Tools to Project** from Command Palette
-2. This creates `.claude/settings.json` with MCP server config
-3. Start a new session - status bar shows `ready (MCP: sublime)`
+1. MCP config is loaded from `~/.claude.json` (global), then project `.claude/settings.json`, then `.mcp.json`
+2. Start a new session - status bar shows `ready (MCP: sublime)`
 
 ### Available Tools
 
@@ -393,6 +435,23 @@ Define additional agents in `.claude/settings.json`:
 
 Agents run with separate context, preventing conversation bloat. Custom agents override built-ins with the same name.
 
+## Tests
+
+Run the test suite from the project root:
+
+```bash
+cd ~/PhpstormProjects/sublime-claude
+python3 -m unittest discover tests/ -v
+```
+
+**151 tests** covering all core utilities:
+- Context window gauge, session tags, drag-drop, usage graph
+- Constants, error handling, logging, prompt building
+- Command parsing, context parsing, session state machine
+- JSON-RPC client, tool routing, settings merging
+
+All tests run in ~0.02s without requiring Sublime Text to be open (uses mock API).
+
 ## Architecture
 
 ```
@@ -448,7 +507,14 @@ sublime-claude/
 │
 └── Utilities:
     ├── constants.py       # Config & magic strings
-    └── context_parser.py  # Context menus & @ picker
+    ├── context_parser.py  # Context menus & @ picker
+    ├── error_handler.py   # Error handling decorators
+    ├── logger.py          # File-based logging
+    ├── prompt_builder.py  # Prompt construction
+    ├── command_parser.py  # Slash command parsing
+    ├── session_state.py   # Session state machine
+    ├── settings.py        # Settings loading & merging
+    └── tool_router.py     # MCP tool dispatch
 ```
 
 All bridges emit identical JSON-RPC notifications to Sublime, so the output view, permissions, and MCP tools work the same regardless of backend.
