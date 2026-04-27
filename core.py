@@ -70,6 +70,12 @@ def plugin_loaded() -> None:
                 backend = view.settings().get("claude_backend", "claude")
                 session = Session(window, resume_id=resume_id, backend=backend)
                 session.name = session_name
+                # Restore tags and usage history from saved session
+                for saved in saved_sessions:
+                    if saved.get("session_id") == resume_id:
+                        session.tags = saved.get("tags", [])
+                        session._usage_history = saved.get("usage_history", [])
+                        break
                 session.output.view = view
                 session.draft_prompt = ""
                 sublime._claude_sessions[view.id()] = session

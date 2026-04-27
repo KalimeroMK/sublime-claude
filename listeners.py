@@ -58,6 +58,58 @@ class ClaudeCodeEventListener(sublime_plugin.EventListener):
         }
         print(f"[Claude] copy tracked: {path} regions={regions}")
 
+    def on_text_command(self, view, command_name, args):
+        """Intercept drag-and-drop file insertions into Claude output view."""
+        if command_name != "insert":
+            return None
+        if not view.settings().get("claude_output"):
+            return None
+        chars = args.get("characters", "") if args else ""
+        if not chars:
+            return None
+        # Check if it looks like a file path (drag-drop inserts path)
+        path = chars.strip().strip('"').strip("'")
+        if not os.path.isfile(path):
+            return None
+        # Get active session for this view
+        from .core import get_session_for_view
+        session = get_session_for_view(view)
+        if not session:
+            sublime.status_message("No active session for this view")
+            return None
+        # Check if it's an image
+        ext = os.path.splitext(path)[1].lower()
+        image_exts = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tiff", ".svg"}
+        if ext in image_exts:
+            try:
+                with open(path, "rb") as f:
+                    data = f.read()
+                mime = "image/png"
+                if ext in (".jpg", ".jpeg"):
+                    mime = "image/jpeg"
+                elif ext == ".gif":
+                    mime = "image/gif"
+                elif ext == ".webp":
+                    mime = "image/webp"
+                elif ext == ".svg":
+                    mime = "image/svg+xml"
+                session.add_context_image(data, mime)
+                sublime.status_message(f"Added image to context: {os.path.basename(path)}")
+            except Exception as e:
+                sublime.status_message(f"Failed to add image: {e}")
+            return ("claude_insert", {"characters": ""})  # Suppress default insert
+        else:
+            # Regular file — add to context
+            try:
+                with open(path, "r", encoding="utf-8", errors="replace") as f:
+                    content = f.read()
+                session.add_context_file(path, content)
+                sublime.status_message(f"Added file to context: {os.path.basename(path)}")
+            except Exception as e:
+                sublime.status_message(f"Failed to add file: {e}")
+            return ("claude_insert", {"characters": ""})  # Suppress default insert
+        return None
+
     def on_window_command(self, window: sublime.Window, command: str, args: dict):
         if command == "close_window":
             # Stop all sessions in this window

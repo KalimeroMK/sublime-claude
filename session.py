@@ -23,6 +23,41 @@ _CONTEXT_LIMITS = {
     "@200k": 200000,
 }
 
+# Model family → default max context tokens (for gauge calculation)
+_MODEL_CONTEXT_LIMITS = {
+    # Claude models
+    "claude-opus-4": 200000,
+    "claude-sonnet-4": 200000,
+    "claude-haiku-4": 200000,
+    "opus": 200000,
+    "sonnet": 200000,
+    "haiku": 200000,
+    "claude-3-opus": 200000,
+    "claude-3-sonnet": 200000,
+    "claude-3-haiku": 200000,
+    "claude-3-5-sonnet": 200000,
+    # OpenAI models
+    "gpt-4o": 128000,
+    "gpt-4o-mini": 128000,
+    "gpt-4-turbo": 128000,
+    "o3-mini": 200000,
+    "o1": 200000,
+    "o1-mini": 128000,
+    # Ollama models (typical)
+    "qwen2.5": 128000,
+    "llama3.1": 128000,
+    "llama3.2": 128000,
+    "mistral": 32000,
+    "phi4": 16000,
+    "deepseek": 64000,
+    "deepseek-v4": 64000,
+    # Codex
+    "gpt-5.5": 200000,
+    "gpt-5.4": 200000,
+    "gpt-5.3": 200000,
+    "o3": 200000,
+}
+
 def _resolve_model_id(model_id: str):
     """Resolve virtual model ID. Returns (real_model_id, max_context_tokens or None)."""
     if not model_id:
@@ -163,6 +198,8 @@ class Session:
         self.total_cost: float = 0.0
         self.query_count: int = 0
         self.context_usage: Optional[Dict] = None  # Latest usage/context stats
+        self.tags: List[str] = []  # Session tags for organization
+        self._usage_history: List[Dict] = []  # Per-query token usage history
         # Pending context for next query
         self.pending_context: List[ContextItem] = []
         # Profile docs available for reading (paths only, not content)
@@ -1553,6 +1590,16 @@ class Session:
             usage = params.get("usage")
             if usage:
                 self.context_usage = usage
+                # Record usage history entry
+                hist_entry = {
+                    "q": self.query_count,
+                    "t": time.time(),
+                    "in": usage.get("input_tokens", 0) + usage.get("cache_read_input_tokens", 0) + usage.get("cache_creation_input_tokens", 0),
+                    "out": usage.get("output_tokens", 0),
+                }
+                self._usage_history.append(hist_entry)
+                if len(self._usage_history) > 100:
+                    self._usage_history = self._usage_history[-100:]
             print(f"[Claude] [{dur:.1f}s, ${cost:.4f}]" if cost else f"[Claude] [{dur:.1f}s]")
             if usage:
                 print(f"[Claude] usage: {usage}")
@@ -1643,6 +1690,14 @@ class Session:
         entry["query_count"] = self.query_count
         entry["backend"] = self.backend
         entry["last_activity"] = self.last_activity
+        if self.tags:
+            entry["tags"] = self.tags.copy()
+        else:
+            entry.pop("tags", None)
+        if self._usage_history:
+            entry["usage_history"] = self._usage_history[-50:]  # Keep last 50 queries
+        else:
+            entry.pop("usage_history", None)
         # Derive state from current session state
         if self.client is not None and self.initialized:
             entry["state"] = "open"
@@ -1680,6 +1735,8 @@ class Session:
             model_info.append(f"@{self.profile_name}")
         if model_info:
             parts.append("".join(model_info))
+        if self.tags:
+            parts.append("[" + ",".join(self.tags) + "]")
         if self.total_cost > 0:
             parts.append(f"${self.total_cost:.4f}")
         if self.query_count > 0:
@@ -1688,6 +1745,9 @@ class Session:
             ctx_k = self._context_tokens_k()
             if ctx_k is not None:
                 parts.append(f"ctx:{ctx_k}k")
+            gauge = self._context_window_gauge()
+            if gauge:
+                parts.append(gauge)
         self.output.view.set_status("claude", f"{label}: {', '.join(parts)}")
 
     def _update_status_bar(self) -> None:
@@ -1708,6 +1768,52 @@ class Session:
         if not input_t:
             return None
         return max(1, input_t // 1000)
+
+    def _context_window_gauge(self) -> Optional[str]:
+        """Return a visual gauge showing context window utilization.
+
+        Format: ▓▓▓▓░░░░░ 45% (colored by severity)
+        """
+        if not self.context_usage:
+            return None
+        u = self.context_usage
+        used = (u.get("input_tokens", 0)
+                + u.get("cache_read_input_tokens", 0)
+                + u.get("cache_creation_input_tokens", 0))
+        if not used:
+            return None
+
+        # Determine max context for this model
+        max_ctx = None
+        model_id = self.sdk_model or ""
+        if model_id:
+            # Check suffix overrides first
+            for suffix, tokens in _CONTEXT_LIMITS.items():
+                if model_id.endswith(suffix):
+                    max_ctx = tokens
+                    break
+            # Fall back to model family lookup
+            if max_ctx is None:
+                for family, tokens in _MODEL_CONTEXT_LIMITS.items():
+                    if family in model_id.lower():
+                        max_ctx = tokens
+                        break
+        # Ultimate fallback: 200k for Claude, 128k for others
+        if max_ctx is None:
+            max_ctx = 200000 if self.backend in ("claude", "kimi", "default", "") else 128000
+
+        pct = min(100, int(used / max_ctx * 100))
+        # Build bar: 10 segments
+        filled = min(10, round(pct / 10))
+        bar = "█" * filled + "░" * (10 - filled)
+        # Color thresholds
+        if pct >= 90:
+            color = "🔴"
+        elif pct >= 70:
+            color = "🟡"
+        else:
+            color = "🟢"
+        return f"{color} {bar} {pct}%"
 
     def _clear_status(self) -> None:
         if self.output.view and self.output.view.is_valid():

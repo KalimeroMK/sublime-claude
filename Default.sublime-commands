@@ -68,6 +68,10 @@
         "command": "claude_code_rename"
     },
     {
+        "caption": "Claude: Tag Session...",
+        "command": "claude_code_tag_session"
+    },
+    {
         "caption": "Claude: Stop Session",
         "command": "claude_code_stop"
     },
@@ -84,6 +88,30 @@
         "command": "claude_undo_message"
     },
     {
+        "caption": "Claude: Clear Notifications",
+        "command": "claude_clear_notifications"
+    },
+    {
+        "caption": "Claude: Search Sessions",
+        "command": "claude_search_sessions"
+    },
+    {
+        "caption": "Claude: Select Effort",
+        "command": "claude_select_effort"
+    },
+    {
+        "caption": "Claude: Select Model",
+        "command": "claude_select_model"
+    },
+    {
+        "caption": "Claude: Set Default Model",
+        "command": "claude_set_default_model"
+    },
+    {
+        "caption": "Claude: Refresh Models",
+        "command": "claude_refresh_models"
+    },
+    {
         "caption": "Claude: Copy Conversation",
         "command": "claude_code_copy"
     },
@@ -94,6 +122,10 @@
     {
         "caption": "Claude: Permission Mode...",
         "command": "claude_code_toggle_permission_mode"
+    },
+    {
+        "caption": "Claude: Manage Auto-Allowed Tools...",
+        "command": "claude_code_manage_auto_allowed_tools"
     },
     {
         "caption": "Claude: Reset Input Mode",
@@ -116,7 +148,19 @@
         "command": "claude_code_usage"
     },
     {
+        "caption": "Claude: Show Usage Graph",
+        "command": "claude_code_show_usage_graph"
+    },
+    {
         "caption": "Claude: Open Link at Cursor",
         "command": "claude_open_link"
+    },
+    {
+        "caption": "Claude: Sleep Session",
+        "command": "claude_sleep_session"
+    },
+    {
+        "caption": "Claude: Wake Session",
+        "command": "claude_wake_session"
     }
 ]
