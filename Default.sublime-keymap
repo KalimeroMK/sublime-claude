@@ -164,6 +164,19 @@
     },
     {
         "keys": [
+            "escape"
+        ],
+        "command": "claude_code_interrupt",
+        "context": [
+            {
+                "key": "setting.claude_output",
+                "operator": "equal",
+                "operand": true
+            }
+        ]
+    },
+    {
+        "keys": [
             "ctrl+c"
         ],
         "command": "claude_code_interrupt",

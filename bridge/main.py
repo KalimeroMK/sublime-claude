@@ -1039,10 +1039,12 @@ You are subsession **{subsession_id}**. Call signal_complete(session_id={view_id
                         break
 
         self.current_task = asyncio.create_task(run_query())
+        result_sent = False
         try:
             await self.current_task
         except asyncio.CancelledError:
             send_result(id, {"status": "interrupted"})
+            result_sent = True
         except Exception as e:
             error_msg = str(e)
             with open("/tmp/claude_bridge.log", "a") as f:
@@ -1055,6 +1057,18 @@ You are subsession **{subsession_id}**. Call signal_complete(session_id={view_id
             )
             if is_session_error:
                 send_error(id, -32003, f"Session error: {error_msg}. Try restarting the session.")
+            else:
+                send_result(id, {"status": "error", "error": error_msg})
+            result_sent = True
+        finally:
+            # Safety net: if run_query() finished without sending a result
+            # (e.g. receive_messages() ended unexpectedly), send one now so
+            # the session doesn't hang forever.
+            if not result_sent:
+                status = "interrupted" if self.interrupted else "complete"
+                with open("/tmp/claude_bridge.log", "a") as f:
+                    f.write(f"query: safety-net result status={status}\n")
+                send_result(id, {"status": status})
             else:
                 send_error(id, -32000, f"Query failed: {error_msg}")
         finally:
@@ -1168,13 +1182,23 @@ You are subsession **{subsession_id}**. Call signal_complete(session_id={view_id
 
     async def interrupt(self, id: int) -> None:
         """Interrupt current query and drain pending messages."""
+        has_task = self.current_task is not None and not self.current_task.done()
         with open("/tmp/claude_bridge.log", "a") as f:
-            f.write(f"interrupt: called, has_task={self.current_task is not None and not self.current_task.done()}\n")
-        if self.current_task and not self.current_task.done():
-            self.interrupted = True  # Signal to query() that we were interrupted
+            f.write(f"interrupt: called, has_task={has_task}\n")
+
+        # Always signal the SDK to interrupt — even if our task tracking thinks
+        # it's done, the underlying claude CLI process may still be running.
+        if self.client:
             with open("/tmp/claude_bridge.log", "a") as f:
                 f.write(f"interrupt: sending to SDK\n")
-            await self.client.interrupt()
+            try:
+                await self.client.interrupt()
+            except Exception as e:
+                with open("/tmp/claude_bridge.log", "a") as f:
+                    f.write(f"interrupt: SDK interrupt error: {e}\n")
+
+        if has_task:
+            self.interrupted = True  # Signal to query() that we were interrupted
             # Cancel any pending permission requests
             for pid, future in list(self.pending_permissions.items()):
                 if not future.done():
