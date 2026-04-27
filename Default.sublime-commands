@@ -166,5 +166,9 @@
     {
         "caption": "Claude: Attach File...",
         "command": "claude_attach_file"
+    },
+    {
+        "caption": "Claude: Swarm Monitor",
+        "command": "claude_code_swarm_monitor"
     }
 ]

@@ -1330,6 +1330,72 @@ class ClaudeAttachFileCommand(sublime_plugin.WindowCommand):
         return session is not None
 
 
+class ClaudeCodeSwarmMonitorCommand(sublime_plugin.WindowCommand):
+    """Show dashboard of all active sessions (swarm monitor)."""
+    def run(self) -> None:
+        if not hasattr(sublime, '_claude_sessions') or not sublime._claude_sessions:
+            sublime.status_message("Нема активни сесии")
+            return
+
+        lines = ["# 🤖 Agent Swarm Monitor", ""]
+        lines.append("| Статус | Име | Backend | Queries | Трошок | Родител | Тагови |")
+        lines.append("|--------|-----|---------|---------|--------|---------|--------|")
+
+        window_sessions = []
+        for view_id, session in sublime._claude_sessions.items():
+            # Only show sessions in this window
+            if session.window != self.window:
+                continue
+            window_sessions.append(session)
+
+        if not window_sessions:
+            sublime.status_message("Нема активни сесии во овој прозорец")
+            return
+
+        # Sort: subsessions last, then by name
+        window_sessions.sort(key=lambda s: (s.parent_view_id is None, s.display_name.lower()))
+
+        for session in window_sessions:
+            status = self._status_icon(session)
+            name = session.display_name or "(unnamed)"
+            backend = session.backend or "claude"
+            queries = session.query_count
+            cost = f"${session.total_cost:.4f}" if session.total_cost else "$0.0000"
+            parent = "—"
+            if session.parent_view_id:
+                parent_session = sublime._claude_sessions.get(session.parent_view_id)
+                parent = parent_session.display_name if parent_session else f"#{session.parent_view_id}"
+            tags = ", ".join(session.tags) if session.tags else "—"
+
+            lines.append(f"| {status} | {name} | {backend} | {queries} | {cost} | {parent} | {tags} |")
+
+        lines.append("")
+        lines.append(f"**Вкупно сесии: {len(window_sessions)}**")
+
+        # Subsession summary
+        subsessions = [s for s in window_sessions if s.parent_view_id]
+        if subsessions:
+            lines.append(f"**Subsessions: {len(subsessions)}**")
+
+        panel = self.window.create_output_panel("claude_swarm")
+        panel.run_command("append", {"characters": "\n".join(lines)})
+        panel.set_syntax_file("Packages/Markdown/Markdown.sublime-syntax")
+        self.window.run_command("show_panel", {"panel": "output.claude_swarm"})
+
+    def _status_icon(self, session) -> str:
+        if session.working:
+            return "🟢 Working"
+        elif session.is_sleeping:
+            return "💤 Sleeping"
+        elif not session.initialized:
+            return "🟡 Connecting"
+        else:
+            return "⏸ Idle"
+
+    def is_enabled(self):
+        return hasattr(sublime, '_claude_sessions') and bool(sublime._claude_sessions)
+
+
 class ClaudeCodeResumeCommand(sublime_plugin.WindowCommand):
     """Resume a previous session."""
     def run(self) -> None:
