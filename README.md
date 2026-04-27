@@ -1,8 +1,10 @@
 # Claude Code for Sublime Text
 
-A Sublime Text plugin for [Kimi](https://kimi.ai/), [Claude Code](https://claude.ai/claude-code), [Ollama](https://ollama.com/), [OpenAI](https://openai.com/), [Codex CLI](https://github.com/openai/codex), [GitHub Copilot CLI](https://github.com/features/copilot/cli), and [DeepSeek](https://api-docs.deepseek.com/) integration.
+A significantly extended Sublime Text plugin for [Kimi](https://kimi.ai/), [Claude Code](https://claude.ai/claude-code), [Ollama](https://ollama.com/), [OpenAI](https://openai.com/), [Codex CLI](https://github.com/openai/codex), [GitHub Copilot CLI](https://github.com/features/copilot/cli), and [DeepSeek](https://api-docs.deepseek.com/) integration.
 
-Fork: https://github.com/KalimeroMK/sublime-claude
+> **Originally forked from [tommo/sublime-claude](https://github.com/tommo/sublime-claude)** — significantly extended with new UI features, monitoring tools, MCP marketplace, and a comprehensive test suite.
+>
+> **This fork:** https://github.com/KalimeroMK/sublime-claude
 
 ## Requirements
 
@@ -108,6 +110,9 @@ All commands available via Command Palette (`Cmd+Shift+P`): type "Claude"
 | Toggle Output | `Cmd+Alt+C` | Show/hide output view |
 | Interrupt | `Alt+Escape` | Stop current query |
 | **Show Usage Graph** | - | ASCII bar chart of token usage per query |
+| **Attach File...** | `Cmd+Shift+F` | Attach any file or image to context (auto-detects type) |
+| **Swarm Monitor** | - | Dashboard of all active sessions and subsessions |
+| **MCP Marketplace** | - | Browse and install 12+ MCP servers with one click |
 
 ### Inline Input Mode
 
@@ -120,6 +125,13 @@ The output view features an inline input area (marked with `◎`) where you type
 
 When a permission prompt appears:
 - **Y/N** - Allow or deny the tool
+
+### Attach File / Image
+
+**`Claude: Attach File...`** (`Cmd+Shift+F`) — attach any file to the current session:
+- **Images** (`.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`, `.svg`) → sent as binary context with correct MIME type
+- **Regular files** → sent as text content
+- Uses native macOS file picker (or input panel on other platforms)
 
 ### Drag & Drop
 
@@ -325,6 +337,44 @@ Claude: ready, effort:high, sonnet.4.5, ctx:45k, 🟡 ████████�
 - **Color coding:** 🟢 <70%, 🟡 70-90%, 🔴 >90%
 - **Model-aware limits:** 200K Claude, 128K GPT-4o, 64K DeepSeek, 32K Mistral
 
+### Agent Swarm Monitor
+
+**`Claude: Swarm Monitor`** — dashboard showing all active sessions in the current window:
+
+| Status | Name | Backend | Queries | Cost | Parent | Tags |
+|--------|------|---------|---------|------|--------|------|
+| 🟢 Working | Main | claude | 5 | $0.1234 | — | bugfix |
+| 💤 Sleeping | Worker | openai | 2 | $0.0567 | Main | — |
+| ⏸ Idle | Cache | deepseek | 10 | $0.8901 | — | refactor |
+
+- **Status icons:** 🟢 Working / 💤 Sleeping / 🟡 Connecting / ⏸ Idle
+- **Subsession tracking** — shows parent session name
+- **Window-scoped** — only shows sessions in the current Sublime window
+
+### MCP Marketplace
+
+**`Claude: MCP Marketplace`** — browse and install MCP servers with one click:
+
+Available servers (12 curated):
+- **Web Fetch** — fetch any web page for context
+- **File System** — read/write files in allowed directories
+- **GitHub** — search repos, read issues/PRs
+- **Git** — `git log`, `diff`, `blame`
+- **PostgreSQL / SQLite** — query databases
+- **Brave Search** — web search via API
+- **Puppeteer** — browser automation
+- **Sequential Thinking** — structured problem-solving
+- **Memory** — persistent knowledge graph across sessions
+- **Slack** — read channels, send messages
+- **Sentry** — read and analyze issues
+
+**How it works:**
+1. Select a server from the quick panel
+2. Confirm installation (shows required env vars like `GITHUB_PAT`)
+3. Automatically updates `.mcp.json` in your project (or `~/.claude.json` globally)
+4. Uses `npx -y` — no manual `npm install` needed
+5. Template variables auto-resolved: `${project_root}`, `${database_path}`
+
 ## MCP Tools (Sublime Integration)
 
 Allow Claude to query Sublime Text's editor state via MCP (Model Context Protocol).
@@ -444,13 +494,16 @@ cd ~/PhpstormProjects/sublime-claude
 python3 -m unittest discover tests/ -v
 ```
 
-**151 tests** covering all core utilities:
+**184 tests** covering all core utilities:
 - Context window gauge, session tags, drag-drop, usage graph
+- Attach commands (image/file auto-detect, MIME mapping)
+- Swarm monitor (status icons, session tracking)
+- MCP marketplace (config loading, install logic, template variables)
 - Constants, error handling, logging, prompt building
 - Command parsing, context parsing, session state machine
 - JSON-RPC client, tool routing, settings merging
 
-All tests run in ~0.02s without requiring Sublime Text to be open (uses mock API).
+All tests run in ~0.03s without requiring Sublime Text to be open (uses mock API).
 
 ## Architecture
 
