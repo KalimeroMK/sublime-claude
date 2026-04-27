@@ -1,0 +1,147 @@
+{
+  "version": "1.0",
+  "description": "Curated MCP servers from the community. Install with one click.",
+  "servers": {
+    "fetch": {
+      "name": "Web Fetch",
+      "description": "Fetch any web page and extract content for context",
+      "publisher": "modelcontextprotocol",
+      "source": "https://github.com/modelcontextprotocol/servers/tree/main/src/fetch",
+      "install_type": "npm",
+      "package": "@modelcontextprotocol/server-fetch",
+      "runtime": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-fetch"],
+      "env": {}
+    },
+    "filesystem": {
+      "name": "File System",
+      "description": "Read and write files within allowed directories",
+      "publisher": "modelcontextprotocol",
+      "source": "https://github.com/modelcontextprotocol/servers/tree/main/src/filesystem",
+      "install_type": "npm",
+      "package": "@modelcontextprotocol/server-filesystem",
+      "runtime": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "${project_root}"],
+      "env": {}
+    },
+    "github": {
+      "name": "GitHub",
+      "description": "Search repos, read issues/PRs, create comments",
+      "publisher": "modelcontextprotocol",
+      "source": "https://github.com/modelcontextprotocol/servers/tree/main/src/github",
+      "install_type": "npm",
+      "package": "@modelcontextprotocol/server-github",
+      "runtime": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "env": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "Your GitHub PAT"
+      }
+    },
+    "git": {
+      "name": "Git",
+      "description": "Read git log, diff, blame, and branch info",
+      "publisher": "modelcontextprotocol",
+      "source": "https://github.com/modelcontextprotocol/servers/tree/main/src/git",
+      "install_type": "npm",
+      "package": "@modelcontextprotocol/server-git",
+      "runtime": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-git"],
+      "env": {}
+    },
+    "postgres": {
+      "name": "PostgreSQL",
+      "description": "Query PostgreSQL databases with read-only access",
+      "publisher": "modelcontextprotocol",
+      "source": "https://github.com/modelcontextprotocol/servers/tree/main/src/postgres",
+      "install_type": "npm",
+      "package": "@modelcontextprotocol/server-postgres",
+      "runtime": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-postgres", "${database_url}"],
+      "env": {}
+    },
+    "sqlite": {
+      "name": "SQLite",
+      "description": "Query SQLite databases",
+      "publisher": "modelcontextprotocol",
+      "source": "https://github.com/modelcontextprotocol/servers/tree/main/src/sqlite",
+      "install_type": "npm",
+      "package": "@modelcontextprotocol/server-sqlite",
+      "runtime": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-sqlite", "${database_path}"],
+      "env": {}
+    },
+    "brave-search": {
+      "name": "Brave Search",
+      "description": "Web search via Brave Search API",
+      "publisher": "modelcontextprotocol",
+      "source": "https://github.com/modelcontextprotocol/servers/tree/main/src/brave-search",
+      "install_type": "npm",
+      "package": "@modelcontextprotocol/server-brave-search",
+      "runtime": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-brave-search"],
+      "env": {
+        "BRAVE_API_KEY": "Your Brave API key"
+      }
+    },
+    "puppeteer": {
+      "name": "Puppeteer",
+      "description": "Browser automation — screenshot, click, navigate",
+      "publisher": "modelcontextprotocol",
+      "source": "https://github.com/modelcontextprotocol/servers/tree/main/src/puppeteer",
+      "install_type": "npm",
+      "package": "@modelcontextprotocol/server-puppeteer",
+      "runtime": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-puppeteer"],
+      "env": {}
+    },
+    "sequential-thinking": {
+      "name": "Sequential Thinking",
+      "description": "Dynamic, structured problem-solving with thought chains",
+      "publisher": "modelcontextprotocol",
+      "source": "https://github.com/modelcontextprotocol/servers/tree/main/src/sequentialthinking",
+      "install_type": "npm",
+      "package": "@modelcontextprotocol/server-sequential-thinking",
+      "runtime": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-sequential-thinking"],
+      "env": {}
+    },
+    "memory": {
+      "name": "Memory",
+      "description": "Persistent knowledge graph across sessions",
+      "publisher": "modelcontextprotocol",
+      "source": "https://github.com/modelcontextprotocol/servers/tree/main/src/memory",
+      "install_type": "npm",
+      "package": "@modelcontextprotocol/server-memory",
+      "runtime": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-memory"],
+      "env": {}
+    },
+    "slack": {
+      "name": "Slack",
+      "description": "Read channels, send messages, search history",
+      "publisher": "modelcontextprotocol",
+      "source": "https://github.com/modelcontextprotocol/servers/tree/main/src/slack",
+      "install_type": "npm",
+      "package": "@modelcontextprotocol/server-slack",
+      "runtime": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-slack"],
+      "env": {
+        "SLACK_BOT_TOKEN": "xoxb-your-token",
+        "SLACK_TEAM_ID": "T12345678"
+      }
+    },
+    "sentry": {
+      "name": "Sentry",
+      "description": "Read and analyze Sentry issues",
+      "publisher": "modelcontextprotocol",
+      "source": "https://github.com/modelcontextprotocol/servers/tree/main/src/sentry",
+      "install_type": "npm",
+      "package": "@modelcontextprotocol/server-sentry",
+      "runtime": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-sentry"],
+      "env": {
+        "SENTRY_AUTH_TOKEN": "Your Sentry auth token"
+      }
+    }
+  }
+}

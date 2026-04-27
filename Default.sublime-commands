@@ -170,5 +170,9 @@
     {
         "caption": "Claude: Swarm Monitor",
         "command": "claude_code_swarm_monitor"
+    },
+    {
+        "caption": "Claude: MCP Marketplace",
+        "command": "claude_mcp_marketplace"
     }
 ]

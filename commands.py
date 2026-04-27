@@ -1,4 +1,5 @@
 """Claude Code commands for Sublime Text."""
+import json
 import os
 import sublime
 import sublime_plugin
@@ -1394,6 +1395,153 @@ class ClaudeCodeSwarmMonitorCommand(sublime_plugin.WindowCommand):
 
     def is_enabled(self):
         return hasattr(sublime, '_claude_sessions') and bool(sublime._claude_sessions)
+
+
+class ClaudeMcpMarketplaceCommand(sublime_plugin.WindowCommand):
+    """Browse and install MCP servers from the marketplace."""
+
+    _MARKETPLACE_PATH = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), "mcp_marketplace.json"
+    )
+
+    def run(self) -> None:
+        servers = self._load_marketplace()
+        if not servers:
+            sublime.status_message("MCP Marketplace: нема достапни сервери")
+            return
+
+        items = []
+        self._server_keys = []
+        for key, info in servers.items():
+            self._server_keys.append(key)
+            name = info.get("name", key)
+            desc = info.get("description", "")
+            install = info.get("install_type", "npm")
+            publisher = info.get("publisher", "unknown")
+            items.append([f"{name}  ({install})", f"{publisher} — {desc}"])
+
+        self.window.show_quick_panel(
+            items,
+            self._on_select,
+            placeholder="Избери MCP сервер за инсталација..."
+        )
+
+    def _load_marketplace(self) -> dict:
+        try:
+            if not os.path.isfile(self._MARKETPLACE_PATH):
+                return {}
+            with open(self._MARKETPLACE_PATH, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            return data.get("servers", {})
+        except Exception as e:
+            print(f"[Claude] MCP Marketplace error: {e}")
+            return {}
+
+    def _on_select(self, idx: int) -> None:
+        if idx < 0:
+            return
+        key = self._server_keys[idx]
+        servers = self._load_marketplace()
+        info = servers.get(key)
+        if not info:
+            return
+
+        # Show install confirmation with env vars info
+        name = info.get("name", key)
+        env = info.get("env", {})
+        env_note = ""
+        if env:
+            env_note = "\n\nПотребни env vars:\n" + "\n".join(f"  {k}={v}" for k, v in env.items())
+
+        if sublime.ok_cancel_dialog(
+            f"Инсталирај '{name}'?\n\n{info.get('description', '')}{env_note}",
+            "Инсталирај"
+        ):
+            self._install_server(key, info)
+
+    def _install_server(self, key: str, info: dict) -> None:
+        """Install MCP server and update config."""
+        install_type = info.get("install_type", "npm")
+        package = info.get("package", "")
+        runtime = info.get("runtime", "npx")
+        args_template = info.get("args", [])
+        env_vars = info.get("env", {})
+
+        # Resolve template variables in args
+        project_root = ""
+        if self.window.folders():
+            project_root = self.window.folders()[0]
+
+        args = []
+        for arg in args_template:
+            if arg == "${project_root}":
+                args.append(project_root or ".")
+            elif arg == "${database_url}":
+                args.append("postgresql://localhost/db")
+            elif arg == "${database_path}":
+                args.append(os.path.join(project_root or ".", "data.db"))
+            else:
+                args.append(arg)
+
+        # Check if runtime is available
+        if runtime in ("npx", "npm"):
+            if not self._command_exists("npx"):
+                sublime.error_message(
+                    "npx не е пронајден.\n\nИнсталирај Node.js од https://nodejs.org"
+                )
+                return
+
+        # Build server config
+        server_config = {
+            "command": runtime,
+            "args": args,
+        }
+        if env_vars:
+            server_config["env"] = env_vars
+
+        # Update config file
+        config_path = self._get_config_path()
+        if not config_path:
+            sublime.error_message("Не е пронајден проект. Отвори folder прво.")
+            return
+
+        try:
+            config = {"mcpServers": {}}
+            if os.path.exists(config_path):
+                with open(config_path, "r", encoding="utf-8") as f:
+                    config = json.load(f)
+
+            if "mcpServers" not in config:
+                config["mcpServers"] = {}
+
+            config["mcpServers"][key] = server_config
+
+            os.makedirs(os.path.dirname(config_path), exist_ok=True)
+            with open(config_path, "w", encoding="utf-8") as f:
+                json.dump(config, f, indent=2)
+
+            sublime.status_message(f"✅ MCP сервер '{key}' е инсталиран. Рестартирај го Sublime.")
+            print(f"[Claude MCP] Installed {key} to {config_path}")
+        except Exception as e:
+            sublime.error_message(f"Грешка при инсталација: {e}")
+            print(f"[Claude MCP] Install error: {e}")
+
+    def _get_config_path(self) -> str:
+        """Get MCP config path. Prefer project .mcp.json, fallback to ~/.claude.json."""
+        if self.window.folders():
+            project_root = self.window.folders()[0]
+            mcp_path = os.path.join(project_root, ".mcp.json")
+            return mcp_path
+        return os.path.expanduser("~/.claude.json")
+
+    def _command_exists(self, cmd: str) -> bool:
+        """Check if a command exists in PATH."""
+        try:
+            import subprocess
+            subprocess.run([cmd, "--version"], capture_output=True, check=True)
+            return True
+        except Exception:
+            return False
 
 
 class ClaudeCodeResumeCommand(sublime_plugin.WindowCommand):
