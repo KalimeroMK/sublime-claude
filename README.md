@@ -1,10 +1,38 @@
-# Claude Code for Sublime Text
+# Claude Code for Sublime Text — Extended
 
-A significantly extended Sublime Text plugin for [Kimi](https://kimi.ai/), [Claude Code](https://claude.ai/claude-code), [Ollama](https://ollama.com/), [OpenAI](https://openai.com/), [Codex CLI](https://github.com/openai/codex), [GitHub Copilot CLI](https://github.com/features/copilot/cli), and [DeepSeek](https://api-docs.deepseek.com/) integration.
+A Sublime Text plugin for [Kimi](https://kimi.ai/), [Claude Code](https://claude.ai/claude-code), [Ollama](https://ollama.com/), [OpenAI](https://openai.com/), [Codex CLI](https://github.com/openai/codex), [GitHub Copilot CLI](https://github.com/features/copilot/cli), and [DeepSeek](https://api-docs.deepseek.com/) integration.
 
-> **Originally forked from [tommo/sublime-claude](https://github.com/tommo/sublime-claude)** — significantly extended with new UI features, monitoring tools, MCP marketplace, and a comprehensive test suite.
->
-> **This fork:** https://github.com/KalimeroMK/sublime-claude
+**Built on top of [tommo/sublime-claude](https://github.com/tommo/sublime-claude)** — extended with additional UI features, monitoring tools, an MCP marketplace, bug fixes, and a comprehensive test suite.
+
+**Repository:** https://github.com/KalimeroMK/sublime-claude
+
+## What's New
+
+This build extends the base project with additional features, bug fixes, and a full test suite.
+
+### Additional Features (not in the original)
+
+| Feature | Description |
+|---------|-------------|
+| **Context Window Gauge** | Visual 10-segment bar in the status bar showing context usage percentage with color coding (🟢🟡🔴) |
+| **Session Tags** | Label sessions with comma-separated tags (e.g. `bugfix, refactor`) — shown in status bar and persisted across restarts |
+| **Attach File / Image** | Single command (`Cmd+Shift+F`) for attaching any file or image to context — auto-detects file type and sends images as binary |
+| **Drag & Drop** | Drop files or images directly onto the output view — automatically added to context |
+| **Token Usage Graph** | `Claude: Show Usage Graph` — ASCII bar chart of token usage per query, 100-query history persisted |
+| **Agent Swarm Monitor** | `Claude: Swarm Monitor` — dashboard showing all active sessions, subsessions, statuses, and costs |
+| **MCP Marketplace** | `Claude: MCP Marketplace` — browse and install 12 curated MCP servers (fetch, filesystem, github, git, postgres, sqlite, brave-search, puppeteer, sequential-thinking, memory, slack, sentry) with one-click auto-install |
+| **Comprehensive Test Suite** | 184 unit tests covering all core utilities, running in ~0.03s with a mock Sublime API |
+
+### Bug Fixes
+
+| Issue | Fix |
+|-------|-----|
+| Mouse selection unresponsive | Fixed dynamic `read_only` toggling to allow selection while protecting conversation history |
+| Input mode leaks | Blocked typing/pasting outside the input area when in input mode |
+| Orphaned view reconnection | Fixed blank lines being added on every reconnect after Sublime restart |
+| Reset input mode | Fixed command to properly re-enter input mode after cleanup instead of leaving view in an unusable state |
+| Duplicate event handlers | Removed duplicate `on_activated` and non-existent imports that caused runtime errors |
+| Dead code cleanup | Removed unused commands and modules that added unnecessary bloat |
 
 ## Requirements
 
