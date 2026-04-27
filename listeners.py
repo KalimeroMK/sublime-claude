@@ -11,6 +11,7 @@ from .context_parser import ContextParser, ContextMenuItem, ContextMenuHandler
 
 
 _last_copy_meta = None  # {file, regions: [(row_start, row_end), ...], text}
+_last_claude_view = None  # (window_id, view_id, timestamp) for drag-and-drop fallback
 
 class ClaudeCodeEventListener(sublime_plugin.EventListener):
     def _ensure_left_group(self, view):
@@ -57,58 +58,6 @@ class ClaudeCodeEventListener(sublime_plugin.EventListener):
             "text": sublime.get_clipboard(),
         }
         print(f"[Claude] copy tracked: {path} regions={regions}")
-
-    def on_text_command(self, view, command_name, args):
-        """Intercept drag-and-drop file insertions into Claude output view."""
-        if command_name != "insert":
-            return None
-        if not view.settings().get("claude_output"):
-            return None
-        chars = args.get("characters", "") if args else ""
-        if not chars:
-            return None
-        # Check if it looks like a file path (drag-drop inserts path)
-        path = chars.strip().strip('"').strip("'")
-        if not os.path.isfile(path):
-            return None
-        # Get active session for this view
-        from .core import get_session_for_view
-        session = get_session_for_view(view)
-        if not session:
-            sublime.status_message("No active session for this view")
-            return None
-        # Check if it's an image
-        ext = os.path.splitext(path)[1].lower()
-        image_exts = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tiff", ".svg"}
-        if ext in image_exts:
-            try:
-                with open(path, "rb") as f:
-                    data = f.read()
-                mime = "image/png"
-                if ext in (".jpg", ".jpeg"):
-                    mime = "image/jpeg"
-                elif ext == ".gif":
-                    mime = "image/gif"
-                elif ext == ".webp":
-                    mime = "image/webp"
-                elif ext == ".svg":
-                    mime = "image/svg+xml"
-                session.add_context_image(data, mime)
-                sublime.status_message(f"Added image to context: {os.path.basename(path)}")
-            except Exception as e:
-                sublime.status_message(f"Failed to add image: {e}")
-            return ("claude_insert", {"characters": ""})  # Suppress default insert
-        else:
-            # Regular file — add to context
-            try:
-                with open(path, "r", encoding="utf-8", errors="replace") as f:
-                    content = f.read()
-                session.add_context_file(path, content)
-                sublime.status_message(f"Added file to context: {os.path.basename(path)}")
-            except Exception as e:
-                sublime.status_message(f"Failed to add file: {e}")
-            return ("claude_insert", {"characters": ""})  # Suppress default insert
-        return None
 
     def on_window_command(self, window: sublime.Window, command: str, args: dict):
         if command == "close_window":
@@ -198,6 +147,73 @@ class ClaudeCodeEventListener(sublime_plugin.EventListener):
                     session.output.view.sel().add(sublime.Region(end, end))
 
             sublime.set_timeout(refocus, 100)
+            return
+
+        # FALLBACK: Detect drag-and-drop images that opened as new tabs
+        # (macOS sometimes opens images instead of inserting path text)
+        global _last_claude_view
+        if not _last_claude_view:
+            return
+        last_window_id, last_view_id, last_time = _last_claude_view
+        if window.id() != last_window_id:
+            return
+        # Only trigger if image was opened very shortly after Claude view was active
+        import time
+        if time.time() - last_time > 2.0:
+            return
+
+        path = view.file_name()
+        if not path:
+            return
+
+        ext = os.path.splitext(path)[1].lower()
+        image_exts = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tiff", ".svg"}
+        if ext not in image_exts:
+            return
+
+        # Find the Claude view
+        claude_view = None
+        for v in window.views():
+            if v.id() == last_view_id and v.settings().get("claude_output"):
+                claude_view = v
+                break
+        if not claude_view:
+            return
+
+        session = get_session_for_view(claude_view)
+        if not session:
+            return
+
+        # This looks like a drag-and-drop that opened as a new tab
+        # Add the image and close the tab
+        def handle_dropped_image():
+            try:
+                with open(path, "rb") as f:
+                    data = f.read()
+                mime = "image/png"
+                if ext in (".jpg", ".jpeg"): mime = "image/jpeg"
+                elif ext == ".gif": mime = "image/gif"
+                elif ext == ".webp": mime = "image/webp"
+                elif ext == ".svg": mime = "image/svg+xml"
+                session.add_context_image(data, mime)
+                sublime.status_message(f"Додадена слика: {os.path.basename(path)}")
+            except Exception as e:
+                sublime.status_message(f"Грешка при додавање слика: {e}")
+                return
+
+            # Close the image view and return to Claude
+            view.close()
+            window.focus_view(claude_view)
+            # Ensure input mode is active
+            if not session.output.is_input_mode():
+                session.output.enter_input_mode()
+                if session.draft_prompt:
+                    session.output.view.run_command("append", {"characters": session.draft_prompt})
+                    end = session.output.view.size()
+                    session.output.view.sel().clear()
+                    session.output.view.sel().add(sublime.Region(end, end))
+
+        sublime.set_timeout(handle_dropped_image, 50)
 
 
     def on_close(self, view: sublime.View) -> None:
@@ -218,6 +234,11 @@ class ClaudeOutputEventListener(sublime_plugin.ViewEventListener):
         window = self.view.window()
         if not window:
             return
+
+        # Track this as the last active Claude view for drag-and-drop fallback
+        global _last_claude_view
+        import time
+        _last_claude_view = (window.id(), self.view.id(), time.time())
 
         # Mark this as the "active" session for the window
         old_active = window.settings().get("claude_active_view")
@@ -366,6 +387,40 @@ class ClaudeOutputEventListener(sublime_plugin.ViewEventListener):
 
     def on_text_command(self, command_name, args):
         """Intercept text commands to restrict edits in input mode."""
+        # Handle drag-and-drop file insertions FIRST (before input mode restrictions)
+        if command_name == "insert" and args and "characters" in args:
+            chars = args["characters"]
+            if chars:
+                path = chars.strip().strip('"').strip("'")
+                if os.path.isfile(path):
+                    s = get_session_for_view(self.view)
+                    if s:
+                        ext = os.path.splitext(path)[1].lower()
+                        image_exts = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tiff", ".svg"}
+                        if ext in image_exts:
+                            try:
+                                with open(path, "rb") as f:
+                                    data = f.read()
+                                mime = "image/png"
+                                if ext in (".jpg", ".jpeg"): mime = "image/jpeg"
+                                elif ext == ".gif": mime = "image/gif"
+                                elif ext == ".webp": mime = "image/webp"
+                                elif ext == ".svg": mime = "image/svg+xml"
+                                s.add_context_image(data, mime)
+                                sublime.status_message(f"Додадена слика: {os.path.basename(path)}")
+                            except Exception as e:
+                                sublime.status_message(f"Грешка при додавање слика: {e}")
+                            return ("claude_insert", {"characters": ""})
+                        else:
+                            try:
+                                with open(path, "r", encoding="utf-8", errors="replace") as f:
+                                    content = f.read()
+                                s.add_context_file(path, content)
+                                sublime.status_message(f"Додаден фајл: {os.path.basename(path)}")
+                            except Exception as e:
+                                sublime.status_message(f"Грешка при додавање фајл: {e}")
+                            return ("claude_insert", {"characters": ""})
+
         s = get_session_for_view(self.view)
         if not s or not s.output.is_input_mode():
             return None

@@ -162,5 +162,9 @@
     {
         "caption": "Claude: Wake Session",
         "command": "claude_wake_session"
+    },
+    {
+        "caption": "Claude: Attach File...",
+        "command": "claude_attach_file"
     }
 ]

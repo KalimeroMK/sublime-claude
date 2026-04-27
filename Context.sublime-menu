@@ -2,5 +2,9 @@
     {
         "caption": "Ask Claude",
         "command": "claude_code_query_selection"
+    },
+    {
+        "caption": "Claude: Attach File...",
+        "command": "claude_attach_file"
     }
 ]

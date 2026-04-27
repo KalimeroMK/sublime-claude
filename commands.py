@@ -1,4 +1,5 @@
 """Claude Code commands for Sublime Text."""
+import os
 import sublime
 import sublime_plugin
 import platform
@@ -1267,6 +1268,66 @@ class ClaudeWakeSessionCommand(sublime_plugin.WindowCommand):
     def is_enabled(self):
         session = get_active_session(self.window)
         return session is not None and session.is_sleeping
+
+
+class ClaudeAttachFileCommand(sublime_plugin.WindowCommand):
+    """Attach a file or image to the current session."""
+    _IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tiff", ".svg"}
+
+    def run(self):
+        session = get_active_session(self.window)
+        if not session:
+            sublime.status_message("Нема активна сесија")
+            return
+        # Use native file picker on macOS, input panel otherwise
+        if platform.system() == "Darwin":
+            import subprocess
+            try:
+                result = subprocess.run([
+                    "osascript", "-e",
+                    'POSIX path of (choose file with prompt "Избери фајл")'
+                ], capture_output=True, text=True, timeout=30)
+                path = result.stdout.strip()
+                if path and os.path.isfile(path):
+                    self._add(session, path)
+                    return
+            except Exception as e:
+                print(f"[Claude] macOS picker error: {e}")
+        # Fallback to input panel
+        self.window.show_input_panel("Патека до фајл:", "", lambda p: self._add(session, p), None, None)
+
+    def _add(self, session, path):
+        if not path or not os.path.isfile(path):
+            sublime.status_message("Невалидна патека")
+            return
+        ext = os.path.splitext(path)[1].lower()
+        if ext in self._IMAGE_EXTS:
+            # Image — send as binary with mime type
+            try:
+                with open(path, "rb") as f:
+                    data = f.read()
+                mime = "image/png"
+                if ext in (".jpg", ".jpeg"): mime = "image/jpeg"
+                elif ext == ".gif": mime = "image/gif"
+                elif ext == ".webp": mime = "image/webp"
+                elif ext == ".svg": mime = "image/svg+xml"
+                session.add_context_image(data, mime)
+                sublime.status_message(f"Додадена слика: {os.path.basename(path)}")
+            except Exception as e:
+                sublime.status_message(f"Грешка: {e}")
+        else:
+            # Regular file — send as text
+            try:
+                with open(path, "r", encoding="utf-8", errors="replace") as f:
+                    content = f.read()
+                session.add_context_file(path, content)
+                sublime.status_message(f"Додаден фајл: {os.path.basename(path)}")
+            except Exception as e:
+                sublime.status_message(f"Грешка: {e}")
+
+    def is_enabled(self):
+        session = get_active_session(self.window)
+        return session is not None
 
 
 class ClaudeCodeResumeCommand(sublime_plugin.WindowCommand):

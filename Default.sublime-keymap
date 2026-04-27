@@ -200,5 +200,18 @@
                 "operand": true
             }
         ]
+    },
+    {
+        "keys": [
+            "super+shift+f"
+        ],
+        "command": "claude_attach_file",
+        "context": [
+            {
+                "key": "setting.claude_output",
+                "operator": "equal",
+                "operand": true
+            }
+        ]
     }
 ]
