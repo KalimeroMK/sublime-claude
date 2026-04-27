@@ -12,6 +12,7 @@ PENDING = "pending"
 DONE = "done"
 ERROR = "error"
 BACKGROUND = "background"
+IN_PROGRESS = "in_progress"
 
 # Permission button constants
 PERM_ALLOW = "allow"
@@ -1891,9 +1892,16 @@ class OutputView:
             lines.append(f"{prefix}◎ {indented_prompt} ▶\n")
 
         # Events in time order (text chunks and tools interleaved)
+        # Find the last pending tool to animate it when working
+        last_pending_idx = None
+        if self.current.working:
+            for idx, event in enumerate(self.current.events):
+                if isinstance(event, ToolCall) and event.status == PENDING:
+                    last_pending_idx = idx
+
         if self.current.events:
             lines.append("\n")
-            for event in self.current.events:
+            for idx, event in enumerate(self.current.events):
                 if isinstance(event, str):
                     # Text chunk
                     lines.append(event)
@@ -1901,12 +1909,16 @@ class OutputView:
                         lines.append("\n")
                 elif isinstance(event, ToolCall):
                     # Tool call
-                    symbol = self.SYMBOLS[event.status]
+                    if idx == last_pending_idx:
+                        # Animate the currently-executing tool
+                        symbol = SPINNER_FRAMES[self._spinner_frame % len(SPINNER_FRAMES)]
+                    else:
+                        symbol = self.SYMBOLS[event.status]
                     detail = self._format_tool_detail(event)
                     lines.append(f"  {symbol} {event.name}{detail}\n")
 
-        # Working indicator at bottom (animated)
-        if self.current.working:
+        # Working indicator at bottom (animated) — only show when no pending tools
+        if self.current.working and last_pending_idx is None:
             spinner = SPINNER_FRAMES[self._spinner_frame % len(SPINNER_FRAMES)]
             lines.append(f"  {spinner}\n")
 
