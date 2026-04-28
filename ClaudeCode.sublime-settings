@@ -73,6 +73,10 @@
     // When true, splits the window into 2 columns (code left, chat right)
     "claude_side_panel": true,
 
+    // Smart context: auto-add git-modified files, open files, and current scope
+    // to context before each query
+    "smart_context_enabled": true,
+
     // Environment variables passed to bridge process
     // "env": {},
 }

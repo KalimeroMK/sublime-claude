@@ -4,6 +4,8 @@ from typing import Optional, Callable
 
 import sublime
 
+from .smart_context import build_smart_context
+
 
 class SessionQueryMixin:
     def query(self, prompt: str, display_prompt: str = None, silent: bool = False) -> None:
@@ -32,6 +34,12 @@ class SessionQueryMixin:
         if self.output.view and not self.window.settings().has("claude_executing_view"):
             self.window.settings().set("claude_executing_view", self.output.view.id())
             self._is_executing_session = True
+
+        # --- Smart Context: auto-add relevant files if enabled ---
+        settings = sublime.load_settings("ClaudeCode.sublime-settings")
+        if settings.get("smart_context_enabled", True):
+            self._inject_smart_context()
+
         # Build prompt with context (may include images)
         full_prompt, images = self._build_prompt_with_context(prompt)
         context_names = [item.name for item in self.pending_context]
@@ -66,6 +74,56 @@ class SessionQueryMixin:
             self._status("error: bridge died")
             self.working = False
             self.output.text("\n\n*Failed to send query. Bridge process died.*\n")
+
+    def _inject_smart_context(self) -> None:
+        """Auto-add smart context items based on current editor state.
+
+        Adds git-modified files, relevant open files, and current scope info
+        to pending_context before the query is sent.
+        """
+        from .session_core import ContextItem
+
+        try:
+            active_view = self.window.active_view()
+            current_file = active_view.file_name() if active_view else None
+
+            smart_items = build_smart_context(
+                window=self.window,
+                current_file=current_file,
+                current_view=active_view,
+                max_related=3,
+                max_git=2,
+                max_open=2,
+            )
+
+            already = {item.name for item in self.pending_context}
+            for item in smart_items:
+                path = item.get("path", "")
+                if path in already:
+                    continue
+                content = item.get("content", "")
+                reason = item.get("reason", "")
+                if not content:
+                    continue
+                prefix = f"[{reason}] " if reason else ""
+                if item.get("type") == "scope":
+                    # Scope info goes as a short note, not a full file
+                    self.pending_context.append(ContextItem(
+                        kind="note",
+                        name=f"scope:{path}",
+                        content=f"{prefix}{content}",
+                    ))
+                else:
+                    # File content
+                    display_path = path.replace(os.path.expanduser("~"), "~")
+                    self.pending_context.append(ContextItem(
+                        kind="file",
+                        name=display_path,
+                        content=f"{prefix}File: {display_path}\n```\n{content}\n```",
+                    ))
+                already.add(path)
+        except Exception as e:
+            print(f"[Claude] Smart context error: {e}")
 
     def send_message_with_callback(self, message: str, callback: Callable[[str], None], silent: bool = False, display_prompt: str = None) -> None:
         """Send message and call callback with Claude's response.
