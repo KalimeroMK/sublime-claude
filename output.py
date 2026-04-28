@@ -10,6 +10,7 @@ from .constants import (
     PERMISSION_REGION_KEY,
     PLAN_REGION_KEY,
     QUESTION_REGION_KEY,
+    UNDO_BUTTON_REGION_KEY,
 )
 from .output_format import format_tool_detail
 from .output_models import (
@@ -60,6 +61,8 @@ class OutputView:
         self._input_area_start: int = 0  # Start of entire input area (context + marker)
         self._input_marker: str = "◎ "  # Marker for input line
         self._spinner_frame: int = 0  # Current spinner animation frame
+        # Undo button tracking: list of (region_start, region_end, file_path, snapshot)
+        self._undo_buttons: List[tuple] = []
 
     def show(self, focus: bool = True) -> None:
         # If we already have a view, optionally focus it
@@ -567,14 +570,14 @@ class OutputView:
         )
         self._scroll_to_end()
 
-    def tool(self, name: str, tool_input: dict = None, tool_id: str = None, background: bool = False) -> None:
+    def tool(self, name: str, tool_input: dict = None, tool_id: str = None, background: bool = False, snapshot: str = None) -> None:
         """Add a pending tool."""
         if not self.current:
             return
 
         tool_input = tool_input or {}
         status = BACKGROUND if background else PENDING
-        tool_call = ToolCall(name=name, tool_input=tool_input, status=status, id=tool_id)
+        tool_call = ToolCall(name=name, tool_input=tool_input, status=status, id=tool_id, snapshot=snapshot)
         self.current.events.append(tool_call)
 
         # Capture TodoWrite state
@@ -936,6 +939,35 @@ class OutputView:
         if detail:
             lines.append(f": {detail}")
         lines.append("?\n")
+
+        # Show diff preview for Edit/Write tools
+        if tool == "Edit" and "file_path" in tool_input:
+            from .output_format import format_edit_diff, format_unified_diff, extract_diff_line_num
+            old = tool_input.get("old_string", "")
+            new = tool_input.get("new_string", "")
+            unified = tool_input.get("unified_diff", "")
+            if unified:
+                diff_preview = format_unified_diff(unified)
+            else:
+                diff_preview = format_edit_diff(old, new)
+            if diff_preview:
+                # Indent each line of the diff preview
+                diff_lines = diff_preview.strip().split("\n")
+                for dl in diff_lines:
+                    lines.append(f"    {dl}\n")
+        elif tool == "Write" and "file_path" in tool_input:
+            content = tool_input.get("content", "")
+            file_path = tool_input["file_path"]
+            if content:
+                content_lines = content.splitlines()
+                preview_lines = content_lines[:15]
+                if len(content_lines) > 15:
+                    preview_lines.append(f"... ({len(content_lines) - 15} more lines)")
+                lines.append(f"    → Will write {len(content_lines)} lines to {file_path}\n")
+                for pl in preview_lines:
+                    pl_truncated = pl[:76] + "…" if len(pl) > 76 else pl
+                    lines.append(f"    │ {pl_truncated}\n")
+
         lines.append("    ")
 
         # Track button positions relative to block start
@@ -1744,6 +1776,57 @@ class OutputView:
 
         return True
 
+    def handle_undo_click(self, point: int) -> bool:
+        """Handle click on an [Undo] button. Returns True if handled."""
+        if not self.view:
+            return False
+        # Check if point is within any undo button region
+        for start, end, file_path, snapshot in self._undo_buttons:
+            if start <= point < end and file_path and snapshot is not None:
+                try:
+                    # Ensure directory exists
+                    import os
+                    dir_path = os.path.dirname(file_path)
+                    if dir_path and not os.path.exists(dir_path):
+                        os.makedirs(dir_path, exist_ok=True)
+                    with open(file_path, "w", encoding="utf-8") as f:
+                        f.write(snapshot)
+                    sublime.status_message(f"Claude: undone edit to {os.path.basename(file_path)}")
+                    # Remove snapshot from the tool so [Undo] disappears
+                    for conv in self.conversations + ([self.current] if self.current else []):
+                        for event in conv.events:
+                            if isinstance(event, ToolCall):
+                                if event.tool_input.get("file_path") == file_path and getattr(event, "snapshot", None) is not None:
+                                    event.snapshot = None
+                                    event.diff = None
+                    self._render_current()
+                    return True
+                except Exception as e:
+                    sublime.status_message(f"Claude: undo failed: {e}")
+                    return True
+        return False
+
+    def find_undoable_at_cursor(self, point: int) -> Optional[tuple]:
+        """Find the nearest undoable edit at or before point. Returns (file_path, snapshot) or None."""
+        if not self.view or not self.current:
+            return None
+        # Search backward from point for a tool line with [Undo]
+        content = self.view.substr(sublime.Region(0, point))
+        # Find last occurrence of tool line pattern with [Undo]
+        import re
+        for m in reversed(list(re.finditer(r'^  [✔✘] (Write|Edit): (.+?)\s+\[Undo\]', content, re.MULTILINE))):
+            file_path = m.group(2).strip()
+            # Find matching ToolCall
+            for conv in self.conversations + ([self.current] if self.current else []):
+                for event in conv.events:
+                    if isinstance(event, ToolCall) and event.name in ("Write", "Edit"):
+                        if event.tool_input.get("file_path") == file_path:
+                            snapshot = getattr(event, "snapshot", None)
+                            if snapshot is not None:
+                                return (file_path, snapshot)
+            # If no snapshot on that exact tool, keep searching
+        return None
+
     def _render_current(self, auto_scroll: bool = True) -> None:
         """Re-render current conversation in place (debounced)."""
         if not self.current or not self.view:
@@ -1861,6 +1944,9 @@ class OutputView:
                 if isinstance(event, ToolCall) and event.status == PENDING:
                     last_pending_idx = idx
 
+        # Collect undo button positions during render
+        undo_buttons = []
+
         if self.current.events:
             lines.append("\n")
             for idx, event in enumerate(self.current.events):
@@ -1877,7 +1963,14 @@ class OutputView:
                     else:
                         symbol = self.SYMBOLS[event.status]
                     detail = format_tool_detail(event)
-                    lines.append(f"  {symbol} {event.name}{detail}\n")
+                    line = f"  {symbol} {event.name}{detail}\n"
+                    # Track [Undo] button position
+                    if getattr(event, "snapshot", None) is not None and event.status == DONE:
+                        undo_idx = line.find("[Undo]")
+                        if undo_idx >= 0:
+                            # Position will be calculated after we know the absolute start
+                            undo_buttons.append((len("".join(lines)) + undo_idx, len("".join(lines)) + undo_idx + len("[Undo]"), event))
+                    lines.append(line)
 
         # Working indicator at bottom (animated) — only show when no pending tools
         if self.current.working and last_pending_idx is None:
@@ -1951,6 +2044,23 @@ class OutputView:
             [sublime.Region(start, new_end)],
             "", "", sublime.HIDDEN,
         )
+
+        # Set up undo button regions
+        self.view.erase_regions(UNDO_BUTTON_REGION_KEY)
+        self._undo_buttons = []
+        if undo_buttons:
+            regions = []
+            for u_start, u_end, tool in undo_buttons:
+                abs_start = start + u_start
+                abs_end = start + u_end
+                regions.append(sublime.Region(abs_start, abs_end))
+                self._undo_buttons.append((abs_start, abs_end, tool.tool_input.get("file_path", ""), tool.snapshot))
+            self.view.add_regions(
+                UNDO_BUTTON_REGION_KEY,
+                regions,
+                "claude.permission.button.allow",
+                "", sublime.DRAW_NO_OUTLINE,
+            )
 
         # Update title to reflect working state
         self._update_title()

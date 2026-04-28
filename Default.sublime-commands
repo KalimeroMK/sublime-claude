@@ -88,6 +88,10 @@
         "command": "claude_undo_message"
     },
     {
+        "caption": "Claude: Undo Last Edit",
+        "command": "claude_undo_edit"
+    },
+    {
         "caption": "Claude: Clear Notifications",
         "command": "claude_clear_notifications"
     },

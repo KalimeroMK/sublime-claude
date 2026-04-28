@@ -64,6 +64,8 @@ class ToolCall:
     status: str = PENDING  # pending, done, error, background
     result: Optional[str] = None  # tool result content
     id: Optional[str] = None  # tool_use_id, for precise matching
+    snapshot: Optional[str] = None  # Original file content before Write/Edit (for undo)
+    diff: Optional[str] = None  # Computed unified diff (for display)
 
 
 @dataclass

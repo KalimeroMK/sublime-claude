@@ -1147,9 +1147,23 @@ class Session(SessionQueryMixin, SessionPermissionsMixin):
             if not name or not name.strip():
                 return
 
+            # Snapshot file content before Write/Edit for diff preview / undo
+            snapshot = None
+            if name in ("Write", "Edit"):
+                file_path = tool_input.get("file_path", "")
+                if file_path:
+                    try:
+                        if os.path.exists(file_path):
+                            with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+                                snapshot = f.read()
+                        else:
+                            snapshot = ""
+                    except Exception:
+                        pass
+
             if background:
                 # Background tools do not take over current_tool (spinner stays on foreground)
-                self.output.tool(name, tool_input, tool_id=tool_id, background=True)
+                self.output.tool(name, tool_input, tool_id=tool_id, background=True, snapshot=snapshot)
                 self._update_status_bar()
                 return
 
@@ -1157,7 +1171,7 @@ class Session(SessionQueryMixin, SessionPermissionsMixin):
             if self.current_tool and self.current_tool.strip():
                 self.output.tool_done(self.current_tool)
             self.current_tool = name
-            self.output.tool(name, tool_input, tool_id=tool_id, background=False)
+            self.output.tool(name, tool_input, tool_id=tool_id, background=False, snapshot=snapshot)
         elif t == "tool_result":
             tool_use_id = params.get("tool_use_id")
             content = params.get("content", "")
@@ -1180,6 +1194,27 @@ class Session(SessionQueryMixin, SessionPermissionsMixin):
                 # Background tool_result is just an ack ("running in background..."),
                 # not the final result. Status change comes from task_notification.
                 return
+
+            # Compute diff for Write/Edit tools
+            if tool_name in ("Write", "Edit") and matched:
+                file_path = matched.tool_input.get("file_path", "")
+                snapshot = getattr(matched, "snapshot", None)
+                if file_path and snapshot is not None:
+                    try:
+                        import difflib
+                        with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+                            current = f.read()
+                        old_lines = snapshot.splitlines(keepends=True)
+                        new_lines = current.splitlines(keepends=True)
+                        if old_lines and not old_lines[-1].endswith("\n"):
+                            old_lines[-1] += "\n"
+                        if new_lines and not new_lines[-1].endswith("\n"):
+                            new_lines[-1] += "\n"
+                        diff = list(difflib.unified_diff(old_lines, new_lines, fromfile=file_path, tofile=file_path, lineterm=""))
+                        if diff:
+                            matched.diff = "".join(diff)
+                    except Exception:
+                        pass
 
             if is_error:
                 self.output.tool_error(tool_name, content, tool_id=tool_use_id)

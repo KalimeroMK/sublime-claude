@@ -392,6 +392,37 @@ class ClaudeOutputEventListener(sublime_plugin.ViewEventListener):
         # Clear reconnecting flag
         view.settings().erase("claude_reconnecting")
 
+    def on_hover(self, point, hover_zone):
+        """Show popup when hovering over [Undo] buttons."""
+        if hover_zone != sublime.HOVER_TEXT:
+            return
+        s = get_session_for_view(self.view)
+        if not s or not s.output.view:
+            return
+        regions = s.output.view.get_regions("claude_undo_buttons")
+        for region in regions:
+            if region.contains(point):
+                self._undo_hover_point = point
+                self.view.show_popup(
+                    '<a href="undo">↩ Undo this edit</a>',
+                    sublime.HIDE_ON_MOUSE_MOVE_AWAY,
+                    point,
+                    max_width=300,
+                )
+                return
+
+    def on_navigate(self, url):
+        """Handle popup navigation clicks."""
+        if url == "undo":
+            s = get_session_for_view(self.view)
+            if s:
+                point = getattr(self, '_undo_hover_point', None)
+                if point is None:
+                    sel = self.view.sel()
+                    point = sel[0].begin() if sel else 0
+                s.output.handle_undo_click(point)
+            self.view.hide_popup()
+
     def on_text_command(self, command_name, args):
         """Intercept text commands to restrict edits in input mode."""
         # Handle drag-and-drop file insertions FIRST (before input mode restrictions)

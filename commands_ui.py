@@ -9,6 +9,7 @@ from .core import get_active_session, get_session_for_view, create_session
 from .session import Session, load_saved_sessions
 from .prompt_builder import PromptBuilder
 from .command_parser import CommandParser
+from .output_models import ToolCall
 
 # Fallback model lists per backend (used when no cache/settings available)
 DEFAULT_MODELS = {
@@ -218,6 +219,43 @@ class ClaudeUndoMessageCommand(sublime_plugin.TextCommand):
         s = get_session_for_view(self.view)
         if s:
             s.undo_message()
+
+
+class ClaudeUndoEditCommand(sublime_plugin.TextCommand):
+    """Undo a file edit (Write/Edit tool) at cursor position or last edit."""
+    def run(self, edit):
+        s = get_session_for_view(self.view)
+        if not s:
+            return
+        # Try cursor position first
+        sel = self.view.sel()
+        point = sel[0].begin() if sel else 0
+        if s.output.handle_undo_click(point):
+            return
+        # Fallback: find nearest undoable edit before cursor
+        result = s.output.find_undoable_at_cursor(point)
+        if result:
+            file_path, snapshot = result
+            try:
+                import os
+                dir_path = os.path.dirname(file_path)
+                if dir_path and not os.path.exists(dir_path):
+                    os.makedirs(dir_path, exist_ok=True)
+                with open(file_path, "w", encoding="utf-8") as f:
+                    f.write(snapshot)
+                sublime.status_message(f"Claude: undone edit to {os.path.basename(file_path)}")
+                # Remove snapshot from the tool so [Undo] disappears
+                for conv in s.output.conversations + ([s.output.current] if s.output.current else []):
+                    for event in conv.events:
+                        if isinstance(event, ToolCall):
+                            if event.tool_input.get("file_path") == file_path and getattr(event, "snapshot", None) is not None:
+                                event.snapshot = None
+                                event.diff = None
+                s.output._render_current()
+            except Exception as e:
+                sublime.status_message(f"Claude: undo failed: {e}")
+        else:
+            sublime.status_message("Claude: no undoable edit found")
 
 
 

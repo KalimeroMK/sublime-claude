@@ -209,21 +209,38 @@ def format_tool_detail(tool) -> str:
             detail += format_read_result(tool.result)
     elif tool.name == "Edit" and "file_path" in tool_input:
         file_path = tool_input['file_path']
-        old = tool_input.get("old_string", "")
-        new = tool_input.get("new_string", "")
-        unified = tool_input.get("unified_diff", "")
-        if unified:
-            diff_str = format_unified_diff(unified)
-            line_num = extract_diff_line_num(unified)
+        # Prefer pre-computed diff from snapshot (actual file changes)
+        if getattr(tool, "diff", None):
+            diff_str = format_unified_diff(tool.diff)
+            line_num = extract_diff_line_num(tool.diff)
             detail = f": {file_path}:{line_num}" if line_num else f": {file_path}"
+            if diff_str:
+                detail += diff_str
         else:
-            line_num = find_line_number(file_path, old, new)
-            diff_str = format_edit_diff(old, new)
-            detail = f": {file_path}:{line_num}" if line_num else f": {file_path}"
-        if diff_str:
-            detail += diff_str
+            old = tool_input.get("old_string", "")
+            new = tool_input.get("new_string", "")
+            unified = tool_input.get("unified_diff", "")
+            if unified:
+                diff_str = format_unified_diff(unified)
+                line_num = extract_diff_line_num(unified)
+                detail = f": {file_path}:{line_num}" if line_num else f": {file_path}"
+            else:
+                line_num = find_line_number(file_path, old, new)
+                diff_str = format_edit_diff(old, new)
+                detail = f": {file_path}:{line_num}" if line_num else f": {file_path}"
+            if diff_str:
+                detail += diff_str
+        if getattr(tool, "snapshot", None) is not None and tool.status == DONE:
+            detail += "  [Undo]"
     elif tool.name == "Write" and "file_path" in tool_input:
-        detail = f": {tool_input['file_path']}"
+        file_path = tool_input['file_path']
+        detail = f": {file_path}"
+        if getattr(tool, "diff", None):
+            diff_str = format_unified_diff(tool.diff)
+            if diff_str:
+                detail += diff_str
+        if getattr(tool, "snapshot", None) is not None and tool.status == DONE:
+            detail += "  [Undo]"
     elif tool.name == "Glob" and "pattern" in tool_input:
         detail = f": {tool_input['pattern']}"
         if tool.result and tool.status == DONE:
