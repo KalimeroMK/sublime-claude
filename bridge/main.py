@@ -25,6 +25,30 @@ from logger import get_bridge_logger, ContextLogger
 # Initialize logger
 _logger = get_bridge_logger()
 
+# Bridge debug log — auto-rotates at 2MB to prevent unbounded growth
+_BRIDGE_LOG_PATH = "/tmp/claude_bridge.log"
+_BRIDGE_LOG_MAX_BYTES = 2 * 1024 * 1024
+
+
+def _bridge_log(message: str) -> None:
+    """Append a line to the bridge debug log, rotating if too large."""
+    try:
+        if os.path.exists(_BRIDGE_LOG_PATH):
+            size = os.path.getsize(_BRIDGE_LOG_PATH)
+            if size > _BRIDGE_LOG_MAX_BYTES:
+                # Rotate: keep last 10% of log
+                with open(_BRIDGE_LOG_PATH, "r") as f:
+                    content = f.read()
+                keep_from = len(content) // 10
+                with open(_BRIDGE_LOG_PATH, "w") as f:
+                    f.write("[log rotated]\n")
+                    f.write(content[keep_from:])
+        with open(_BRIDGE_LOG_PATH, "a") as f:
+            f.write(message + "\n")
+    except Exception:
+        pass
+
+
 # Set env var so child processes (bash commands) can detect they're running under Claude agent
 os.environ["CLAUDE_AGENT"] = "1"
 
@@ -243,9 +267,7 @@ You are subsession **{subsession_id}**. Call signal_complete(session_id={view_id
         sandbox = self._load_sandbox_settings(cwd)
         if sandbox:
             options_dict["sandbox"] = sandbox
-            with open("/tmp/claude_bridge.log", "a") as f:
-                f.write(f"  sandbox enabled: {sandbox}\n")
-
+            _bridge_log(f"  sandbox enabled: {sandbox}\n")
         # Add MCP servers if found
         if mcp_servers:
             options_dict["mcp_servers"] = mcp_servers
@@ -294,8 +316,7 @@ You are subsession **{subsession_id}**. Call signal_complete(session_id={view_id
             if is_session_error and resume_id:
                 # If rewind failed, retry resume without rewind point
                 if "extra_args" in options_dict and "resume-session-at" in options_dict.get("extra_args", {}):
-                    with open("/tmp/claude_bridge.log", "a") as f:
-                        f.write(f"resume-session-at failed, retrying plain resume: {error_msg}\n")
+                    _bridge_log(f"resume-session-at failed, retrying plain resume: {error_msg}\n")
                     del options_dict["extra_args"]["resume-session-at"]
                     if not options_dict["extra_args"]:
                         del options_dict["extra_args"]
@@ -370,9 +391,8 @@ You are subsession **{subsession_id}**. Call signal_complete(session_id={view_id
             }
 
         if servers:
-            with open("/tmp/claude_bridge.log", "a") as f:
-                f.write(f"  injected MCP servers: {list(servers.keys())}\n")
-        return servers
+            _bridge_log(f"  injected MCP servers: {list(servers.keys())}\n")
+            return servers
 
     def _load_sandbox_settings(self, cwd: str) -> dict:
         """Load sandbox settings from project config."""
@@ -716,16 +736,14 @@ You are subsession **{subsession_id}**. Call signal_complete(session_id={view_id
         if tool_name == "Bash" and "command" in tool_input:
             is_safe, warning = self._validate_bash_command(tool_input["command"])
             if not is_safe:
-                with open("/tmp/claude_bridge.log", "a") as f:
-                    f.write(f"BLOCKED dangerous Bash command: {warning}\n")
-                    f.write(f"  Command: {tool_input['command']}\n")
+                _bridge_log(f"BLOCKED dangerous Bash command: {warning}\n")
+                _bridge_log(f"  Command: {tool_input['command']}\n")
                 return PermissionResultDeny(message=f"Blocked dangerous command: {warning}")
 
             # Run pre-flight checks for commands that require them
             passed, message = self._run_pre_flight_checks(tool_input["command"])
             if not passed:
-                with open("/tmp/claude_bridge.log", "a") as f:
-                    f.write(f"PRE-FLIGHT CHECKS FAILED: {message}\n")
+                _bridge_log(f"PRE-FLIGHT CHECKS FAILED: {message}\n")
                 return PermissionResultDeny(message=f"Pre-flight checks failed:\n{message}")
 
             # Check guardrails requiring approval
@@ -734,8 +752,7 @@ You are subsession **{subsession_id}**. Call signal_complete(session_id={view_id
             for pattern in require_approval:
                 if pattern.lower() in tool_input["command"].lower():
                     # Force permission dialog even if auto-allowed
-                    with open("/tmp/claude_bridge.log", "a") as f:
-                        f.write(f"GUARDRAIL: Requiring approval for '{pattern}' command\n")
+                    _bridge_log(f"GUARDRAIL: Requiring approval for '{pattern}' command\n")
                     break
             else:
                 # No approval required, continue to auto-allow check
@@ -757,8 +774,7 @@ You are subsession **{subsession_id}**. Call signal_complete(session_id={view_id
                 # Check if tool matches any auto-allow pattern (supports fine-grained patterns)
                 for pattern in auto_allowed:
                     if self._match_permission_pattern(tool_name, tool_input, pattern):
-                        with open("/tmp/claude_bridge.log", "a") as f:
-                            f.write(f"can_use_tool: auto-allowed {tool_name} (matched pattern: {pattern})\n")
+                        _bridge_log(f"can_use_tool: auto-allowed {tool_name} (matched pattern: {pattern})\n")
                         return PermissionResultAllow(updated_input=tool_input)
 
                 # No auto-allow match, fall through to permission dialog below
@@ -772,16 +788,13 @@ You are subsession **{subsession_id}**. Call signal_complete(session_id={view_id
             # Check if tool matches any auto-allow pattern (supports fine-grained patterns)
             for pattern in auto_allowed:
                 if self._match_permission_pattern(tool_name, tool_input, pattern):
-                    with open("/tmp/claude_bridge.log", "a") as f:
-                        f.write(f"can_use_tool: auto-allowed {tool_name} (matched pattern: {pattern})\n")
+                    _bridge_log(f"can_use_tool: auto-allowed {tool_name} (matched pattern: {pattern})\n")
                     return PermissionResultAllow(updated_input=tool_input)
 
         self.permission_id += 1
         pid = self.permission_id
 
-        with open("/tmp/claude_bridge.log", "a") as f:
-            f.write(f"can_use_tool: tool={tool_name}, pid={pid}, input={str(tool_input)[:100]}\n")
-
+        _bridge_log(f"can_use_tool: tool={tool_name}, pid={pid}, input={str(tool_input)[:100]}\n")
         # Create a future to wait for the response
         future = asyncio.get_event_loop().create_future()
         self.pending_permissions[pid] = future
@@ -796,8 +809,7 @@ You are subsession **{subsession_id}**. Call signal_complete(session_id={view_id
         # Wait for response from Sublime
         try:
             allowed = await asyncio.wait_for(future, timeout=3600)  # 1 hour timeout
-            with open("/tmp/claude_bridge.log", "a") as f:
-                f.write(f"can_use_tool returning: pid={pid}, allowed={allowed}\n")
+            _bridge_log(f"can_use_tool returning: pid={pid}, allowed={allowed}\n")
             if allowed:
                 return PermissionResultAllow(updated_input=tool_input)
             else:
@@ -812,16 +824,12 @@ You are subsession **{subsession_id}**. Call signal_complete(session_id={view_id
         pid = params.get("id")
         allow = params.get("allow", False)
 
-        with open("/tmp/claude_bridge.log", "a") as f:
-            f.write(f"permission_response: pid={pid}, allow={allow}\n")
-
+        _bridge_log(f"permission_response: pid={pid}, allow={allow}\n")
         if pid in self.pending_permissions:
             future = self.pending_permissions[pid]
             future.set_result(allow)
         else:
-            with open("/tmp/claude_bridge.log", "a") as f:
-                f.write(f"  -> WARNING: pid {pid} not found in pending!\n")
-
+            _bridge_log(f"  -> WARNING: pid {pid} not found in pending!\n")
         send_result(id, {"status": "ok"})
 
     async def _handle_ask_user_question(self, tool_input: dict):
@@ -833,9 +841,7 @@ You are subsession **{subsession_id}**. Call signal_complete(session_id={view_id
         self.permission_id += 1
         qid = self.permission_id
 
-        with open("/tmp/claude_bridge.log", "a") as f:
-            f.write(f"AskUserQuestion: qid={qid}, questions={len(questions)}\n")
-
+        _bridge_log(f"AskUserQuestion: qid={qid}, questions={len(questions)}\n")
         future = asyncio.get_event_loop().create_future()
         self.pending_questions[qid] = future
 
@@ -846,9 +852,7 @@ You are subsession **{subsession_id}**. Call signal_complete(session_id={view_id
 
         try:
             answers = await future
-            with open("/tmp/claude_bridge.log", "a") as f:
-                f.write(f"AskUserQuestion response: qid={qid}, answers={answers}\n")
-
+            _bridge_log(f"AskUserQuestion response: qid={qid}, answers={answers}\n")
             if answers is None:
                 return PermissionResultDeny(message="User cancelled")
 
@@ -862,15 +866,11 @@ You are subsession **{subsession_id}**. Call signal_complete(session_id={view_id
         qid = params.get("id")
         answers = params.get("answers")
 
-        with open("/tmp/claude_bridge.log", "a") as f:
-            f.write(f"question_response: qid={qid}, answers={answers}\n")
-
+        _bridge_log(f"question_response: qid={qid}, answers={answers}\n")
         if qid in self.pending_questions:
             self.pending_questions[qid].set_result(answers)
         else:
-            with open("/tmp/claude_bridge.log", "a") as f:
-                f.write(f"  -> WARNING: qid {qid} not found!\n")
-
+            _bridge_log(f"  -> WARNING: qid {qid} not found!\n")
         send_result(id, {"status": "ok"})
 
     async def _handle_exit_plan_mode(self, tool_input: dict):
@@ -878,9 +878,7 @@ You are subsession **{subsession_id}**. Call signal_complete(session_id={view_id
         self.plan_id += 1
         pid = self.plan_id
 
-        with open("/tmp/claude_bridge.log", "a") as f:
-            f.write(f"ExitPlanMode: pid={pid}, input={str(tool_input)[:200]}\n")
-
+        _bridge_log(f"ExitPlanMode: pid={pid}, input={str(tool_input)[:200]}\n")
         future = asyncio.get_event_loop().create_future()
         self.pending_plan_approvals[pid] = future
 
@@ -892,9 +890,7 @@ You are subsession **{subsession_id}**. Call signal_complete(session_id={view_id
 
         try:
             result = await asyncio.wait_for(future, timeout=3600)  # 1 hour timeout
-            with open("/tmp/claude_bridge.log", "a") as f:
-                f.write(f"ExitPlanMode response: pid={pid}, approved={result}\n")
-
+            _bridge_log(f"ExitPlanMode response: pid={pid}, approved={result}\n")
             if result is True:
                 # Approved - allow the tool
                 return PermissionResultAllow(updated_input=tool_input)
@@ -914,15 +910,11 @@ You are subsession **{subsession_id}**. Call signal_complete(session_id={view_id
         pid = params.get("id")
         approved = params.get("approved")  # True, False, or None (continue)
 
-        with open("/tmp/claude_bridge.log", "a") as f:
-            f.write(f"plan_response: pid={pid}, approved={approved}\n")
-
+        _bridge_log(f"plan_response: pid={pid}, approved={approved}\n")
         if pid in self.pending_plan_approvals:
             self.pending_plan_approvals[pid].set_result(approved)
         else:
-            with open("/tmp/claude_bridge.log", "a") as f:
-                f.write(f"  -> WARNING: pid {pid} not found!\n")
-
+            _bridge_log(f"  -> WARNING: pid {pid} not found!\n")
         send_result(id, {"status": "ok"})
 
     def _build_content_with_images(self, prompt: str, images: list) -> list:
@@ -982,15 +974,12 @@ You are subsession **{subsession_id}**. Call signal_complete(session_id={view_id
                     # Very short timeout — only catches already-buffered messages
                     msg = await asyncio.wait_for(stale_iter.__anext__(), timeout=0.05)
                     count += 1
-                    with open("/tmp/claude_bridge.log", "a") as f:
-                        f.write(f"pre-drain stale: {type(msg).__name__}\n")
+                    _bridge_log(f"pre-drain stale: {type(msg).__name__}\n")
                     # Don't emit stale messages — they'd confuse the current conversation
                 except (asyncio.TimeoutError, StopAsyncIteration):
                     break
             if count:
-                with open("/tmp/claude_bridge.log", "a") as f:
-                    f.write(f"pre-drain: consumed {count} stale messages\n")
-
+                _bridge_log(f"pre-drain: consumed {count} stale messages\n")
         async def run_query():
             if images:
                 # Build multimodal content
@@ -1047,8 +1036,7 @@ You are subsession **{subsession_id}**. Call signal_complete(session_id={view_id
             result_sent = True
         except Exception as e:
             error_msg = str(e)
-            with open("/tmp/claude_bridge.log", "a") as f:
-                f.write(f"query error: {error_msg}\n")
+            _bridge_log(f"query error: {error_msg}\n")
             # Check for session-related errors
             is_session_error = (
                 "No conversation found" in error_msg or
@@ -1066,14 +1054,12 @@ You are subsession **{subsession_id}**. Call signal_complete(session_id={view_id
             # the session doesn't hang forever.
             if not result_sent:
                 status = "interrupted" if self.interrupted else "complete"
-                with open("/tmp/claude_bridge.log", "a") as f:
-                    f.write(f"query: safety-net result status={status}\n")
+                _bridge_log(f"query: safety-net result status={status}\n")
                 send_result(id, {"status": status})
             self.query_id = None
             # Process any pending injects that arrived during query
             if self.pending_injects:
-                with open("/tmp/claude_bridge.log", "a") as f:
-                    f.write(f"query ended with {len(self.pending_injects)} pending injects\n")
+                _bridge_log(f"query ended with {len(self.pending_injects)} pending injects\n")
                 # Send notification to Sublime to submit the queued prompts
                 for inject in self.pending_injects:
                     send_notification("queued_inject", {"message": inject})
@@ -1101,8 +1087,7 @@ You are subsession **{subsession_id}**. Call signal_complete(session_id={view_id
             return
 
         if isinstance(message, AssistantMessage):
-            with open("/tmp/claude_bridge.log", "a") as f:
-                f.write(f"  blocks: {[type(b).__name__ for b in message.content]}\n")
+            _bridge_log(f"  blocks: {[type(b).__name__ for b in message.content]}\n")
             if message.usage:
                 send_notification("message", {
                     "type": "turn_usage",
@@ -1125,8 +1110,7 @@ You are subsession **{subsession_id}**. Call signal_complete(session_id={view_id
                         "background": is_bg,
                     })
                 elif isinstance(block, ToolResultBlock):
-                    with open("/tmp/claude_bridge.log", "a") as f:
-                        f.write(f"tool_result: id={block.tool_use_id}, is_error={block.is_error}, content={str(block.content)[:200]}\n")
+                    _bridge_log(f"tool_result: id={block.tool_use_id}, is_error={block.is_error}, content={str(block.content)[:200]}\n")
                     send_notification("message", {
                         "type": "tool_result",
                         "tool_use_id": block.tool_use_id,
@@ -1142,12 +1126,10 @@ You are subsession **{subsession_id}**. Call signal_complete(session_id={view_id
             # UserMessage contains tool results
             content = message.content
             if isinstance(content, list):
-                with open("/tmp/claude_bridge.log", "a") as f:
-                    f.write(f"  UserMessage blocks: {[type(b).__name__ for b in content]}\n")
+                _bridge_log(f"  UserMessage blocks: {[type(b).__name__ for b in content]}\n")
                 for block in content:
                     if isinstance(block, ToolResultBlock):
-                        with open("/tmp/claude_bridge.log", "a") as f:
-                            f.write(f"tool_result: id={block.tool_use_id}, is_error={block.is_error}\n")
+                        _bridge_log(f"tool_result: id={block.tool_use_id}, is_error={block.is_error}\n")
                         send_notification("message", {
                             "type": "tool_result",
                             "tool_use_id": block.tool_use_id,
@@ -1169,8 +1151,7 @@ You are subsession **{subsession_id}**. Call signal_complete(session_id={view_id
                 result_params["stop_reason"] = message.stop_reason
             send_notification("message", result_params)
         elif isinstance(message, SystemMessage):
-            with open("/tmp/claude_bridge.log", "a") as f:
-                f.write(f"SystemMessage: subtype={message.subtype}, data={message.data}\n")
+            _bridge_log(f"SystemMessage: subtype={message.subtype}, data={message.data}\n")
             send_notification("message", {
                 "type": "system",
                 "subtype": message.subtype,
@@ -1180,20 +1161,15 @@ You are subsession **{subsession_id}**. Call signal_complete(session_id={view_id
     async def interrupt(self, id: int) -> None:
         """Interrupt current query and drain pending messages."""
         has_task = self.current_task is not None and not self.current_task.done()
-        with open("/tmp/claude_bridge.log", "a") as f:
-            f.write(f"interrupt: called, has_task={has_task}\n")
-
+        _bridge_log(f"interrupt: called, has_task={has_task}\n")
         # Always signal the SDK to interrupt — even if our task tracking thinks
         # it's done, the underlying claude CLI process may still be running.
         if self.client:
-            with open("/tmp/claude_bridge.log", "a") as f:
-                f.write(f"interrupt: sending to SDK\n")
+            _bridge_log(f"interrupt: sending to SDK\n")
             try:
                 await self.client.interrupt()
             except Exception as e:
-                with open("/tmp/claude_bridge.log", "a") as f:
-                    f.write(f"interrupt: SDK interrupt error: {e}\n")
-
+                _bridge_log(f"interrupt: SDK interrupt error: {e}\n")
         if has_task:
             self.interrupted = True  # Signal to query() that we were interrupted
             # Cancel any pending permission requests
@@ -1203,22 +1179,19 @@ You are subsession **{subsession_id}**. Call signal_complete(session_id={view_id
             self.pending_permissions.clear()
             # Don't cancel task - let it drain naturally after interrupt
             # Wait for the task to complete (it should finish quickly after interrupt)
-            with open("/tmp/claude_bridge.log", "a") as f:
-                f.write(f"interrupt: waiting for task to drain\n")
+            _bridge_log(f"interrupt: waiting for task to drain\n")
             try:
                 await asyncio.wait_for(self.current_task, timeout=5.0)
             except asyncio.TimeoutError:
-                with open("/tmp/claude_bridge.log", "a") as f:
-                    f.write(f"interrupt: drain timeout, cancelling\n")
+                _bridge_log(f"interrupt: drain timeout, cancelling\n")
                 self.current_task.cancel()
                 try:
                     await self.current_task
                 except asyncio.CancelledError:
                     pass
             except Exception as e:
-                with open("/tmp/claude_bridge.log", "a") as f:
-                    f.write(f"interrupt: drain error: {e}\n")
-        send_result(id, {"status": "interrupted"})
+                _bridge_log(f"interrupt: drain error: {e}\n")
+                send_result(id, {"status": "interrupted"})
 
     async def cancel_pending(self, id: int) -> None:
         """Cancel all pending permission/question requests."""
@@ -1235,8 +1208,7 @@ You are subsession **{subsession_id}**. Call signal_complete(session_id={view_id
                 count += 1
         self.pending_questions.clear()
 
-        with open("/tmp/claude_bridge.log", "a") as f:
-            f.write(f"cancel_pending: cancelled {count} requests\n")
+        _bridge_log(f"cancel_pending: cancelled {count} requests\n")
         send_result(id, {"status": "ok", "cancelled": count})
 
     # _on_notalone_inject removed - handled by global client in plugin
@@ -1248,13 +1220,10 @@ You are subsession **{subsession_id}**. Call signal_complete(session_id={view_id
             send_error(id, -32602, "Missing message parameter")
             return
 
-        with open("/tmp/claude_bridge.log", "a") as f:
-            f.write(f"inject_message: {message[:60]}...\n")
-
+        _bridge_log(f"inject_message: {message[:60]}...\n")
         # If no active query, queue the message to be sent when query ends
         if not self.query_id:
-            with open("/tmp/claude_bridge.log", "a") as f:
-                f.write(f"  no active query, queuing inject\n")
+            _bridge_log(f"  no active query, queuing inject\n")
             self.pending_injects.append(message)
             send_result(id, {"status": "queued"})
             return
@@ -1265,8 +1234,7 @@ You are subsession **{subsession_id}**. Call signal_complete(session_id={view_id
             send_result(id, {"status": "ok"})
         except Exception as e:
             # If injection fails (e.g., query completed), queue it
-            with open("/tmp/claude_bridge.log", "a") as f:
-                f.write(f"  inject failed: {e}, queuing\n")
+            _bridge_log(f"  inject failed: {e}, queuing\n")
             self.pending_injects.append(message)
             send_result(id, {"status": "queued"})
 
@@ -1367,8 +1335,7 @@ You are subsession **{subsession_id}**. Call signal_complete(session_id={view_id
         await loop.connect_read_pipe(lambda: protocol, sys.stdin)
 
         # Log to verify this code is running
-        with open("/tmp/claude_bridge.log", "a") as f:
-            f.write("Bridge started with 1GB buffer limit\n")
+        _bridge_log("Bridge started with 1GB buffer limit\n")
         sys.stderr.write(f"=== StreamReader limit set to {reader._limit} bytes ===\n")
         sys.stderr.flush()
 
