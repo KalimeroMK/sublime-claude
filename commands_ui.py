@@ -172,20 +172,6 @@ class ClaudeSubmitInputCommand(sublime_plugin.TextCommand):
 
 
 
-class ClaudeInsertCommand(sublime_plugin.TextCommand):
-    """Insert text at position in Claude output view."""
-    def run(self, edit, pos, text):
-        self.view.insert(edit, pos, text)
-
-
-
-class ClaudeReplaceCommand(sublime_plugin.TextCommand):
-    """Replace region in Claude output view."""
-    def run(self, edit, start, end, text):
-        self.view.replace(edit, sublime.Region(start, end), text)
-
-
-
 class ClaudeReplaceContentCommand(sublime_plugin.TextCommand):
     """Replace entire view content."""
     def run(self, edit, content):
