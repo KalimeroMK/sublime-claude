@@ -2,13 +2,18 @@
 
 Provides context beyond explicitly added files:
 - Git recently modified files
-- Symbols from Sublime's index
+- Symbols from Sublime's index (codebase-wide)
 - Current scope (function/class at cursor)
 - Open files relevance scoring
+
+Uses Sublime Text's built-in symbol index instead of embeddings,
+so it works with any language that Sublime can index (including
+PHP via Intelephense, LSP, or built-in syntax definitions).
 """
 import os
+import re
 import subprocess
-from typing import List, Dict, Optional, Set
+from typing import List, Dict, Optional, Set, Tuple
 import sublime
 
 try:
@@ -143,6 +148,120 @@ def get_open_code_files(window: sublime.Window, exclude: Set[str]) -> List[str]:
     return files
 
 
+def extract_symbol_candidates(text: str) -> List[str]:
+    """Extract potential symbol names from prompt text.
+
+    Looks for CamelCase, snake_case, and PascalCase identifiers
+    that are likely to be class/function names.
+    """
+    candidates = set()
+    # CamelCase / PascalCase words (2+ consecutive capitalized words)
+    for match in re.finditer(r'\b[A-Z][a-zA-Z0-9]*(?:[A-Z][a-zA-Z0-9]*)+\b', text):
+        candidates.add(match.group())
+    # snake_case words that look like functions/classes
+    for match in re.finditer(r'\b[a-z][a-z0-9]*(?:_[a-z0-9]+)+\b', text):
+        word = match.group()
+        # Exclude common words
+        if word not in ("is_valid", "getattr", "hasattr", "isinstance"):
+            candidates.add(word)
+    # Single Capitalized words (likely class names)
+    for match in re.finditer(r'\b[A-Z][a-zA-Z0-9]{2,}\b', text):
+        word = match.group()
+        if word not in ("True", "False", "None", "HTTP", "URL", "API", "JSON", "XML"):
+            candidates.add(word)
+    return list(candidates)
+
+
+def get_view_symbols(view: sublime.View) -> List[Tuple[str, int]]:
+    """Get indexed symbols from the current view.
+
+    Returns list of (symbol_name, kind_id) tuples.
+    """
+    if not view or not view.is_valid():
+        return []
+    symbols = []
+    try:
+        # indexed_symbol_regions() returns SymbolRegion objects with .name and .kind
+        for sym in view.indexed_symbol_regions():
+            symbols.append((sym.name, sym.kind[0] if sym.kind else 0))
+    except Exception:
+        pass
+    return symbols
+
+
+def get_symbol_related_files(window: sublime.Window, current_file: str, max_symbols: int = 3) -> List[str]:
+    """Find definition files for symbols in the current file.
+
+    Uses Sublime Text's symbol index (or Intelephense/LSP if installed)
+    to find where symbols defined in current_file are referenced,
+    and where symbols referenced in current_file are defined.
+    """
+    if not window or not current_file:
+        return []
+
+    files = []
+    try:
+        # Find the view for current_file
+        current_view = None
+        for view in window.views():
+            if view.file_name() == current_file:
+                current_view = view
+                break
+
+        if not current_view or not current_view.is_valid():
+            return []
+
+        # Get symbols from current view
+        symbols = get_view_symbols(current_view)
+        if not symbols:
+            return []
+
+        # Prioritize: types/classes first, then functions
+        symbols.sort(key=lambda s: 0 if s[1] in (2, 4) else 1)  # KindId.TYPE=2, NAMESPACE=4
+
+        seen = set()
+        for sym_name, _ in symbols[:max_symbols]:
+            if sym_name in seen:
+                continue
+            seen.add(sym_name)
+
+            # Look up symbol definitions in project index
+            try:
+                locations = window.symbol_locations(sym_name)
+            except Exception:
+                # Fallback to deprecated API
+                try:
+                    locations = window.lookup_symbol_in_index(sym_name)
+                except Exception:
+                    continue
+
+            for loc in locations:
+                path = loc.path
+                if not path or path == current_file:
+                    continue
+                if os.path.isfile(path) and path not in files:
+                    files.append(path)
+                    break  # One definition per symbol is enough
+
+            # Also look up references
+            try:
+                refs = window.lookup_references_in_index(sym_name)
+            except Exception:
+                refs = []
+
+            for ref in refs[:2]:  # Limit references
+                path = ref.path
+                if not path or path == current_file:
+                    continue
+                if os.path.isfile(path) and path not in files:
+                    files.append(path)
+
+        return files[:max_symbols]
+    except Exception as e:
+        print(f"[Claude] Symbol index error: {e}")
+        return []
+
+
 def build_smart_context(
     window: sublime.Window,
     current_file: Optional[str],
@@ -176,7 +295,30 @@ def build_smart_context(
                 "reason": "cursor",
             })
 
-    # 2. Git recently modified files
+    # 2. Symbol-based codebase context (from Sublime's index)
+    if current_file:
+        sym_files = get_symbol_related_files(window, current_file, max_symbols=3)
+        for path in sym_files:
+            if os.path.abspath(path) in exclude:
+                continue
+            if os.path.exists(path) and os.path.isfile(path):
+                try:
+                    with open(path, "r", encoding="utf-8", errors="replace") as f:
+                        content = f.read()
+                    # Limit content size to avoid context bloat
+                    if len(content) > 8000:
+                        content = content[:8000] + "\n\n... [truncated]\n"
+                    context_items.append({
+                        "type": "symbol",
+                        "path": path,
+                        "content": content,
+                        "reason": "symbol_definition",
+                    })
+                    exclude.add(os.path.abspath(path))
+                except Exception:
+                    pass
+
+    # 3. Git recently modified files
     if cwd:
         git_files = get_git_modified_files(cwd, max_files=max_git)
         for path in git_files:
