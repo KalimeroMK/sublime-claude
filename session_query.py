@@ -45,6 +45,9 @@ class SessionQueryMixin:
         if settings.get("auto_add_current_file", True) and not self.pending_context:
             self._auto_add_current_file()
 
+        # --- @-commands: @codebase, @web, @file ---
+        prompt = self._expand_at_commands(prompt)
+
         # Build prompt with context (may include images)
         full_prompt, images = self._build_prompt_with_context(prompt)
         context_names = [item.name for item in self.pending_context]
@@ -164,6 +167,90 @@ class SessionQueryMixin:
                 already.add(path)
         except Exception as e:
             print(f"[Claude] Smart context error: {e}")
+
+    def _expand_at_commands(self, prompt: str) -> str:
+        """Expand @-commands in prompt and add results to pending_context.
+
+        Supported:
+            @codebase <query>  -- search project for relevant code
+            @file:<path>       -- inline file reference
+            @web <query>       -- web search (placeholder)
+
+        Returns the prompt with @-markers removed.
+        """
+        import re
+        from .session_core import ContextItem
+
+        # @codebase <query> -- search codebase
+        def replace_codebase(match):
+            query_text = match.group(1).strip()
+            if not query_text:
+                return ""
+
+            project_root = self.window.folders()[0] if self.window.folders() else None
+            if not project_root:
+                return ""
+
+            try:
+                from .codebase_search import CodebaseSearch
+                search = CodebaseSearch(project_root)
+                # Index on first use if needed
+                if search.needs_reindex(max_age_hours=24.0):
+                    print(f"[Claude] Indexing codebase for @codebase...")
+                    count = search.index_project()
+                    print(f"[Claude] Indexed {count} files")
+
+                results = search.search(query_text, top_k=5)
+                if results:
+                    for r in results:
+                        display_path = r["path"].replace(os.path.expanduser("~"), "~")
+                        self.pending_context.append(ContextItem(
+                            kind="file",
+                            name=display_path,
+                            content=f"[codebase] {display_path}:{r['line_start']}\n```\n{r['chunk']}\n```",
+                        ))
+                    print(f"[Claude] @codebase: added {len(results)} files")
+                else:
+                    print(f"[Claude] @codebase: no results for '{query_text}'")
+            except Exception as e:
+                print(f"[Claude] @codebase error: {e}")
+            return query_text
+
+        prompt = re.sub(r'@codebase\s+([^@\n]+)', replace_codebase, prompt)
+
+        # @file:<path> -- inline file reference
+        def replace_file(match):
+            path = match.group(1).strip()
+            # Resolve relative to project root
+            if not os.path.isabs(path) and self.window.folders():
+                for root in self.window.folders():
+                    full = os.path.join(root, path)
+                    if os.path.isfile(full):
+                        path = full
+                        break
+            if os.path.isfile(path):
+                try:
+                    with open(path, "r", encoding="utf-8", errors="replace") as f:
+                        content = f.read()
+                    display_path = path.replace(os.path.expanduser("~"), "~")
+                    self.pending_context.append(ContextItem(
+                        kind="file",
+                        name=display_path,
+                        content=f"[file] {display_path}\n```\n{content}\n```",
+                    ))
+                except Exception as e:
+                    print(f"[Claude] @file error: {e}")
+            else:
+                print(f"[Claude] @file: not found: {path}")
+            return ""
+
+        prompt = re.sub(r'@file:(\S+)', replace_file, prompt)
+
+        # Clean up any remaining standalone @codebase or @file without args
+        prompt = re.sub(r'@codebase\b', '', prompt)
+        prompt = re.sub(r'@file\b', '', prompt)
+
+        return prompt.strip()
 
     def send_message_with_callback(self, message: str, callback: Callable[[str], None], silent: bool = False, display_prompt: str = None) -> None:
         """Send message and call callback with Claude's response.

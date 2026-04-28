@@ -44,8 +44,20 @@ class ContextParserTest(unittest.TestCase):
             has_pending_context=False
         )
         self.assertTrue(len(menu) > 0)
-        # First item should be "browse" action
-        self.assertEqual(menu[0].action, "browse")
+        # First item should be "codebase" action
+        self.assertEqual(menu[0].action, "codebase")
+        # Second item should be "browse"
+        self.assertEqual(menu[1].action, "browse")
+
+    def test_build_menu_has_codebase(self):
+        """Menu includes @codebase option."""
+        menu = ContextParser.build_menu(
+            open_files=[],
+            has_pending_context=False
+        )
+        codebase_items = [m for m in menu if m.action == "codebase"]
+        self.assertEqual(len(codebase_items), 1)
+        self.assertEqual(codebase_items[0].label, "@codebase")
 
     def test_build_menu_with_files(self):
         """Menu includes open files."""

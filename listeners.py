@@ -666,7 +666,11 @@ class ClaudeOutputEventListener(sublime_plugin.ViewEventListener):
                     session.add_context_file(path, content)
                     break
 
-        handler = ContextMenuHandler(on_browse, on_clear, on_add_file)
+        def on_codebase():
+            # Insert @codebase text at current cursor position
+            self.view.run_command("insert", {"characters": "@codebase "})
+
+        handler = ContextMenuHandler(on_browse, on_clear, on_add_file, on_codebase)
 
         def on_select(idx):
             handler.handle_selection(menu_items, idx)

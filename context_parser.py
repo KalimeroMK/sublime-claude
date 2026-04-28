@@ -62,7 +62,14 @@ class ContextParser:
         """
         items = []
 
-        # Browse option (always first)
+        # @codebase -- search entire codebase
+        items.append(ContextMenuItem(
+            action="codebase",
+            label="@codebase",
+            description="Search entire codebase for relevant code"
+        ))
+
+        # Browse option
         items.append(ContextMenuItem(
             action="browse",
             label="Browse...",
@@ -127,6 +134,7 @@ class ContextMenuHandler:
         on_browse: Callable[[], None],
         on_clear: Callable[[], None],
         on_add_file: Callable[[str, str], None],  # (path, content) -> None
+        on_codebase: Optional[Callable[[], None]] = None,
     ):
         """Initialize handler with action callbacks.
 
@@ -134,10 +142,12 @@ class ContextMenuHandler:
             on_browse: Callback when Browse is selected
             on_clear: Callback when Clear is selected
             on_add_file: Callback when a file is selected (path, content)
+            on_codebase: Callback when @codebase is selected
         """
         self.on_browse = on_browse
         self.on_clear = on_clear
         self.on_add_file = on_add_file
+        self.on_codebase = on_codebase
 
     def handle_selection(self, items: List[ContextMenuItem], index: int) -> None:
         """Handle menu item selection.
@@ -151,7 +161,10 @@ class ContextMenuHandler:
 
         selected = items[index]
 
-        if selected.action == "browse":
+        if selected.action == "codebase":
+            if self.on_codebase:
+                self.on_codebase()
+        elif selected.action == "browse":
             self.on_browse()
         elif selected.action == "clear":
             self.on_clear()

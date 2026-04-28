@@ -153,7 +153,7 @@ The output view features an inline input area (marked with `◎`) where you type
 
 - **Enter** - Submit prompt
 - **Shift+Enter** - Insert newline (multiline prompts)
-- **@** - Open context menu (add files, selection, folder, or clear context)
+- **@** - Open context menu (add files, @codebase search, folder, or clear context)
 - **Alt+Escape** - Interrupt current query
 
 When a permission prompt appears:
@@ -309,6 +309,28 @@ Works with any language server (Intelephense, LSP, etc.) without external depend
 ```
 
 Disable `smart_context_enabled` to skip auto-context injection. Disable `auto_add_current_file` to prevent automatically adding the active file to context.
+
+### @-Commands
+
+Type `@` in the inline input area to trigger the context menu, or type commands directly in your prompt:
+
+| Command | Description |
+|---------|-------------|
+| `@codebase <query>` | Search entire project for relevant code (TF-IDF, no API needed) |
+| `@file:<path>` | Inline reference to a specific file |
+
+**`@codebase`** finds the most relevant files based on your query keywords and adds them to context automatically:
+
+```
+◎ @codebase how does authentication work? ▶
+```
+
+This will:
+1. Index the project (first use only, ~1-10s depending on size)
+2. Search for files matching keywords like `auth`, `login`, `authenticate`
+3. Add top 5 matching code chunks to your query context
+
+**How it works:** Uses TF-IDF over a local SQLite database — no embeddings API or Ollama required. Indexes are stored in `.claude_codebase.db` inside your project root and auto-refresh every 24 hours.
 
 ### Related Files (Manual)
 
