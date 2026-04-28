@@ -5,6 +5,7 @@ from typing import Optional, Callable
 import sublime
 
 from .smart_context import build_smart_context
+from .constants import OUTPUT_VIEW_SETTING
 
 
 class SessionQueryMixin:
@@ -40,6 +41,10 @@ class SessionQueryMixin:
         if settings.get("smart_context_enabled", True):
             self._inject_smart_context()
 
+        # --- Auto-add current file if no explicit context provided ---
+        if settings.get("auto_add_current_file", True) and not self.pending_context:
+            self._auto_add_current_file()
+
         # Build prompt with context (may include images)
         full_prompt, images = self._build_prompt_with_context(prompt)
         context_names = [item.name for item in self.pending_context]
@@ -74,6 +79,41 @@ class SessionQueryMixin:
             self._status("error: bridge died")
             self.working = False
             self.output.text("\n\n*Failed to send query. Bridge process died.*\n")
+
+    def _auto_add_current_file(self) -> None:
+        """Automatically add the current file to context if none provided.
+
+        This ensures the AI always sees the file the user is working on,
+        matching the behavior of Cursor, Copilot, and Continue.dev.
+        """
+        from .session_core import ContextItem
+
+        try:
+            active_view = self.window.active_view()
+            if not active_view or not active_view.is_valid():
+                return
+            path = active_view.file_name()
+            if not path:
+                return
+            # Skip if it's the output view itself
+            if active_view.settings().get(OUTPUT_VIEW_SETTING):
+                return
+            # Skip very large files (>100KB)
+            size = active_view.size()
+            if size > 100000:
+                return
+            content = active_view.substr(sublime.Region(0, size))
+            if not content.strip():
+                return
+            # Add to pending context
+            self.pending_context.append(ContextItem(
+                kind="file",
+                name=path,
+                content=f"File: {path}\n```\n{content}\n```",
+            ))
+            print(f"[Claude] Auto-added current file: {path}")
+        except Exception as e:
+            print(f"[Claude] Auto-add current file error: {e}")
 
     def _inject_smart_context(self) -> None:
         """Auto-add smart context items based on current editor state.

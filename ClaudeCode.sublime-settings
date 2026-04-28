@@ -77,6 +77,9 @@
     // to context before each query
     "smart_context_enabled": true,
 
+    // Auto-add current file to context when querying without explicit context
+    "auto_add_current_file": true,
+
     // Environment variables passed to bridge process
     // "env": {},
 }
