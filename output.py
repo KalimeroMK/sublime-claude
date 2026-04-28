@@ -52,6 +52,7 @@ class OutputView:
         self._render_queued_changes: int = 0  # Count of pending changes to batch
         self._last_rendered_events_len: int = 0  # Track events length at last render
         self._last_rendered_text_len: int = 0  # Track total text length at last render
+        self._last_rendered_last_event_len: int = 0  # Track last event text length at last render
         self._incremental_render: bool = False  # Whether to use incremental append
         # Inline input state
         self._input_mode: bool = False  # True when user can type in input region
@@ -1803,11 +1804,13 @@ class OutputView:
             )
         )
         if can_incremental:
-            # Only append new text since last render
-            new_text = self.current.events[-1] if self.current.events and isinstance(self.current.events[-1], str) else ""
-            if new_text:
-                self._write(new_text, pos=end)
+            # Only append new text delta since last render
+            last_event = self.current.events[-1] if self.current.events and isinstance(self.current.events[-1], str) else ""
+            if last_event and len(last_event) > self._last_rendered_last_event_len:
+                delta = last_event[self._last_rendered_last_event_len:]
+                self._write(delta, pos=end)
                 self._last_rendered_text_len = current_text_len
+                self._last_rendered_last_event_len = len(last_event)
                 self._scroll_to_end()
                 self._update_title()
                 return
@@ -1968,6 +1971,10 @@ class OutputView:
         self._last_rendered_text_len = sum(
             len(e) for e in self.current.events if isinstance(e, str)
         )
+        if self.current.events and isinstance(self.current.events[-1], str):
+            self._last_rendered_last_event_len = len(self.current.events[-1])
+        else:
+            self._last_rendered_last_event_len = 0
 
 
 
