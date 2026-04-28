@@ -28,9 +28,11 @@ from .commands import (
     ClaudePermissionAllowCommand,
     ClaudePermissionDenyCommand,
     ClaudeCloseSessionCommand,
+    ClaudeReplaceContentCommand,
+)
+from .output import (
     ClaudeInsertCommand,
     ClaudeReplaceCommand,
-    ClaudeReplaceContentCommand,
 )
 
 # Event listeners
