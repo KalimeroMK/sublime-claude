@@ -22,6 +22,7 @@ from logger import get_bridge_logger
 _logger = get_bridge_logger()
 
 from rpc_helpers import send, send_error, send_result, send_notification
+from base import BaseBridge, run_bridge
 
 
 # ---------------------------------------------------------------------------
@@ -363,15 +364,13 @@ def _http_post(url: str, payload: dict, headers: dict) -> dict:
 # Bridge
 # ---------------------------------------------------------------------------
 
-class Bridge:
+class Bridge(BaseBridge):
     def __init__(self):
+        super().__init__(name="openai")
         self.base_url: str = ""
         self.api_key: str = ""
         self.model: str = ""
         self.session_id: str = ""
-        self.running = True
-        self.current_task: asyncio.Task | None = None
-        self.interrupted = False
         self._messages: list[dict] = []
         self._system_prompt: str = ""
         self._cwd: str = "."
@@ -723,35 +722,5 @@ class Bridge:
         await self.interrupt(id)
         send_result(id, {"status": "shutdown"})
 
-    async def run(self) -> None:
-        sys.stderr.write("=== OPENAI BRIDGE STARTING ===\n")
-        sys.stderr.flush()
-
-        loop = asyncio.get_event_loop()
-        buffer_limit = 1024 * 1024 * 1024
-        reader = asyncio.StreamReader(limit=buffer_limit, loop=loop)
-        protocol = asyncio.StreamReaderProtocol(reader, loop=loop)
-        await loop.connect_read_pipe(lambda: protocol, sys.stdin)
-
-        _logger.info("OpenAI bridge started")
-
-        while self.running:
-            try:
-                line = await reader.readline()
-                if not line:
-                    break
-                req = json.loads(line.decode())
-                asyncio.create_task(self.handle_request(req))
-            except json.JSONDecodeError as e:
-                send_error(None, -32700, f"Parse error: {e}")
-            except Exception as e:
-                send_error(None, -32000, f"Internal error: {e}")
-
-
-async def main():
-    bridge = Bridge()
-    await bridge.run()
-
-
 if __name__ == "__main__":
-    asyncio.run(main())
+    asyncio.run(run_bridge(Bridge))

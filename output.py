@@ -1,110 +1,20 @@
 """Structured output view with region tracking."""
 import sublime
 import sublime_plugin
-from dataclasses import dataclass, field
 from typing import List, Optional, Dict, Callable, Any
 
 from .constants import SPINNER_FRAMES
-
-
-# Status constants (re-export for backward compat)
-from .constants import (
-    TOOL_STATUS_PENDING as PENDING,
-    TOOL_STATUS_DONE as DONE,
-    TOOL_STATUS_ERROR as ERROR,
-    TOOL_STATUS_BACKGROUND as BACKGROUND,
-)
-IN_PROGRESS = "in_progress"
 from .output_format import format_tool_detail
+from .output_models import (
+    PENDING, DONE, ERROR, BACKGROUND,
+    PERM_ALLOW, PERM_DENY, PERM_ALLOW_ALL, PERM_ALLOW_SESSION,
+    PLAN_APPROVE, PLAN_REJECT, PLAN_VIEW,
+    PlanApproval, PermissionRequest, QuestionRequest,
+    ToolCall, TodoItem, Conversation,
+)
 
 
-# Permission button constants
-PERM_ALLOW = "allow"
-PERM_DENY = "deny"
-PERM_ALLOW_ALL = "allow_all"
-PERM_ALLOW_SESSION = "allow_session"  # Allow same tool for 30s
-
-
-PLAN_APPROVE = "approve"
-PLAN_REJECT = "reject"
-PLAN_VIEW = "view"
-
-
-@dataclass
-class PlanApproval:
-    """A pending plan approval request."""
-    id: int
-    plan_file: str
-    allowed_prompts: List[dict]
-    callback: Callable[[str], None]  # Called with PLAN_APPROVE or PLAN_REJECT
-    region: tuple = (0, 0)
-    button_regions: Dict[str, tuple] = field(default_factory=dict)
-
-
-@dataclass
-class PermissionRequest:
-    """A pending permission request."""
-    id: int
-    tool: str
-    tool_input: dict
-    callback: Callable[[str], None]  # Called with PERM_ALLOW, PERM_DENY, or PERM_ALLOW_ALL
-    region: tuple = (0, 0)  # Region in view
-    button_regions: Dict[str, tuple] = field(default_factory=dict)  # button_type -> (start, end)
-
-
-@dataclass
-class QuestionRequest:
-    """A pending inline question request."""
-    qid: int
-    questions: List[dict]     # [{question, options, header, multiSelect}]
-    current_idx: int = 0
-    answers: Dict[str, str] = field(default_factory=dict)
-    callback: Callable = None  # Called with answers dict or None (cancelled)
-    region: tuple = (0, 0)
-    button_regions: Dict[str, tuple] = field(default_factory=dict)
-    selected: set = field(default_factory=set)  # multi-select toggles
-
-
-@dataclass
-class ToolCall:
-    """A single tool call."""
-    name: str
-    tool_input: dict
-    status: str = PENDING  # pending, done, error, background
-    result: Optional[str] = None  # tool result content
-    id: Optional[str] = None  # tool_use_id, for precise matching
-
-
-@dataclass
-class TodoItem:
-    """A todo item from TodoWrite."""
-    content: str
-    status: str  # pending, in_progress, completed
-
-
-@dataclass
-class Conversation:
-    """A single prompt + tools + response + meta."""
-    prompt: str = ""
-    # Events in time order - either ToolCall or str (text chunk)
-    events: List = field(default_factory=list)
-    todos: List[TodoItem] = field(default_factory=list)  # current todo state
-    todos_all_done: bool = False  # True when all todos completed (don't carry to next)
-    working: bool = True  # True while processing, False when done
-    duration: float = 0.0
-    usage: dict = None
-    region: tuple = (0, 0)
-    context_names: List[str] = field(default_factory=list)  # Context files used
-
-    @property
-    def tools(self) -> List[ToolCall]:
-        """Get all tool calls (for compatibility)."""
-        return [e for e in self.events if isinstance(e, ToolCall)]
-
-    @property
-    def text_chunks(self) -> List[str]:
-        """Get all text chunks (for compatibility)."""
-        return [e for e in self.events if isinstance(e, str)]
+IN_PROGRESS = "in_progress"
 
 
 class OutputView:
@@ -132,6 +42,10 @@ class OutputView:
         self._pending_context_region: tuple = (0, 0)  # Region for context display
         self._cleared_content: Optional[str] = None  # For undo clear
         self._render_pending: bool = False  # Debounce flag for rendering
+        self._render_queued_changes: int = 0  # Count of pending changes to batch
+        self._last_rendered_events_len: int = 0  # Track events length at last render
+        self._last_rendered_text_len: int = 0  # Track total text length at last render
+        self._incremental_render: bool = False  # Whether to use incremental append
         # Inline input state
         self._input_mode: bool = False  # True when user can type in input region
         self._input_start: int = 0  # Start position of editable input region
@@ -1827,12 +1741,17 @@ class OutputView:
         if not self.current or not self.view:
             return
 
-        # Debounce: if render already pending, skip
+        # Debounce: accumulate changes instead of queuing multiple renders
+        self._render_queued_changes += 1
         if self._render_pending:
             return
         self._render_pending = True
         self._auto_scroll = auto_scroll  # Store for _do_render
-        sublime.set_timeout(self._do_render, 10)
+
+        # Adaptive debounce: longer during active streaming to batch more chunks
+        is_streaming = self.current and self.current.working and self._render_queued_changes > 1
+        debounce_ms = 50 if is_streaming else 16  # 50ms for streaming, ~1 frame otherwise
+        sublime.set_timeout(self._do_render, debounce_ms)
 
     def advance_spinner(self) -> None:
         """Advance spinner animation frame and re-render if working."""
@@ -1850,12 +1769,41 @@ class OutputView:
     def _do_render(self) -> None:
         """Actually perform the render."""
         self._render_pending = False
+        queued_changes = self._render_queued_changes
+        self._render_queued_changes = 0
         if not self.current or not self.view:
             return
 
         # Don't render while in input mode - it would corrupt the input region
         if self._input_mode:
             return
+
+        # --- Incremental render optimization ---
+        # If only text was added (no tool changes, no meta, still working),
+        # just append new text instead of rebuilding the whole conversation.
+        current_events_len = len(self.current.events)
+        current_text_len = sum(
+            len(e) for e in self.current.events if isinstance(e, str)
+        )
+        can_incremental = (
+            self.current.working
+            and queued_changes > 0
+            and current_events_len == self._last_rendered_events_len
+            and current_text_len > self._last_rendered_text_len
+            and not any(
+                isinstance(e, ToolCall) and e.status == PENDING
+                for e in self.current.events
+            )
+        )
+        if can_incremental:
+            # Only append new text since last render
+            new_text = self.current.events[-1] if self.current.events and isinstance(self.current.events[-1], str) else ""
+            if new_text:
+                self._write(new_text, pos=end)
+                self._last_rendered_text_len = current_text_len
+                self._scroll_to_end()
+                self._update_title()
+                return
 
         # Read region from Sublime's tracked region (auto-adjusts when view shifts)
         view_size = self.view.size()
@@ -2007,6 +1955,12 @@ class OutputView:
         # Scroll after render completes (only if auto_scroll is enabled)
         if getattr(self, '_auto_scroll', True):
             self._scroll_to_end()
+
+        # Track render state for incremental optimization
+        self._last_rendered_events_len = len(self.current.events)
+        self._last_rendered_text_len = sum(
+            len(e) for e in self.current.events if isinstance(e, str)
+        )
 
 
 
