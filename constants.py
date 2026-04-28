@@ -32,6 +32,15 @@ LOG_PREFIX_ERROR = "ERROR: "
 
 # ─── View Settings ────────────────────────────────────────────────────────────
 OUTPUT_VIEW_SETTING = "claude_output"
+INPUT_MODE_SETTING = "claude_input_mode"
+ACTIVE_VIEW_SETTING = "claude_active_view"
+BACKEND_SETTING = "claude_backend"
+CONVERSATION_REGION_KEY = "claude_conversation"
+PERMISSION_REGION_KEY = "claude_permission_block"
+PLAN_REGION_KEY = "claude_plan_block"
+QUESTION_REGION_KEY = "claude_question_block"
+PENDING_CONTEXT_SESSION_SETTING = "claude_pending_context_session"
+PENDING_CONTEXT_TIME_SETTING = "claude_pending_context_time"
 FONT_SIZE = 12
 
 # ─── Status Indicators ────────────────────────────────────────────────────────

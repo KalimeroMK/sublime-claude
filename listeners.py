@@ -8,6 +8,13 @@ import platform
 from .core import get_session_for_view, get_active_session
 from .session import Session
 from .context_parser import ContextParser, ContextMenuItem, ContextMenuHandler
+from .constants import (
+    OUTPUT_VIEW_SETTING,
+    ACTIVE_VIEW_SETTING,
+    BACKEND_SETTING,
+    PENDING_CONTEXT_SESSION_SETTING,
+    PENDING_CONTEXT_TIME_SETTING,
+)
 
 
 _last_copy_meta = None  # {file, regions: [(row_start, row_end), ...], text}
@@ -24,7 +31,7 @@ class ClaudeCodeEventListener(sublime_plugin.EventListener):
         if window.num_groups() < 2:
             return
         # Check if this view is the AI chat output
-        is_claude_output = view.settings().get("claude_output")
+        is_claude_output = view.settings().get(OUTPUT_VIEW_SETTING)
         # If it's not AI output and it's in group 1, move it to group 0
         if not is_claude_output:
             current_group = window.get_view_index(view)[0]
@@ -41,7 +48,7 @@ class ClaudeCodeEventListener(sublime_plugin.EventListener):
             return
         print(f"[Claude] on_post_text_command: {command_name}")
         path = view.file_name()
-        if not path or view.is_scratch() or view.settings().get("claude_output"):
+        if not path or view.is_scratch() or view.settings().get(OUTPUT_VIEW_SETTING):
             return
         sel = view.sel()
         if not sel:
@@ -79,7 +86,7 @@ class ClaudeCodeEventListener(sublime_plugin.EventListener):
                 views = window.views_in_group(group)
                 if index < len(views):
                     view = views[index]
-            if view and view.settings().get("claude_output"):
+            if view and view.settings().get(OUTPUT_VIEW_SETTING):
                 session = sublime._claude_sessions.get(view.id())
                 if session and (session.initialized or session.is_sleeping):
                     def _ask():
@@ -104,22 +111,22 @@ class ClaudeCodeEventListener(sublime_plugin.EventListener):
             return
 
         # Skip Claude output views
-        if view.settings().get("claude_output"):
+        if view.settings().get(OUTPUT_VIEW_SETTING):
             return
 
         # Check if we have a pending context session
-        session_view_id = window.settings().get("claude_pending_context_session")
+        session_view_id = window.settings().get(PENDING_CONTEXT_SESSION_SETTING)
         if not session_view_id:
             return
 
         # Check timestamp - only process if at least 300ms have passed
-        pending_time = window.settings().get("claude_pending_context_time", 0)
+        pending_time = window.settings().get(PENDING_CONTEXT_TIME_SETTING, 0)
         if time.time() - pending_time < 0.3:
             return
 
         # Clear the pending state
-        window.settings().erase("claude_pending_context_session")
-        window.settings().erase("claude_pending_context_time")
+        window.settings().erase(PENDING_CONTEXT_SESSION_SETTING)
+        window.settings().erase(PENDING_CONTEXT_TIME_SETTING)
 
         # Get the session
         session = sublime._claude_sessions.get(session_view_id)
@@ -174,7 +181,7 @@ class ClaudeCodeEventListener(sublime_plugin.EventListener):
         # Find the Claude view
         claude_view = None
         for v in window.views():
-            if v.id() == last_view_id and v.settings().get("claude_output"):
+            if v.id() == last_view_id and v.settings().get(OUTPUT_VIEW_SETTING):
                 claude_view = v
                 break
         if not claude_view:
@@ -227,7 +234,7 @@ class ClaudeOutputEventListener(sublime_plugin.ViewEventListener):
 
     @classmethod
     def is_applicable(cls, settings):
-        return settings.get("claude_output", False)
+        return settings.get(OUTPUT_VIEW_SETTING, False)
 
     def on_activated(self):
         """Update status bar and title when this output view becomes active."""
@@ -241,9 +248,9 @@ class ClaudeOutputEventListener(sublime_plugin.ViewEventListener):
         _last_claude_view = (window.id(), self.view.id(), time.time())
 
         # Mark this as the "active" session for the window
-        old_active = window.settings().get("claude_active_view")
+        old_active = window.settings().get(ACTIVE_VIEW_SETTING)
         switched = old_active != self.view.id()
-        window.settings().set("claude_active_view", self.view.id())
+        window.settings().set(ACTIVE_VIEW_SETTING, self.view.id())
 
         # Check if this is an orphaned view that needs reconnection
         s = get_session_for_view(self.view)
@@ -353,7 +360,7 @@ class ClaudeOutputEventListener(sublime_plugin.ViewEventListener):
         print(f"[Claude] reconnect: view={view.name()!r}, session={session_name!r}, resume_id={resume_id}")
 
         # Create session in sleeping state — user wakes with Enter or Wake command
-        saved_backend = view.settings().get("claude_backend", "claude")
+        saved_backend = view.settings().get(BACKEND_SETTING, "claude")
         session = Session(window, resume_id=resume_id, backend=saved_backend)
         session.name = session_name
         session.output.view = view
@@ -366,7 +373,7 @@ class ClaudeOutputEventListener(sublime_plugin.ViewEventListener):
         session.output.reset_active_states()
 
         # Re-apply backend-specific background color
-        backend = view.settings().get("claude_backend")
+        backend = view.settings().get(BACKEND_SETTING)
         if backend:
             backend_themes = {
                 "codex": "Packages/ClaudeCode/ClaudeOutput-codex.hidden-tmTheme",
@@ -602,7 +609,7 @@ class ClaudeOutputEventListener(sublime_plugin.ViewEventListener):
         import os
         open_files = []
         for v in window.views():
-            if v.file_name() and not v.settings().get("claude_output"):
+            if v.file_name() and not v.settings().get(OUTPUT_VIEW_SETTING):
                 name = os.path.basename(v.file_name())
                 path = v.file_name()
                 open_files.append((name, path))
@@ -647,7 +654,7 @@ class ClaudeOutputEventListener(sublime_plugin.ViewEventListener):
 
         active_view = None
         for v in window.views():
-            if not v.settings().get("claude_output") and v.file_name():
+            if not v.settings().get(OUTPUT_VIEW_SETTING) and v.file_name():
                 active_view = v
                 break
 
@@ -664,7 +671,7 @@ class ClaudeOutputEventListener(sublime_plugin.ViewEventListener):
                     session.add_context_selection(path, content)
         elif choice == "open":
             for v in window.views():
-                if v.file_name() and not v.settings().get("claude_output"):
+                if v.file_name() and not v.settings().get(OUTPUT_VIEW_SETTING):
                     content = v.substr(sublime.Region(0, v.size()))
                     session.add_context_file(v.file_name(), content)
         elif choice == "folder":
@@ -686,8 +693,8 @@ class ClaudeOutputEventListener(sublime_plugin.ViewEventListener):
             return
 
         # Store session and timestamp for the callback
-        window.settings().set("claude_pending_context_session", session.output.view.id())
-        window.settings().set("claude_pending_context_time", time.time())
+        window.settings().set(PENDING_CONTEXT_SESSION_SETTING, session.output.view.id())
+        window.settings().set(PENDING_CONTEXT_TIME_SETTING, time.time())
 
         # Show the goto file overlay (Ctrl+P)
         window.run_command("show_overlay", {"overlay": "goto", "show_files": True})

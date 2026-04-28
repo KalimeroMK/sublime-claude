@@ -11,6 +11,7 @@ from .rpc import JsonRpcClient
 from .output import OutputView
 from .session_query import SessionQueryMixin
 from .session_permissions import SessionPermissionsMixin
+from .constants import CONVERSATION_REGION_KEY
 from .session_env import (
     _find_python_310_plus,
     _resolve_model_id,
@@ -764,7 +765,7 @@ class Session(SessionQueryMixin, SessionPermissionsMixin):
         # Update conversation state
         if self.output.current:
             self.output.current = None
-        view.erase_regions("claude_conversation")
+        view.erase_regions(CONVERSATION_REGION_KEY)
         # Kill bridge synchronously (may already be dead from previous undo)
         if self.client:
             self.client.stop()

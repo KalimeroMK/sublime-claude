@@ -12,10 +12,10 @@ import re
 import subprocess
 import sys
 import uuid
-from typing import Any, Optional
+from typing import Any, List, Optional
 
 # Import shared utilities
-sys.path.insert(0, str(os.path.dirname(os.path.abspath(__file__)) + "/.."))
+sys.path.insert(0, str(Path(__file__).parent.parent))
 from settings import load_project_settings
 from logger import get_bridge_logger
 
@@ -371,10 +371,10 @@ class Bridge(BaseBridge):
         self.api_key: str = ""
         self.model: str = ""
         self.session_id: str = ""
-        self._messages: list[dict] = []
+        self._messages: List[dict] = []
         self._system_prompt: str = ""
         self._cwd: str = "."
-        self._allowed_tools: list[str] = []
+        self._allowed_tools: List[str] = []
         self._is_ollama = False
 
     async def handle_request(self, req: dict) -> None:

@@ -134,7 +134,7 @@ class NotaloneClient:
                 if sock:
                     try:
                         sock.close()
-                    except:
+                    except OSError:
                         pass
 
             if self._running:

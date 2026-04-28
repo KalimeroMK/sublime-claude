@@ -7,6 +7,7 @@ import platform
 
 from .core import get_active_session, get_session_for_view, create_session
 from .session import Session, load_saved_sessions
+from .constants import OUTPUT_VIEW_SETTING, ACTIVE_VIEW_SETTING
 from .prompt_builder import PromptBuilder
 from .command_parser import CommandParser
 
@@ -391,7 +392,7 @@ class ClaudeCodeSwitchCommand(sublime_plugin.WindowCommand):
                 sessions_in_window.append((view_id, session))
 
         # Build quick panel items
-        active_view_id = self.window.settings().get("claude_active_view")
+        active_view_id = self.window.settings().get(ACTIVE_VIEW_SETTING)
         items = []
         actions = []  # ("new", None) | ("focus", session)
 
@@ -404,7 +405,7 @@ class ClaudeCodeSwitchCommand(sublime_plugin.WindowCommand):
 
         # Show "Active:" option only when not in a Claude output view (for quick jumping from file view)
         current_view = self.window.active_view()
-        in_output_view = current_view and current_view.settings().get("claude_output")
+        in_output_view = current_view and current_view.settings().get(OUTPUT_VIEW_SETTING)
         current_file = current_view.file_name() if current_view else None
 
         # Add "New Session with This File" option when in a non-session file

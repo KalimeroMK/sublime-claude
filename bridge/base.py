@@ -7,7 +7,7 @@ import asyncio
 import json
 import sys
 from abc import abstractmethod
-from typing import Any
+from typing import Any, Optional
 
 from rpc_helpers import send_error
 
@@ -19,7 +19,7 @@ class BaseBridge:
         self.name = name
         self.buffer_limit = buffer_limit
         self.running = True
-        self.current_task: asyncio.Task | None = None
+        self.current_task: Optional[asyncio.Task] = None
         self.interrupted = False
 
     @abstractmethod

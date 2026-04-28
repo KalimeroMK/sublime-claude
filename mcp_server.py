@@ -9,7 +9,10 @@ import sublime
 import sublime_plugin
 
 from .settings import load_profiles_and_checkpoints
-from .constants import MCP_SOCKET_PATH, USER_PROFILES_DIR, PROFILES_FILE
+from .constants import (
+    MCP_SOCKET_PATH, USER_PROFILES_DIR, PROFILES_FILE,
+    OUTPUT_VIEW_SETTING, ACTIVE_VIEW_SETTING,
+)
 
 SOCKET_PATH = MCP_SOCKET_PATH
 USER_PROFILES_PATH = str(USER_PROFILES_DIR / PROFILES_FILE)
@@ -43,8 +46,8 @@ def _save_checkpoint(name: str, session_id: str, description: str, to_project: b
         try:
             with open(path, "r") as f:
                 data = json.load(f)
-        except:
-            pass
+        except (json.JSONDecodeError, OSError) as e:
+            print(f"[Claude MCP] Error loading checkpoint data: {e}")
 
     # Add checkpoint
     if "checkpoints" not in data:
@@ -101,11 +104,11 @@ class MCPSocketServer:
         if self.socket:
             try:
                 self.socket.close()
-            except:
+            except OSError:
                 pass
         try:
             os.unlink(SOCKET_PATH)
-        except:
+        except OSError:
             pass
 
     def _run(self):
@@ -267,7 +270,7 @@ class MCPSocketServer:
         except Exception as e:
             try:
                 conn.sendall((json.dumps({"error": str(e)}) + "\n").encode())
-            except:
+            except OSError:
                 pass
         finally:
             conn.close()
@@ -509,7 +512,7 @@ class MCPSocketServer:
             if query.startswith('['):
                 try:
                     symbols = json.loads(query)
-                except:
+                except json.JSONDecodeError:
                     symbols = [query]
             elif ',' in query:
                 symbols = [s.strip() for s in query.split(',') if s.strip()]
@@ -583,7 +586,7 @@ class MCPSocketServer:
                         desc = code[3:end].strip()
 
                 tools.append({"name": name, "description": desc})
-            except:
+            except (ValueError, IndexError):
                 tools.append({"name": name, "description": "No description"})
 
         return tools
@@ -1004,7 +1007,7 @@ class MCPSocketServer:
             return {"error": "No active window"}
 
         # Get active session
-        active_view_id = window.settings().get("claude_active_view")
+        active_view_id = window.settings().get(ACTIVE_VIEW_SETTING)
         if not active_view_id or active_view_id not in sublime._claude_sessions:
             return {"error": "No active Claude session"}
 
@@ -1030,7 +1033,7 @@ class MCPSocketServer:
             return {"error": "No active window"}
 
         # Get active session
-        active_view_id = window.settings().get("claude_active_view")
+        active_view_id = window.settings().get(ACTIVE_VIEW_SETTING)
         if not active_view_id or active_view_id not in sublime._claude_sessions:
             return {"error": "No active Claude session"}
 
@@ -1107,7 +1110,7 @@ class MCPSocketServer:
             # Each session gets its own terminal to avoid state pollution
             window = self._get_window()
             # Find active session via window's active view setting
-            active_view_id = window.settings().get("claude_active_view") if window else None
+            active_view_id = window.settings().get(ACTIVE_VIEW_SETTING) if window else None
             if active_view_id and active_view_id in sublime._claude_sessions:
                 session = sublime._claude_sessions[active_view_id]
                 tag = f"claude-agent-{active_view_id}"
@@ -1162,7 +1165,7 @@ class MCPSocketServer:
             tag = f"claude-agent-{target_id}"
         elif not tag:
             # Default tag uses active Claude session's view ID for isolation
-            active_view_id = window.settings().get("claude_active_view") if window else None
+            active_view_id = window.settings().get(ACTIVE_VIEW_SETTING) if window else None
             if active_view_id and active_view_id in sublime._claude_sessions:
                 tag = f"claude-agent-{active_view_id}"
             else:
@@ -1245,7 +1248,7 @@ class MCPSocketServer:
         elif not tag:
             # Default tag uses active Claude session's view ID for isolation
             window = self._get_window()
-            active_view_id = window.settings().get("claude_active_view") if window else None
+            active_view_id = window.settings().get(ACTIVE_VIEW_SETTING) if window else None
             if active_view_id and active_view_id in sublime._claude_sessions:
                 tag = f"claude-agent-{active_view_id}"
             else:
@@ -1289,7 +1292,7 @@ class MCPSocketServer:
             # Default tag uses active Claude session's view ID for isolation
             from . import core
             window = self._get_window()
-            active_view_id = window.settings().get("claude_active_view") if window else None
+            active_view_id = window.settings().get(ACTIVE_VIEW_SETTING) if window else None
             if active_view_id and active_view_id in sublime._claude_sessions:
                 tag = f"claude-agent-{active_view_id}"
             else:
@@ -1729,7 +1732,7 @@ class MCPSocketServer:
 
         # Fall back to claude_active_view (last active session)
         if not view_id or view_id not in sublime._claude_sessions:
-            view_id = window.settings().get("claude_active_view")
+            view_id = window.settings().get(ACTIVE_VIEW_SETTING)
 
         # Last resort: if only one session exists, use it
         if not view_id or view_id not in sublime._claude_sessions:
@@ -1813,7 +1816,7 @@ class MCPSocketServer:
                     for svc, types in available.items():
                         for t in types:
                             service_types.append(f"{svc}.{t}")
-                except:
+                except (AttributeError, TypeError):
                     service_types = []
 
                 return {

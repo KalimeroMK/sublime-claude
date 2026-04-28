@@ -11,7 +11,7 @@ import sys
 import shutil
 import time
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Dict, List, Optional
 
 
 # ── Logging to stderr (stdout is reserved for JSON-RPC) ────────────────
@@ -82,8 +82,8 @@ class CodexBridge:
         self.codex_request_counter = 1
 
         # Map our permission_id → codex server-request id
-        self.pending_approvals: dict[int, Any] = {}
-        self.pending_questions: dict[int, Any] = {}
+        self.pending_approvals: Dict[int, Any] = {}
+        self.pending_questions: Dict[int, Any] = {}
         self.permission_counter = 0
 
         # Track turn timing
@@ -92,11 +92,11 @@ class CodexBridge:
         self._last_usage: Optional[dict] = None
 
         # Accumulate command output from outputDelta events
-        self._command_output: dict[str, list[str]] = {}
+        self._command_output: Dict[str, List[str]] = {}
 
     # ── Codex subprocess management ─────────────────────────────────
 
-    async def start_codex(self, cwd: str, config_overrides: list[str] = None) -> None:
+    async def start_codex(self, cwd: str, config_overrides: List[str] = None) -> None:
         """Spawn codex app-server as subprocess."""
         codex_path = shutil.which("codex") or "codex"
         cmd = [codex_path, "app-server"]

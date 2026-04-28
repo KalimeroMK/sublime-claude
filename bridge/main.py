@@ -10,7 +10,7 @@ import sys
 import uuid
 from dataclasses import asdict, is_dataclass
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 # Import shared utilities
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -85,22 +85,22 @@ from rpc_helpers import send, send_error, send_result, send_notification
 
 class Bridge:
     def __init__(self):
-        self.client: ClaudeSDKClient | None = None
-        self.options: ClaudeAgentOptions | None = None
+        self.client: Optional[ClaudeSDKClient] = None
+        self.options: Optional[ClaudeAgentOptions] = None
         self.running = True
-        self.current_task: asyncio.Task | None = None
-        self.pending_permissions: dict[int, asyncio.Future] = {}
-        self.pending_questions: dict[int, asyncio.Future] = {}  # For AskUserQuestion
-        self.pending_plan_approvals: dict[int, asyncio.Future] = {}  # For plan mode
+        self.current_task: Optional[asyncio.Task] = None
+        self.pending_permissions: Dict[int, asyncio.Future] = {}
+        self.pending_questions: Dict[int, asyncio.Future] = {}  # For AskUserQuestion
+        self.pending_plan_approvals: Dict[int, asyncio.Future] = {}  # For plan mode
         self.permission_id = 0
         self.question_id = 0
         self.plan_id = 0
         self.interrupted = False  # Set by interrupt(), checked by query()
-        self.query_id: int | None = None  # Track active query for inject_message
-        self.cwd: str | None = None  # Current working directory (set by initialize)
+        self.query_id: Optional[int] = None  # Track active query for inject_message
+        self.cwd: Optional[str] = None  # Current working directory (set by initialize)
 
         # Queue for injected prompts that arrive when query completes
-        self.pending_injects: list[str] = []
+        self.pending_injects: List[str] = []
 
         # Track active background tasks
         self._pending_bg_tasks: set[str] = set()
@@ -440,7 +440,7 @@ You are subsession **{subsession_id}**. Call signal_complete(session_id={view_id
         """
         return []
 
-    def _parse_permission_pattern(self, pattern: str) -> tuple[str, str | None]:
+    def _parse_permission_pattern(self, pattern: str) -> Tuple[str, Optional[str]]:
         """Parse permission pattern into (tool_name, specifier).
 
         Formats:
@@ -455,7 +455,7 @@ You are subsession **{subsession_id}**. Call signal_complete(session_id={view_id
             return tool_name, specifier
         return pattern, None
 
-    def _extract_bash_commands(self, command: str) -> list[str]:
+    def _extract_bash_commands(self, command: str) -> List[str]:
         """Extract individual command names from a bash command string.
 
         Handles:
@@ -625,7 +625,7 @@ You are subsession **{subsession_id}**. Call signal_complete(session_id={view_id
         settings = load_project_settings(self.cwd)
         return settings.get("guardrails", {})
 
-    def _validate_bash_command(self, command: str) -> tuple[bool, str]:
+    def _validate_bash_command(self, command: str) -> Tuple[bool, str]:
         """Validate bash command for dangerous patterns and guardrails.
 
         Returns: (is_safe, warning_message)
@@ -673,7 +673,7 @@ You are subsession **{subsession_id}**. Call signal_complete(session_id={view_id
 
         return True, ""
 
-    def _run_pre_flight_checks(self, command: str) -> tuple[bool, str]:
+    def _run_pre_flight_checks(self, command: str) -> Tuple[bool, str]:
         """Run pre-flight checks before allowing certain commands.
 
         Returns: (passed, message)
@@ -1357,7 +1357,7 @@ You are subsession **{subsession_id}**. Call signal_complete(session_id={view_id
                 # Try to consume the rest of the line to recover
                 try:
                     await reader.readuntil(b'\n')
-                except:
+                except (asyncio.LimitOverrunError, asyncio.IncompleteReadError, ValueError):
                     pass
             except json.JSONDecodeError as e:
                 send_error(None, -32700, f"Parse error: {e}")

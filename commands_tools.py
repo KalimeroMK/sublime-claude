@@ -445,8 +445,8 @@ class ClaudeCodeViewHistoryCommand(sublime_plugin.WindowCommand):
                                     text = c.get("text", "")
                                     if text and not text.startswith("[Request interrupted"):
                                         messages.append(text)
-                except:
-                    pass
+                except (json.JSONDecodeError, KeyError, TypeError) as e:
+                    print(f"[Claude] Error parsing history message: {e}")
 
         # Create output view
         view = self.window.new_file()

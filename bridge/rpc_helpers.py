@@ -1,7 +1,7 @@
 """Shared JSON-RPC helpers for bridge subprocesses. Sends to stdout."""
 import json
 import sys
-from typing import Any
+from typing import Any, Optional
 
 
 def send(msg: dict) -> None:
@@ -9,7 +9,7 @@ def send(msg: dict) -> None:
     sys.stdout.flush()
 
 
-def send_error(id: int | None, code: int, message: str) -> None:
+def send_error(id: Optional[int], code: int, message: str) -> None:
     send({"jsonrpc": "2.0", "id": id, "error": {"code": code, "message": message}})
 
 

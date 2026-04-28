@@ -6,6 +6,11 @@ import sublime_plugin
 from typing import Dict, Optional
 
 from .session import Session, load_saved_sessions, save_sessions
+from .constants import (
+    OUTPUT_VIEW_SETTING,
+    ACTIVE_VIEW_SETTING,
+    BACKEND_SETTING,
+)
 
 
 _auto_sleep_timer = None
@@ -32,7 +37,7 @@ def plugin_loaded() -> None:
 
         for window in sublime.windows():
             for view in window.views():
-                if not view.settings().get("claude_output"):
+                if not view.settings().get(OUTPUT_VIEW_SETTING):
                     continue
                 if view.id() in sublime._claude_sessions:
                     continue
@@ -67,7 +72,7 @@ def plugin_loaded() -> None:
                 if not view.is_scratch():
                     view.set_scratch(True)
 
-                backend = view.settings().get("claude_backend", "claude")
+                backend = view.settings().get(BACKEND_SETTING, "claude")
                 session = Session(window, resume_id=resume_id, backend=backend)
                 session.name = session_name
                 # Restore tags and usage history from saved session
@@ -103,10 +108,10 @@ def get_session_for_view(view: sublime.View) -> Optional[Session]:
 def get_active_session(window: sublime.Window) -> Optional[Session]:
     """Get session for active view if it's a Claude output, or last active Claude session in window."""
     view = window.active_view()
-    if view and view.settings().get("claude_output"):
+    if view and view.settings().get(OUTPUT_VIEW_SETTING):
         return sublime._claude_sessions.get(view.id())
     # Check for last active Claude view in this window
-    active_view_id = window.settings().get("claude_active_view")
+    active_view_id = window.settings().get(ACTIVE_VIEW_SETTING)
     if active_view_id and active_view_id in sublime._claude_sessions:
         session = sublime._claude_sessions[active_view_id]
         if session.window == window:
@@ -121,7 +126,7 @@ def get_active_session(window: sublime.Window) -> Optional[Session]:
 def create_session(window: sublime.Window, resume_id: Optional[str] = None, fork: bool = False, profile: Optional[dict] = None, initial_context: Optional[dict] = None, backend: str = "claude") -> Session:
     """Create a new session (always creates new, doesn't reuse)."""
     # Clear active marker from previous active session
-    old_active = window.settings().get("claude_active_view")
+    old_active = window.settings().get(ACTIVE_VIEW_SETTING)
     if old_active and old_active in sublime._claude_sessions:
         old_session = sublime._claude_sessions[old_active]
         old_session.output.set_name(old_session.name or "Claude")
@@ -129,7 +134,7 @@ def create_session(window: sublime.Window, resume_id: Optional[str] = None, fork
     s = Session(window, resume_id=resume_id, fork=fork, profile=profile, initial_context=initial_context, backend=backend)
     s.output.show()  # Create view first
     if s.output.view and backend != "claude":
-        s.output.view.settings().set("claude_backend", backend)
+        s.output.view.settings().set(BACKEND_SETTING, backend)
         backend_names = {"codex": "Codex", "copilot": "Copilot", "deepseek": "DeepSeek", "openai": "OpenAI"}
         s.output.set_name(backend_names.get(backend, backend.title()))
         # Apply backend-specific background
@@ -145,7 +150,7 @@ def create_session(window: sublime.Window, resume_id: Optional[str] = None, fork
     if s.output.view:
         view_id = s.output.view.id()
         sublime._claude_sessions[view_id] = s
-        window.settings().set("claude_active_view", view_id)
+        window.settings().set(ACTIVE_VIEW_SETTING, view_id)
         print(f"[Claude] create_session: view_id={view_id}")
     else:
         print(f"[Claude] create_session: ERROR - no output view!")

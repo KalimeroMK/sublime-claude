@@ -3,7 +3,14 @@ import sublime
 import sublime_plugin
 from typing import List, Optional, Dict, Callable, Any
 
-from .constants import SPINNER_FRAMES
+from .constants import (
+    SPINNER_FRAMES,
+    INPUT_MODE_SETTING,
+    CONVERSATION_REGION_KEY,
+    PERMISSION_REGION_KEY,
+    PLAN_REGION_KEY,
+    QUESTION_REGION_KEY,
+)
 from .output_format import format_tool_detail
 from .output_models import (
     PENDING, DONE, ERROR, BACKGROUND,
@@ -323,7 +330,7 @@ class OutputView:
         # NOW set input mode - after _input_start is correctly positioned
         # This ensures on_modified won't save wrong content as draft
         self._input_mode = True
-        self.view.settings().set("claude_input_mode", True)
+        self.view.settings().set(INPUT_MODE_SETTING, True)
 
         # Move cursor to input position
         self.view.sel().clear()
@@ -352,7 +359,7 @@ class OutputView:
             })
 
         self._input_mode = False
-        self.view.settings().set("claude_input_mode", False)
+        self.view.settings().set(INPUT_MODE_SETTING, False)
         self.view.set_read_only(True)
         return input_text
 
@@ -407,7 +414,7 @@ class OutputView:
         self._input_mode = False
         self._input_start = 0
         self._input_area_start = 0
-        self.view.settings().set("claude_input_mode", False)
+        self.view.settings().set(INPUT_MODE_SETTING, False)
         self.view.set_read_only(True)
         # Also clear any pending regions that might be stale
         self._pending_context_region = (0, 0)
@@ -553,7 +560,7 @@ class OutputView:
         self.current.region = (start, end)
         # Track with Sublime region so it auto-adjusts when view content shifts
         self.view.add_regions(
-            "claude_conversation",
+            CONVERSATION_REGION_KEY,
             [sublime.Region(start, end)],
             "", "", sublime.HIDDEN,
         )
@@ -738,7 +745,7 @@ class OutputView:
             self.view.run_command("claude_clear_all")
             self.view.set_read_only(True)
             # Reset view settings that might be stale from old session
-            self.view.settings().set("claude_input_mode", False)
+            self.view.settings().set(INPUT_MODE_SETTING, False)
         self.conversations = []
         self.current = None
         self.pending_permission = None
@@ -752,7 +759,7 @@ class OutputView:
         self._input_area_start = 0
         # Clean up any tracked permission region
         if self.view:
-            self.view.erase_regions("claude_permission_block")
+            self.view.erase_regions(PERMISSION_REGION_KEY)
 
         # If agent was working, create a stub conversation to receive further output
         # This prevents output from being silently discarded after clear
@@ -808,7 +815,7 @@ class OutputView:
         for btn_type in perm.button_regions:
             self.view.erase_regions(f"claude_btn_{btn_type}")
         # Get current region from tracked region (auto-adjusted for text shifts)
-        regions = self.view.get_regions("claude_permission_block")
+        regions = self.view.get_regions(PERMISSION_REGION_KEY)
         if regions and regions[0].size() > 0:
             region = regions[0]
             self._replace(region.begin(), region.end(), "")
@@ -820,7 +827,7 @@ class OutputView:
                 view_size = self.view.size()
                 if view_size > conv_end:
                     self._replace(conv_end, view_size, "")
-        self.view.erase_regions("claude_permission_block")
+        self.view.erase_regions(PERMISSION_REGION_KEY)
 
     # --- Permission UI ---
 
@@ -850,7 +857,7 @@ class OutputView:
         # IMPORTANT: Ensure input mode is OFF so permission keys (Y/N/S/A) work
         # Permission keys require claude_input_mode=false in Default.sublime-keymap
         if self.view:
-            self.view.settings().set("claude_input_mode", False)
+            self.view.settings().set(INPUT_MODE_SETTING, False)
 
         # NOTE: Don't call clear_stale_permission here - concurrent permissions are valid
         # Stale permission cleanup is handled by clear_all_permissions() on query completion
@@ -990,7 +997,7 @@ class OutputView:
 
         # Add tracked region for the whole permission block (auto-adjusts when text shifts)
         self.view.add_regions(
-            "claude_permission_block",
+            PERMISSION_REGION_KEY,
             [sublime.Region(start, end)],
             "",
             "",
@@ -1039,7 +1046,7 @@ class OutputView:
             self.view.erase_regions(f"claude_btn_{btn_type}")
 
         # Get current region from tracked region (auto-adjusted for text shifts)
-        regions = self.view.get_regions("claude_permission_block")
+        regions = self.view.get_regions(PERMISSION_REGION_KEY)
         if regions and regions[0].size() > 0:
             region = regions[0]
             self._replace(region.begin(), region.end(), "")
@@ -1054,7 +1061,7 @@ class OutputView:
         if self.current:
             self.current.region = (self.current.region[0], self.view.size())
 
-        self.view.erase_regions("claude_permission_block")
+        self.view.erase_regions(PERMISSION_REGION_KEY)
         # Don't clear pending_permission - keep it to detect rapid same-tool requests
         # It will be overwritten when a different tool request comes in
 
@@ -1345,7 +1352,7 @@ class OutputView:
         self.show(focus=False)
 
         if self.view:
-            self.view.settings().set("claude_input_mode", False)
+            self.view.settings().set(INPUT_MODE_SETTING, False)
 
         self.pending_plan = PlanApproval(
             id=plan_id,
@@ -1407,7 +1414,7 @@ class OutputView:
 
         # Track region
         self.view.add_regions(
-            "claude_plan_block",
+            PLAN_REGION_KEY,
             [sublime.Region(start, end)],
             "", "", sublime.HIDDEN,
         )
@@ -1442,7 +1449,7 @@ class OutputView:
         for btn_type in self.pending_plan.button_regions:
             self.view.erase_regions(f"claude_plan_btn_{btn_type}")
 
-        regions = self.view.get_regions("claude_plan_block")
+        regions = self.view.get_regions(PLAN_REGION_KEY)
         if regions and regions[0].size() > 0:
             self._replace(regions[0].begin(), regions[0].end(), "")
         elif self.current:
@@ -1450,7 +1457,7 @@ class OutputView:
             view_size = self.view.size()
             if view_size > conv_end:
                 self._replace(conv_end, view_size, "")
-        self.view.erase_regions("claude_plan_block")
+        self.view.erase_regions(PLAN_REGION_KEY)
 
     def handle_plan_key(self, key: str) -> bool:
         """Handle Y/N key for plan approval. Returns True if handled."""
@@ -1495,7 +1502,7 @@ class OutputView:
         self.show(focus=False)
 
         if self.view:
-            self.view.settings().set("claude_input_mode", False)
+            self.view.settings().set(INPUT_MODE_SETTING, False)
 
         self.pending_question = QuestionRequest(
             qid=qid,
@@ -1554,7 +1561,7 @@ class OutputView:
 
         # Track region
         self.view.add_regions(
-            "claude_question_block",
+            QUESTION_REGION_KEY,
             [sublime.Region(start, end)],
             "", "", sublime.HIDDEN,
         )
@@ -1578,7 +1585,7 @@ class OutputView:
             return
 
         # Erase the block
-        regions = self.view.get_regions("claude_question_block")
+        regions = self.view.get_regions(QUESTION_REGION_KEY)
         if regions and regions[0].size() > 0:
             region = regions[0]
             if summary:
@@ -1591,7 +1598,7 @@ class OutputView:
             view_size = self.view.size()
             if view_size > conv_end:
                 self._replace(conv_end, view_size, "")
-        self.view.erase_regions("claude_question_block")
+        self.view.erase_regions(QUESTION_REGION_KEY)
         self.view.erase_regions("claude_question_keys")
 
     def _advance_question(self) -> None:
@@ -1694,7 +1701,7 @@ class OutputView:
         # Set standard input mode so keyboard/selection handling works
         self._input_start = self._question_input_start
         self._input_mode = True
-        self.view.settings().set("claude_input_mode", True)
+        self.view.settings().set(INPUT_MODE_SETTING, True)
 
         # Move cursor to input position
         self.view.sel().clear()
@@ -1713,7 +1720,7 @@ class OutputView:
         text = self.view.substr(sublime.Region(self._question_input_start, self.view.size())).strip()
         self._question_input_mode = False
         self._input_mode = False
-        self.view.settings().set("claude_input_mode", False)
+        self.view.settings().set(INPUT_MODE_SETTING, False)
         self.view.set_read_only(True)
 
         # Remove the input line
@@ -1807,7 +1814,7 @@ class OutputView:
 
         # Read region from Sublime's tracked region (auto-adjusts when view shifts)
         view_size = self.view.size()
-        tracked = self.view.get_regions("claude_conversation")
+        tracked = self.view.get_regions(CONVERSATION_REGION_KEY)
         if tracked and tracked[0].size() > 0:
             start, end = tracked[0].begin(), tracked[0].end()
         else:
@@ -1920,11 +1927,11 @@ class OutputView:
         if has_trailing_ui:
             # Clamp end to not eat the trailing UI block
             if self.pending_permission and self.pending_permission.callback:
-                ui_key = "claude_permission_block"
+                ui_key = PERMISSION_REGION_KEY
             elif self.pending_plan and self.pending_plan.callback:
-                ui_key = "claude_plan_block"
+                ui_key = PLAN_REGION_KEY
             else:
-                ui_key = "claude_question_block"
+                ui_key = QUESTION_REGION_KEY
             ui_region = self.view.get_regions(ui_key)
             if ui_region and ui_region[0].size() > 0:
                 end = min(end, ui_region[0].begin())
@@ -1937,7 +1944,7 @@ class OutputView:
         new_end = self._replace(start, end, text)
         self.current.region = (start, new_end)
         self.view.add_regions(
-            "claude_conversation",
+            CONVERSATION_REGION_KEY,
             [sublime.Region(start, new_end)],
             "", "", sublime.HIDDEN,
         )

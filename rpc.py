@@ -44,7 +44,8 @@ class JsonRpcClient:
                 if not line:
                     break
                 print(f"[Claude Bridge] {line.decode().rstrip()}")
-            except:
+            except (OSError, ValueError, UnicodeDecodeError) as e:
+                print(f"[Claude RPC] stderr read error: {e}")
                 continue
 
     def stop(self) -> None:

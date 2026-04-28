@@ -16,7 +16,7 @@ def main():
     # Read hook input from stdin
     try:
         input_data = json.load(sys.stdin)
-    except:
+    except json.JSONDecodeError:
         input_data = {}
 
     session_id = input_data.get("session_id", "")

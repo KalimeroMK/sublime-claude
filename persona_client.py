@@ -23,7 +23,7 @@ def _request(url: str, method: str = "GET", data: dict = None, timeout: float = 
         try:
             error_body = json.loads(e.read().decode())
             return {"error": error_body.get("error", str(e))}
-        except:
+        except (json.JSONDecodeError, UnicodeDecodeError):
             return {"error": str(e)}
     except Exception as e:
         return {"error": str(e)}
