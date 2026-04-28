@@ -21,12 +21,16 @@ This build extends the base project with additional features, bug fixes, and a f
 | **Token Usage Graph** | `Claude: Show Usage Graph` — ASCII bar chart of token usage per query, 100-query history persisted |
 | **Agent Swarm Monitor** | `Claude: Swarm Monitor` — dashboard showing all active sessions, subsessions, statuses, and costs |
 | **MCP Marketplace** | `Claude: MCP Marketplace` — browse and install 12 curated MCP servers (fetch, filesystem, github, git, postgres, sqlite, brave-search, puppeteer, sequential-thinking, memory, slack, sentry) with one-click auto-install |
-| **Comprehensive Test Suite** | 184 unit tests covering all core utilities, running in ~0.03s with a mock Sublime API |
+| **Diff Preview & Undo** | Unified diff preview for Write/Edit tools — see changes before approving, with one-click undo after execution |
+| **Smart Context** | Auto-adds current scope, git-modified files, relevant open files, and symbol definitions to queries |
+| **Comprehensive Test Suite** | 197 unit tests covering all core utilities, running in ~0.03s with a mock Sublime API |
 
 ### Bug Fixes
 
 | Issue | Fix |
 |-------|-----|
+| Import error | Fixed `ClaudeInsertCommand`/`ClaudeReplaceCommand` imported from wrong module |
+| Python 3.9 compatibility | Replaced `int \| None`, `dict[]`, `list[]` with `Optional`, `Dict`, `List` for Sublime's Python 3.8 |
 | Mouse selection unresponsive | Fixed dynamic `read_only` toggling to allow selection while protecting conversation history |
 | Input mode leaks | Blocked typing/pasting outside the input area when in input mode |
 | Orphaned view reconnection | Fixed blank lines being added on every reconnect after Sublime restart |
@@ -127,6 +131,7 @@ All commands available via Command Palette (`Cmd+Shift+P`): type "Claude"
 | New Session with Backend... | - | Pick backend manually |
 | Configure Settings | - | Open settings file |
 | Undo Message | - | Rewind last conversation turn |
+| **Undo Last Edit** | - | Undo the most recent Write/Edit file change |
 | Restart Session | - | Restart current session, keep output view |
 | Resume Session... | - | Resume a previous session |
 | Switch Session... | - | Switch between active sessions |
@@ -153,6 +158,10 @@ The output view features an inline input area (marked with `◎`) where you type
 
 When a permission prompt appears:
 - **Y/N** - Allow or deny the tool
+- **S** - Allow same tool for 30 seconds
+- **A** - Always allow this tool pattern
+
+For Write/Edit tools, the permission block shows a **diff preview** so you can see exactly what will change before approving.
 
 ### Attach File / Image
 
@@ -232,7 +241,9 @@ Options: `"claude"`, `"openai"`, `"deepseek"`, `"codex"`
     "python_path": "python3",
     "allowed_tools": ["Read", "Write", "Edit", "Bash", "Glob", "Grep", "WebFetch", "WebSearch"],
     "permission_mode": "acceptEdits",
-    "effort": "high"
+    "effort": "high",
+    "smart_context_enabled": true,
+    "auto_add_current_file": true
 }
 ```
 
@@ -278,9 +289,30 @@ Add files, selections, or folders as context before your query:
 
 Requires an active session (use **New Session** first).
 
-### Smart Context
+### Smart Context (Auto)
 
-When you add a file, related files are automatically included (up to 5):
+The plugin automatically enriches queries with relevant context when no explicit context is provided:
+
+- **Current scope** — function/class at cursor position (via `view.symbols()`)
+- **Git-modified files** — staged files + last 3 commits
+- **Relevant open files** — same directory, same extension (score-based ranking)
+- **Symbol definitions** — uses Sublime's built-in symbol index (`window.symbol_locations()`)
+
+Works with any language server (Intelephense, LSP, etc.) without external dependencies.
+
+**Settings:**
+```json
+{
+    "smart_context_enabled": true,
+    "auto_add_current_file": true
+}
+```
+
+Disable `smart_context_enabled` to skip auto-context injection. Disable `auto_add_current_file` to prevent automatically adding the active file to context.
+
+### Related Files (Manual)
+
+When you explicitly add a file, related files are automatically included (up to 5):
 
 - **Test/sibling files** — `user.py` → `user_test.py`, `test_user.py`
 - **Imported modules** — parsed from `import` / `from` / `require` / `use` statements in the first 30 lines
@@ -334,10 +366,21 @@ The output view shows:
 - `◎ prompt ▶` - Your query (multiline supported)
 - `⋯` - Working indicator (disappears when done)
 - `☐ Tool` - Tool pending
-- `✔ Tool` - Tool completed
+- `✔ Tool` - Tool completed (with diff preview for Write/Edit)
 - `✘ Tool` - Tool error
 - Response text with syntax highlighting
 - `@done(Xs)` - Completion time
+
+### Diff Preview & Undo
+
+When the AI uses **Write** or **Edit** tools:
+
+1. **Before execution** — the permission block shows a diff preview of the proposed changes
+2. **After execution** — the completed tool line shows the actual unified diff with an `[Undo]` button
+3. **Hover over `[Undo]`** — shows a popup with a link to revert the file to its original state
+4. **Command Palette** — `Claude: Undo Last Edit` to undo the most recent file change
+
+Diffs are computed from the actual file snapshot taken before execution, so undo is accurate even for multiple consecutive edits.
 
 View title shows session status:
 - `◉` Active + working
@@ -522,11 +565,13 @@ cd ~/PhpstormProjects/sublime-claude
 python3 -m unittest discover tests/ -v
 ```
 
-**184 tests** covering all core utilities:
+**197 tests** covering all core utilities:
 - Context window gauge, session tags, drag-drop, usage graph
 - Attach commands (image/file auto-detect, MIME mapping)
 - Swarm monitor (status icons, session tracking)
 - MCP marketplace (config loading, install logic, template variables)
+- Smart context (scope, git, open files, symbol definitions)
+- Diff preview and undo logic
 - Constants, error handling, logging, prompt building
 - Command parsing, context parsing, session state machine
 - JSON-RPC client, tool routing, settings merging
@@ -573,11 +618,17 @@ sublime-claude/
 ├── claude_code.py         # Plugin entry point
 ├── core.py                # Session lifecycle
 ├── commands.py            # Plugin commands
-├── session.py             # Session class
-├── output.py              # Output rendering
+├── session_core.py        # Session class (lifecycle, bridge, notifications)
+├── session_query.py       # Query handling (smart context, file attachment)
+├── session_permissions.py # Permission/plan/question UI handling
+├── session_env.py         # Environment & session persistence helpers
+├── output.py              # Output view rendering
+├── output_models.py       # Data classes (ToolCall, Conversation, etc.)
+├── output_format.py       # Tool result formatting (diffs, etc.)
 ├── listeners.py           # Event handlers
 ├── rpc.py                 # JSON-RPC client
 ├── mcp_server.py          # MCP socket server
+├── smart_context.py       # Auto context expansion (git, symbols, scope)
 ├── bridge/
 │   ├── main.py            # Claude bridge (Claude CLI wrapper)
 │   ├── openai_main.py     # Ollama/OpenAI bridge
