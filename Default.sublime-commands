@@ -186,5 +186,9 @@
     {
         "caption": "Claude: Git Status",
         "command": "claude_code_git_status"
+    },
+    {
+        "caption": "Claude: Voice Input",
+        "command": "claude_voice_input"
     }
 ]

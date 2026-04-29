@@ -148,6 +148,7 @@ All commands available via Command Palette (`Cmd+Shift+P`): type "Claude"
 | **MCP Marketplace** | - | Browse and install 12+ MCP servers with one click |
 | **Generate Commit Message** | - | Generate commit message from `git diff --staged` |
 | **Git Status** | - | Show `git status --short` in output view |
+| **Voice Input** | `Cmd+Shift+R` | Record audio, transcribe via Whisper API, insert text (macOS only) |
 
 ### Inline Input Mode
 
@@ -347,6 +348,22 @@ When you explicitly add a file, related files are automatically included (up to 
 Supported: Python, JavaScript/TypeScript, PHP, Go.
 
 Disable by removing the `_add_related_files` call in `session.py` if you prefer manual context only.
+
+## Voice Input
+
+**`Claude: Voice Input`** (`Cmd+Shift+R`) — speak instead of typing (macOS only):
+
+1. Press `Cmd+Shift+R` to start recording
+2. Speak your prompt
+3. Press `Cmd+Shift+R` again to stop
+4. Audio is sent to OpenAI Whisper API and transcribed
+5. Text is inserted into the input area
+
+**Requirements:**
+- macOS (`afrecord` for audio capture)
+- OpenAI API key set in settings: `"openai_api_key": "sk-..."`
+
+**Privacy note:** Audio is sent to OpenAI's Whisper API for transcription. For local-only transcription, use macOS built-in dictation (Fn twice) instead.
 
 ## Sessions
 

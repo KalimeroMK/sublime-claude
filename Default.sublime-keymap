@@ -226,5 +226,18 @@
                 "operand": true
             }
         ]
+    },
+    {
+        "keys": [
+            "super+shift+r"
+        ],
+        "command": "claude_voice_input",
+        "context": [
+            {
+                "key": "setting.claude_output",
+                "operator": "equal",
+                "operand": true
+            }
+        ]
     }
 ]

@@ -5,4 +5,5 @@ from .commands_context import *
 from .commands_session import *
 from .commands_tools import *
 from .commands_ui import *
+from .commands_voice import *
 
