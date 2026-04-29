@@ -181,12 +181,13 @@ def format_unified_diff(unified: str, max_lines: int = 30) -> str:
 
 
 def _format_diff_block(lines: list, max_lines: int = 30) -> str:
-    """Wrap diff lines in a fenced block with truncation."""
+    """Format diff lines indented (no fence markers for cleaner inline display)."""
     if len(lines) > max_lines:
         omitted = len(lines) - max_lines
         lines = lines[:max_lines]
         lines.append(f"... ({omitted} more lines)")
-    return "\n```diff\n" + "\n".join(lines) + "\n```"
+    # Indent each line to align with tool detail (4 spaces)
+    return "\n" + "\n".join("    " + line for line in lines)
 
 
 def format_tool_detail(tool) -> str:

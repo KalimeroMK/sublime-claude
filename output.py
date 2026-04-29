@@ -164,10 +164,10 @@ class OutputView:
         self.view.set_name(f"{prefix}{name}")
 
     def _highlight_diff_blocks(self, start: int, end: int) -> None:
-        """Scan conversation region for ```diff blocks and add colored scopes.
+        """Scan conversation region for diff lines and add colored scopes.
 
-        Diff lines are indented, so source.diff syntax doesn't match them.
-        We add explicit regions with scopes that the theme already colors.
+        Diff lines are indented 4 spaces (no fence markers).
+        We match lines starting with 4+ spaces followed by + / - / @@.
         """
         if not self.view or not self.view.is_valid():
             return
@@ -184,21 +184,16 @@ class OutputView:
             deleted = []    # - lines (red)
             ranges = []     # @@ lines (purple)
 
-            in_diff_block = False
             line_start = start
 
             for i, ch in enumerate(text):
                 if ch == '\n':
                     line_end = start + i
                     line_text = text[line_start - start:line_end - start]
-                    stripped = line_text.lstrip()
-
-                    if stripped.startswith('```diff'):
-                        in_diff_block = True
-                    elif stripped.startswith('```') and in_diff_block:
-                        in_diff_block = False
-                    elif in_diff_block:
-                        # Inside a diff block — check for + / - / @@
+                    # Diff lines are indented 4+ spaces and start with + / - / @@
+                    # Must have at least 4 leading spaces and then + / - / @@
+                    if len(line_text) >= 6 and line_text[:4] == '    ':
+                        stripped = line_text.lstrip()
                         if stripped.startswith('+'):
                             inserted.append(sublime.Region(line_start, line_end))
                         elif stripped.startswith('-'):
@@ -209,15 +204,16 @@ class OutputView:
                     line_start = line_end + 1
 
             # Handle last line if text doesn't end with newline
-            if line_start < end and in_diff_block:
+            if line_start < end:
                 line_text = text[line_start - start:]
-                stripped = line_text.lstrip()
-                if stripped.startswith('+'):
-                    inserted.append(sublime.Region(line_start, end))
-                elif stripped.startswith('-'):
-                    deleted.append(sublime.Region(line_start, end))
-                elif stripped.startswith('@@'):
-                    ranges.append(sublime.Region(line_start, end))
+                if len(line_text) >= 6 and line_text[:4] == '    ':
+                    stripped = line_text.lstrip()
+                    if stripped.startswith('+'):
+                        inserted.append(sublime.Region(line_start, end))
+                    elif stripped.startswith('-'):
+                        deleted.append(sublime.Region(line_start, end))
+                    elif stripped.startswith('@@'):
+                        ranges.append(sublime.Region(line_start, end))
 
             # Add regions with scopes (theme already defines colors for these)
             if inserted:
