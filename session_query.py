@@ -246,6 +246,49 @@ class SessionQueryMixin:
 
         prompt = re.sub(r'@file:(\S+)', replace_file, prompt)
 
+        # @git -- add git diff --staged as context
+        if "@git" in prompt:
+            try:
+                import subprocess
+                project_root = self.window.folders()[0] if self.window.folders() else None
+                if project_root:
+                    result = subprocess.run(
+                        ["git", "-C", project_root, "diff", "--staged"],
+                        capture_output=True, text=True, timeout=10
+                    )
+                    if result.returncode == 0 and result.stdout.strip():
+                        diff = result.stdout.strip()
+                        if len(diff) > 20000:
+                            diff = diff[:20000] + "\n\n... [truncated]\n"
+                        self.pending_context.append(ContextItem(
+                            kind="note",
+                            name="git:staged",
+                            content=f"[git diff --staged]\n```diff\n{diff}\n```",
+                        ))
+                        print(f"[Claude] @git: added staged diff ({len(diff)} chars)")
+                    else:
+                        result = subprocess.run(
+                            ["git", "-C", project_root, "diff"],
+                            capture_output=True, text=True, timeout=10
+                        )
+                        if result.returncode == 0 and result.stdout.strip():
+                            diff = result.stdout.strip()
+                            if len(diff) > 20000:
+                                diff = diff[:20000] + "\n\n... [truncated]\n"
+                            self.pending_context.append(ContextItem(
+                                kind="note",
+                                name="git:unstaged",
+                                content=f"[git diff]\n```diff\n{diff}\n```",
+                            ))
+                            print(f"[Claude] @git: added unstaged diff ({len(diff)} chars)")
+                        else:
+                            print("[Claude] @git: no changes to diff")
+                else:
+                    print("[Claude] @git: no project root")
+            except Exception as e:
+                print(f"[Claude] @git error: {e}")
+            prompt = prompt.replace("@git", "").strip()
+
         # Clean up any remaining standalone @codebase or @file without args
         prompt = re.sub(r'@codebase\b', '', prompt)
         prompt = re.sub(r'@file\b', '', prompt)

@@ -178,5 +178,13 @@
     {
         "caption": "Claude: MCP Marketplace",
         "command": "claude_mcp_marketplace"
+    },
+    {
+        "caption": "Claude: Generate Commit Message",
+        "command": "claude_code_git_commit_message"
+    },
+    {
+        "caption": "Claude: Git Status",
+        "command": "claude_code_git_status"
     }
 ]

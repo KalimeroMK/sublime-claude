@@ -46,8 +46,10 @@ class ContextParserTest(unittest.TestCase):
         self.assertTrue(len(menu) > 0)
         # First item should be "codebase" action
         self.assertEqual(menu[0].action, "codebase")
-        # Second item should be "browse"
-        self.assertEqual(menu[1].action, "browse")
+        # Second item should be "git"
+        self.assertEqual(menu[1].action, "git")
+        # Third item should be "browse"
+        self.assertEqual(menu[2].action, "browse")
 
     def test_build_menu_has_codebase(self):
         """Menu includes @codebase option."""
@@ -58,6 +60,16 @@ class ContextParserTest(unittest.TestCase):
         codebase_items = [m for m in menu if m.action == "codebase"]
         self.assertEqual(len(codebase_items), 1)
         self.assertEqual(codebase_items[0].label, "@codebase")
+
+    def test_build_menu_has_git(self):
+        """Menu includes @git option."""
+        menu = ContextParser.build_menu(
+            open_files=[],
+            has_pending_context=False
+        )
+        git_items = [m for m in menu if m.action == "git"]
+        self.assertEqual(len(git_items), 1)
+        self.assertEqual(git_items[0].label, "@git")
 
     def test_build_menu_with_files(self):
         """Menu includes open files."""

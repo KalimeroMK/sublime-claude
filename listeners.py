@@ -670,7 +670,11 @@ class ClaudeOutputEventListener(sublime_plugin.ViewEventListener):
             # Insert @codebase text at current cursor position
             self.view.run_command("insert", {"characters": "@codebase "})
 
-        handler = ContextMenuHandler(on_browse, on_clear, on_add_file, on_codebase)
+        def on_git():
+            # Insert @git text at current cursor position
+            self.view.run_command("insert", {"characters": "@git "})
+
+        handler = ContextMenuHandler(on_browse, on_clear, on_add_file, on_codebase, on_git)
 
         def on_select(idx):
             handler.handle_selection(menu_items, idx)

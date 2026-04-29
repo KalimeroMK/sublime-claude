@@ -146,6 +146,8 @@ All commands available via Command Palette (`Cmd+Shift+P`): type "Claude"
 | **Attach File...** | `Cmd+Shift+F` | Attach any file or image to context (auto-detects type) |
 | **Swarm Monitor** | - | Dashboard of all active sessions and subsessions |
 | **MCP Marketplace** | - | Browse and install 12+ MCP servers with one click |
+| **Generate Commit Message** | - | Generate commit message from `git diff --staged` |
+| **Git Status** | - | Show `git status --short` in output view |
 
 ### Inline Input Mode
 
@@ -153,7 +155,7 @@ The output view features an inline input area (marked with `◎`) where you type
 
 - **Enter** - Submit prompt
 - **Shift+Enter** - Insert newline (multiline prompts)
-- **@** - Open context menu (add files, @codebase search, folder, or clear context)
+- **@** - Open context menu (add files, @codebase, @git, folder, or clear context)
 - **Alt+Escape** - Interrupt current query
 
 When a permission prompt appears:
@@ -318,6 +320,7 @@ Type `@` in the inline input area to trigger the context menu, or type commands 
 | Command | Description |
 |---------|-------------|
 | `@codebase <query>` | Search entire project for relevant code (TF-IDF, no API needed) |
+| `@git` | Add `git diff --staged` (or unstaged) to context |
 | `@file:<path>` | Inline reference to a specific file |
 
 **`@codebase`** finds the most relevant files based on your query keywords and adds them to context automatically:

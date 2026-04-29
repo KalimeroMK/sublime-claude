@@ -214,3 +214,90 @@ class ClaudeAttachFileCommand(sublime_plugin.WindowCommand):
         return session is not None
 
 
+class ClaudeCodeGitCommitMessageCommand(sublime_plugin.WindowCommand):
+    """Generate commit message from git diff."""
+    def run(self) -> None:
+        import subprocess
+
+        s = get_active_session(self.window)
+        if not s:
+            sublime.status_message("No active session")
+            return
+
+        project_root = self.window.folders()[0] if self.window.folders() else None
+        if not project_root:
+            sublime.status_message("No project folder")
+            return
+
+        # Get staged diff
+        result = subprocess.run(
+            ["git", "-C", project_root, "diff", "--staged"],
+            capture_output=True, text=True, timeout=10
+        )
+        diff = result.stdout.strip() if result.returncode == 0 else ""
+
+        # Fallback to unstaged
+        if not diff:
+            result = subprocess.run(
+                ["git", "-C", project_root, "diff"],
+                capture_output=True, text=True, timeout=10
+            )
+            diff = result.stdout.strip() if result.returncode == 0 else ""
+
+        if not diff:
+            sublime.status_message("No changes to commit")
+            return
+
+        # Truncate if too large
+        if len(diff) > 20000:
+            diff = diff[:20000] + "\n\n... [truncated]\n"
+
+        prompt = (
+            "Write a concise, conventional commit message for the following changes.\n"
+            "Format: <type>(<scope>): <description>\n\n"
+            "```diff\n" + diff + "\n```"
+        )
+
+        def on_done(response: str) -> None:
+            if response and not response.startswith("Error"):
+                # Show result in output view
+                s.output.text("\n\n**Generated commit message:**\n```\n" + response.strip() + "\n```\n")
+                s.output.show()
+                sublime.status_message("Commit message generated")
+            else:
+                sublime.status_message("Failed to generate commit message")
+
+        s.send_message_with_callback(prompt, on_done, display_prompt="[git commit message]")
+        sublime.status_message("Generating commit message...")
+
+
+class ClaudeCodeGitStatusCommand(sublime_plugin.WindowCommand):
+    """Show git status in the Claude output view."""
+    def run(self) -> None:
+        import subprocess
+
+        s = get_active_session(self.window)
+        if not s:
+            sublime.status_message("No active session")
+            return
+
+        project_root = self.window.folders()[0] if self.window.folders() else None
+        if not project_root:
+            sublime.status_message("No project folder")
+            return
+
+        result = subprocess.run(
+            ["git", "-C", project_root, "status", "--short"],
+            capture_output=True, text=True, timeout=10
+        )
+        status = result.stdout.strip() if result.returncode == 0 else ""
+
+        if not status:
+            s.output.text("\n\n*Working tree clean*\n")
+        else:
+            s.output.text("\n\n**Git status:**\n```\n" + status + "\n```\n")
+
+        s.output.show()
+        sublime.status_message("Git status shown")
+
+
