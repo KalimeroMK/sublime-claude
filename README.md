@@ -21,11 +21,12 @@ This build extends the base project with additional features, bug fixes, and a f
 | **Token Usage Graph** | `Claude: Show Usage Graph` — ASCII bar chart of token usage per query, 100-query history persisted |
 | **Agent Swarm Monitor** | `Claude: Swarm Monitor` — dashboard showing all active sessions, subsessions, statuses, and costs |
 | **MCP Marketplace** | `Claude: MCP Marketplace` — browse and install 21 curated MCP servers with one-click auto-install |
+| **Skills Marketplace** | `Claude: Skills Marketplace` — browse and install 27 curated skills (global or per-project). Skills inject into `~/.claude/CLAUDE.md` or `./CLAUDE.md` |
 | **Diff Preview & Undo** | Unified diff preview for Write/Edit tools — see changes before approving, with colored diff lines (green/red) and one-click undo |
 | **Smart Context** | Auto-adds current scope, git-modified files, relevant open files, and symbol definitions to queries — with caching and `.gitignore` filtering |
 | **Persistent Memory** | AI remembers facts, preferences, and decisions across sessions via `.claude/memory.json` |
 | **Scroll Respect** | Viewport-aware auto-scroll — doesn't jump to bottom when reading history |
-| **Comprehensive Test Suite** | 211 unit tests covering all core utilities, running in ~0.03s with a mock Sublime API |
+| **Comprehensive Test Suite** | 233 unit tests covering all core utilities, running in ~0.03s with a mock Sublime API |
 
 ### Bug Fixes
 
@@ -499,6 +500,29 @@ Claude: ready, effort:high, sonnet.4.5, ctx:45k, 🟡 ████████�
 - **Status icons:** 🟢 Working / 💤 Sleeping / 🟡 Connecting / ⏸ Idle
 - **Subsession tracking** — shows parent session name
 - **Window-scoped** — only shows sessions in the current Sublime window
+
+### Skills Marketplace
+
+**`Claude: Skills Marketplace`** — browse and install 27 curated skills with one click:
+
+- **TDD Workflow** — RED-GREEN-REFACTOR with 80%+ coverage and git checkpoints
+- **Security Review** — OWASP-aligned checklist (secrets, XSS, SQL injection, auth, rate limiting)
+- **API Design** — REST patterns: resource naming, status codes, pagination, versioning
+- **Search First** — research-before-coding workflow (adopt/extend/build decision matrix)
+- **Frontend Patterns** — React, Next.js, state management, performance, forms, accessibility
+- **Backend Patterns** — repository/service layers, database optimization, caching, auth
+- **Deployment Patterns** — CI/CD, Docker, health checks, rollback strategies
+- **Verification Loop** — build, type check, lint, tests, security scan, diff review
+- **Laravel Boost** — comprehensive Laravel: architecture, Eloquent, security, TDD with Pest
+- **PHP Strict**, **Python Clean**, **TypeScript Strict**, **Rust**, **Go**
+- **Domain-Driven Design**, **Microservices**, **Functional Programming**
+
+**How it works:**
+1. Select a skill from the quick panel
+2. Choose scope: 🌍 **Global** (all projects → `~/.claude/CLAUDE.md`) or 📁 **Project** (current project → `./CLAUDE.md`)
+3. Skills are injected between `<!-- [Claude Sublime Skills] START/END -->` markers
+4. User content is preserved — only the managed section is updated
+5. Additional commands: `Claude: List Active Skills`, `Claude: Disable All Skills`
 
 ### MCP Marketplace
 

@@ -29,6 +29,9 @@ from .commands import (
     ClaudePermissionDenyCommand,
     ClaudeCloseSessionCommand,
     ClaudeReplaceContentCommand,
+    ClaudeSkillsMarketplaceCommand,
+    ClaudeSkillsListCommand,
+    ClaudeSkillsDisableAllCommand,
 )
 from .output import (
     ClaudeInsertCommand,

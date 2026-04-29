@@ -202,5 +202,17 @@
     {
         "caption": "Claude: Voice Input",
         "command": "claude_voice_input"
+    },
+    {
+        "caption": "Claude: Skills Marketplace",
+        "command": "claude_skills_marketplace"
+    },
+    {
+        "caption": "Claude: List Active Skills",
+        "command": "claude_skills_list"
+    },
+    {
+        "caption": "Claude: Disable All Skills",
+        "command": "claude_skills_disable_all"
     }
 ]

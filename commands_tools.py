@@ -828,3 +828,174 @@ class ClaudeCodeManageAutoAllowedToolsCommand(sublime_plugin.WindowCommand):
                 sublime.error_message(f"Failed to save settings: {e}")
 
 
+# ──────────────────────────────────────────────────────────────────────────────
+# Skills Marketplace Commands
+# ──────────────────────────────────────────────────────────────────────────────
+
+class ClaudeSkillsMarketplaceCommand(sublime_plugin.WindowCommand):
+    """Browse and install skills from the curated marketplace."""
+
+    def run(self) -> None:
+        from .skills_manager import list_installed_skills
+
+        project_root = self.window.folders()[0] if self.window.folders() else None
+        self._skills = list_installed_skills(project_root)
+
+        if not self._skills:
+            sublime.status_message("Skills Marketplace: нема достапни skills")
+            return
+
+        items = []
+        for skill in self._skills:
+            name = skill["name"]
+            cat = skill["category"]
+            desc = skill["description"]
+            status = ""
+            if skill["global_active"] and skill["project_active"]:
+                status = " 🌍📁"
+            elif skill["global_active"]:
+                status = " 🌍"
+            elif skill["project_active"]:
+                status = " 📁"
+            items.append([f"{name}{status}", f"[{cat}] {desc}"])
+
+        self.window.show_quick_panel(
+            items,
+            self._on_select,
+            placeholder="Избери skill за инсталација..."
+        )
+
+    def _on_select(self, idx: int) -> None:
+        if idx < 0:
+            return
+        skill = self._skills[idx]
+        self._selected_skill = skill
+
+        # Ask user where to install
+        items = [
+            ["🌍 Global", "Сите проекти (~/.claude/CLAUDE.md)"],
+            ["📁 Project", f"Само тековен проект ({self.window.folders()[0] if self.window.folders() else 'нема'})"],
+        ]
+
+        # If already active somewhere, show toggle options
+        if skill["global_active"] or skill["project_active"]:
+            items.append(["❌ Disable", "Исклучи го skill-от"])
+
+        self.window.show_quick_panel(
+            items,
+            self._on_scope_select,
+            placeholder=f"{skill['name']} — каде да инсталираш?"
+        )
+
+    def _on_scope_select(self, idx: int) -> None:
+        if idx < 0:
+            return
+        skill = self._selected_skill
+        project_root = self.window.folders()[0] if self.window.folders() else None
+
+        from .skills_manager import (
+            set_skill_state,
+            rebuild_global_claude_md,
+            rebuild_project_claude_md,
+        )
+
+        if idx == 0:
+            # Global
+            set_skill_state(skill["id"], "global", True)
+            rebuild_global_claude_md()
+            sublime.status_message(f"✅ {skill['name']} е активиран глобално")
+        elif idx == 1:
+            # Project
+            if not project_root:
+                sublime.error_message("Нема отворен проект за инсталација.")
+                return
+            set_skill_state(skill["id"], "project", True, project_root)
+            rebuild_project_claude_md(project_root)
+            sublime.status_message(f"✅ {skill['name']} е активиран за проектот")
+        elif idx == 2:
+            # Disable
+            if skill["global_active"]:
+                set_skill_state(skill["id"], "global", False)
+                rebuild_global_claude_md()
+            if skill["project_active"] and project_root:
+                set_skill_state(skill["id"], "project", False, project_root)
+                rebuild_project_claude_md(project_root)
+            sublime.status_message(f"❌ {skill['name']} е исклучен")
+
+
+class ClaudeSkillsListCommand(sublime_plugin.WindowCommand):
+    """List all active skills and their scope."""
+
+    def run(self) -> None:
+        from .skills_manager import list_installed_skills
+
+        project_root = self.window.folders()[0] if self.window.folders() else None
+        skills = list_installed_skills(project_root)
+
+        active = [s for s in skills if s["global_active"] or s["project_active"]]
+
+        if not active:
+            sublime.status_message("Нема активни skills")
+            return
+
+        lines = ["# 🎯 Active Skills", ""]
+        for s in active:
+            scopes = []
+            if s["global_active"]:
+                scopes.append("🌍 Global")
+            if s["project_active"]:
+                scopes.append("📁 Project")
+            lines.append(f"- **{s['name']}** ({s['category']}) — {' + '.join(scopes)}")
+            if s["description"]:
+                lines.append(f"  {s['description']}")
+
+        view = self.window.new_file()
+        view.set_name("Claude Skills")
+        view.set_scratch(True)
+        view.assign_syntax("Packages/Markdown/Markdown.sublime-syntax")
+        view.run_command("append", {"characters": "\n".join(lines) + "\n"})
+
+
+class ClaudeSkillsDisableAllCommand(sublime_plugin.WindowCommand):
+    """Disable all skills (global and/or project)."""
+
+    def run(self) -> None:
+        items = [
+            ["🌍 Disable Global", "Исклучи ги сите глобални skills"],
+            ["📁 Disable Project", "Исклучи ги сите project skills"],
+            ["❌ Disable All", "Исклучи ги сите (global + project)"],
+        ]
+
+        def on_select(idx):
+            if idx < 0:
+                return
+            project_root = self.window.folders()[0] if self.window.folders() else None
+            from .skills_manager import (
+                get_active_skills,
+                set_skill_state,
+                rebuild_global_claude_md,
+                rebuild_project_claude_md,
+            )
+
+            if idx == 0:
+                for sid in get_active_skills("global"):
+                    set_skill_state(sid, "global", False)
+                rebuild_global_claude_md()
+                sublime.status_message("Сите глобални skills се исклучени")
+            elif idx == 1:
+                if project_root:
+                    for sid in get_active_skills("project", project_root):
+                        set_skill_state(sid, "project", False, project_root)
+                    rebuild_project_claude_md(project_root)
+                    sublime.status_message("Сите project skills се исклучени")
+            elif idx == 2:
+                for sid in get_active_skills("global"):
+                    set_skill_state(sid, "global", False)
+                rebuild_global_claude_md()
+                if project_root:
+                    for sid in get_active_skills("project", project_root):
+                        set_skill_state(sid, "project", False, project_root)
+                    rebuild_project_claude_md(project_root)
+                sublime.status_message("Сите skills се исклучени")
+
+        self.window.show_quick_panel(items, on_select)

@@ -2,6 +2,15 @@
 
 ## Done
 
+### Skills Marketplace
+Browse and install 27 curated skills with one click. Install globally (`~/.claude/CLAUDE.md`) or per-project (`./CLAUDE.md`). Skills from everything-claude-code and community.
+
+- `Claude: Skills Marketplace` — browse and install
+- `Claude: List Active Skills` — view active skills and scope
+- `Claude: Disable All Skills` — disable global/project/all skills
+- Hybrid scope: ask user on each install whether to apply globally or per-project
+- User content in CLAUDE.md is preserved via `<!-- [Claude Sublime Skills] START/END -->` markers
+
 ### Session Sleep/Wake
 Sessions can be put to sleep to free bridge subprocess resources while keeping the view open.
 
