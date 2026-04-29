@@ -207,6 +207,52 @@
       "env": {
         "TAVILY_API_KEY": "Your Tavily API key"
       }
+    },
+    "chrome-devtools": {
+      "name": "Chrome DevTools",
+      "description": "Debug browser from Claude — DOM inspection, console logs, network requests",
+      "publisher": "chrome-devtools-mcp",
+      "source": "https://github.com/ChromeDevTools/chrome-devtools-mcp",
+      "install_type": "npm",
+      "package": "chrome-devtools-mcp",
+      "runtime": "npx",
+      "args": ["-y", "chrome-devtools-mcp"],
+      "env": {}
+    },
+    "kubeshark": {
+      "name": "Kubeshark",
+      "description": "Kubernetes network observability — inspect L4/L7 traffic with full K8s context",
+      "publisher": "kubeshark",
+      "source": "https://github.com/kubeshark/kubeshark",
+      "install_type": "npm",
+      "package": "kubeshark-mcp",
+      "runtime": "npx",
+      "args": ["-y", "kubeshark-mcp"],
+      "env": {}
+    },
+    "exa": {
+      "name": "Exa",
+      "description": "AI-powered web search and content crawling for agents",
+      "publisher": "exa",
+      "source": "https://github.com/exa-labs/exa-mcp-server",
+      "install_type": "npm",
+      "package": "exa-mcp-server",
+      "runtime": "npx",
+      "args": ["-y", "exa-mcp-server"],
+      "env": {
+        "EXA_API_KEY": "Your Exa API key"
+      }
+    },
+    "spec-workflow": {
+      "name": "Spec Workflow",
+      "description": "Spec-driven development workflow with real-time web dashboard",
+      "publisher": "spec-workflow-mcp",
+      "source": "https://github.com/spec-workflow-mcp/spec-workflow-mcp",
+      "install_type": "npm",
+      "package": "spec-workflow-mcp",
+      "runtime": "npx",
+      "args": ["-y", "spec-workflow-mcp"],
+      "env": {}
     }
   }
 }
