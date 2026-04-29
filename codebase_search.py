@@ -139,7 +139,7 @@ class CodebaseSearch:
             with open(path, "r", encoding="utf-8", errors="replace") as f:
                 content = f.read()
         except (OSError, IOError):
-            return
+            return False
 
         # Extract words
         text_lower = content.lower()

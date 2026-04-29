@@ -749,23 +749,13 @@ You are subsession **{subsession_id}**. Call signal_complete(session_id={view_id
             # Check guardrails requiring approval
             guardrails = self._load_guardrails()
             require_approval = guardrails.get("require_approval_for", [])
-            for pattern in require_approval:
-                if pattern.lower() in tool_input["command"].lower():
-                    # Force permission dialog even if auto-allowed
-                    _bridge_log(f"GUARDRAIL: Requiring approval for '{pattern}' command\n")
-                    break
-            else:
-                # No approval required, continue to auto-allow check
-                pass
-            # If we hit a pattern requiring approval, we fall through to permission dialog below
-            # We use a flag to track this
             _guardrail_requires_approval = any(
                 pattern.lower() in tool_input["command"].lower()
                 for pattern in require_approval
             )
             if _guardrail_requires_approval:
-                # Skip auto-allow and go straight to permission dialog
-                pass  # Fall through below
+                _bridge_log(f"GUARDRAIL: Requiring approval for command matching guardrail pattern\n")
+                # Fall through to permission dialog below
             else:
                 # Check auto-allowed tools from settings
                 settings = load_project_settings(self.cwd)
@@ -778,7 +768,6 @@ You are subsession **{subsession_id}**. Call signal_complete(session_id={view_id
                         return PermissionResultAllow(updated_input=tool_input)
 
                 # No auto-allow match, fall through to permission dialog below
-                pass
 
         # For non-Bash tools: check auto-allowed tools from settings
         if tool_name != "Bash":

@@ -289,6 +289,8 @@ class NotaloneClient:
                 session.working = False
         except Exception as e:
             # Reset working on any failure to prevent stuck session
+            with self._channel_lock:
+                self._active_channels.pop(view_id, None)
             session.working = False
             logger.error(f"notalone: channel processing error: {e}")
             self._send_channel_response(channel_id, {"error": str(e)})

@@ -39,11 +39,11 @@ class TestSkillsManager(unittest.TestCase):
 
         # Patch base dir
         import skills_manager
-        self._orig_base_dir = skills_manager._SKILLES_BASE_DIR
+        self._orig_base_dir = skills_manager._SKILLS_BASE_DIR
         self._orig_global_manifest = skills_manager._GLOBAL_MANIFEST_PATH
-        skills_manager._SKILLES_BASE_DIR = os.path.join(self.temp_dir, "skills")
+        skills_manager._SKILLS_BASE_DIR = os.path.join(self.temp_dir, "skills")
         skills_manager._GLOBAL_MANIFEST_PATH = os.path.join(self.temp_dir, "skills", "global_manifest.json")
-        os.makedirs(skills_manager._SKILLES_BASE_DIR, exist_ok=True)
+        os.makedirs(skills_manager._SKILLS_BASE_DIR, exist_ok=True)
 
         self.marketplace = {
             "php-strict": {
@@ -69,7 +69,7 @@ class TestSkillsManager(unittest.TestCase):
     def tearDown(self):
         """Clean up temporary directories."""
         import skills_manager
-        skills_manager._SKILLES_BASE_DIR = self._orig_base_dir
+        skills_manager._SKILLS_BASE_DIR = self._orig_base_dir
         skills_manager._GLOBAL_MANIFEST_PATH = self._orig_global_manifest
         shutil.rmtree(self.temp_dir, ignore_errors=True)
 

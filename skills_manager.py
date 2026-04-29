@@ -14,14 +14,14 @@ SKILLS_START_MARKER = "<!-- [Claude Sublime Skills] START -->"
 SKILLS_END_MARKER = "<!-- [Claude Sublime Skills] END -->"
 
 # Directories and files
-_SKILLES_BASE_DIR = os.path.expanduser("~/.claude-sublime/skills")
-_GLOBAL_MANIFEST_PATH = os.path.join(_SKILLES_BASE_DIR, "global_manifest.json")
+_SKILLS_BASE_DIR = os.path.expanduser("~/.claude-sublime/skills")
+_GLOBAL_MANIFEST_PATH = os.path.join(_SKILLS_BASE_DIR, "global_manifest.json")
 _PROJECT_MANIFEST_NAME = ".claude/skills_manifest.json"
 
 
 def _ensure_dirs() -> None:
     """Create base directories if missing."""
-    os.makedirs(_SKILLES_BASE_DIR, exist_ok=True)
+    os.makedirs(_SKILLS_BASE_DIR, exist_ok=True)
 
 
 def load_marketplace(path: Optional[str] = None) -> Dict[str, dict]:
