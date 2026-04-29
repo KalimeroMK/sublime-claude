@@ -7,10 +7,9 @@ DEFAULT_SESSION_NAME = "Claude"
 PLUGIN_NAME = "ClaudeCode"
 
 # ─── User Directories ─────────────────────────────────────────────────────────
-USER_HOME = Path.home()
-USER_SETTINGS_DIR = USER_HOME / ".claude"
-USER_SETTINGS_FILE = USER_HOME / ".claude.json"  # User-level settings (MCP, etc.)
-USER_PROFILES_DIR = USER_HOME / ".claude-sublime"
+USER_SETTINGS_DIR = Path.home() / ".claude"
+USER_SETTINGS_FILE = Path.home() / ".claude.json"  # User-level settings (MCP, etc.)
+USER_PROFILES_DIR = Path.home() / ".claude-sublime"
 
 # ─── Project Directories ──────────────────────────────────────────────────────
 PROJECT_SETTINGS_DIR = ".claude"
@@ -57,55 +56,8 @@ SPINNER_FRAMES = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
 # ─── Input Mode ───────────────────────────────────────────────────────────────
 INPUT_MARKER = "◎ "
 
-# ─── Timing ───────────────────────────────────────────────────────────────────
-CONTEXT_DEBOUNCE_MS = 300  # Debounce for context menu after goto
-INPUT_RETRY_DELAY_MS = 500  # Retry delay for query when not initialized
-RECONNECT_DELAY_MS = 100    # Delay before reconnecting orphaned view
-
-# ─── Limits ───────────────────────────────────────────────────────────────────
-DEFAULT_FIND_FILE_LIMIT = 20
-DEFAULT_GET_SYMBOLS_LIMIT = 10
-DEFAULT_TERMINAL_READ_LINES = 100
-MAX_LINE_LENGTH = 2000  # Max chars per line in read results
-
-# ─── Buffer Sizes ─────────────────────────────────────────────────────────────
-BRIDGE_BUFFER_SIZE = 1073741824  # 1GB for StreamReader
-
-# ─── Permissions ──────────────────────────────────────────────────────────────
-PERMISSION_MODE_DEFAULT = "default"
-PERMISSION_MODE_ACCEPT_EDITS = "acceptEdits"
-PERMISSION_MODE_BYPASS = "bypassPermissions"
-
-PERMISSION_MODES = [
-    PERMISSION_MODE_DEFAULT,
-    PERMISSION_MODE_ACCEPT_EDITS,
-    PERMISSION_MODE_BYPASS
-]
-
-PERMISSION_MODE_LABELS = {
-    PERMISSION_MODE_DEFAULT: "Default (prompt for all)",
-    PERMISSION_MODE_ACCEPT_EDITS: "Accept Edits (auto-allow Read/Edit/Write)",
-    PERMISSION_MODE_BYPASS: "Bypass All (auto-allow everything)"
-}
-
-# ─── Context Triggers ─────────────────────────────────────────────────────────
-CONTEXT_TRIGGER_CHAR = "@"
-
 # ─── Tool Status ──────────────────────────────────────────────────────────────
 TOOL_STATUS_PENDING = "pending"
 TOOL_STATUS_DONE = "done"
 TOOL_STATUS_ERROR = "error"
 TOOL_STATUS_BACKGROUND = "background"
-
-TOOL_STATUS_SYMBOLS = {
-    TOOL_STATUS_PENDING: "☐",
-    TOOL_STATUS_DONE: "✔",
-    TOOL_STATUS_ERROR: "✘",
-}
-
-# ─── Session State ────────────────────────────────────────────────────────────
-SESSION_STATE_UNINITIALIZED = "uninitialized"
-SESSION_STATE_INITIALIZING = "initializing"
-SESSION_STATE_READY = "ready"
-SESSION_STATE_WORKING = "working"
-SESSION_STATE_ERROR = "error"

@@ -1,6 +1,6 @@
 """Session query orchestration mixin."""
 import time
-from typing import Optional, Callable
+from typing import Callable
 
 import sublime
 

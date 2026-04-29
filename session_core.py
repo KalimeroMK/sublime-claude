@@ -15,10 +15,8 @@ from .constants import CONVERSATION_REGION_KEY
 from .session_env import (
     _find_python_310_plus,
     _resolve_model_id,
-    get_model_context_limit,
     load_saved_sessions,
     save_sessions,
-    SESSIONS_FILE,
     _CONTEXT_LIMITS,
     _MODEL_CONTEXT_LIMITS,
 )

@@ -151,17 +151,6 @@ def _resolve_model_id(model_id: str):
     return model_id, None
 
 
-def get_model_context_limit(model_id: str) -> Optional[int]:
-    """Get context limit for a model ID."""
-    real_id, explicit = _resolve_model_id(model_id)
-    if explicit:
-        return explicit
-    for prefix, limit in _MODEL_CONTEXT_LIMITS.items():
-        if prefix in (real_id or ""):
-            return limit
-    return None
-
-
 # ─── Session Persistence ──────────────────────────────────────────────────────
 
 SESSIONS_FILE = os.path.join(os.path.dirname(__file__), ".sessions.json")

@@ -339,9 +339,4 @@ class CodebaseSearch:
         results.sort(key=lambda x: x["score"], reverse=True)
         return results[:top_k]
 
-    def index_if_needed(self, max_age_hours: float = 24.0) -> bool:
-        """Re-index project if index is stale or empty. Returns True if indexing was done."""
-        if self.needs_reindex(max_age_hours):
-            self.index_project()
-            return True
-        return False
+

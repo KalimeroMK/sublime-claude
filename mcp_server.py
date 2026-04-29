@@ -1290,7 +1290,6 @@ class MCPSocketServer:
             tag = f"claude-agent-{target_id}"
         elif not tag:
             # Default tag uses active Claude session's view ID for isolation
-            from . import core
             window = self._get_window()
             active_view_id = window.settings().get(ACTIVE_VIEW_SETTING) if window else None
             if active_view_id and active_view_id in sublime._claude_sessions:

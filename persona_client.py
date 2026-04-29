@@ -82,23 +82,4 @@ def release_persona(
     return _request(f"{base_url}/release", method="POST", data=data)
 
 
-def log_work(
-    session_id: str,
-    action: str,
-    summary: str,
-    work_item_id: str = None,
-    work_provider: str = None,
-    base_url: str = DEFAULT_BASE_URL
-) -> Dict[str, Any]:
-    """Log work for the persona's worklog."""
-    data = {
-        "session_id": session_id,
-        "action": action,
-        "summary": summary
-    }
-    if work_item_id:
-        data["work_item_id"] = work_item_id
-    if work_provider:
-        data["work_provider"] = work_provider
 
-    return _request(f"{base_url}/worklog", method="POST", data=data)

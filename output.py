@@ -17,7 +17,7 @@ from .output_models import (
     PENDING, DONE, ERROR, BACKGROUND,
     PERM_ALLOW, PERM_DENY, PERM_ALLOW_ALL, PERM_ALLOW_SESSION, PERM_BATCH,
     PLAN_APPROVE, PLAN_REJECT, PLAN_VIEW,
-    PlanApproval, PermissionRequest, PermissionBatch, QuestionRequest,
+    PlanApproval, PermissionRequest, QuestionRequest,
     ToolCall, TodoItem, Conversation,
 )
 
@@ -232,12 +232,10 @@ class OutputView:
 
         # Exit any current conversation's working state
         if self.current and self.current.working:
-            # print(f"[Claude] enter_input_mode: current conversation is working, can't enter input mode")
             return  # Can't input while working
 
         # Additional safety: check if there's a pending render that should complete first
         if self._render_pending:
-            # print(f"[Claude] enter_input_mode: pending render, deferring...")
             # Schedule input mode entry after pending render completes
             sublime.set_timeout(self.enter_input_mode, 20)
             return
@@ -246,15 +244,12 @@ class OutputView:
         # This can happen after Sublime restart when OutputView state is lost but view content remains
         # BUT: Don't clean up fresh context that was just added
         has_pending_context = session and session.pending_context
-        # print(f"[Claude] enter_input_mode: has_pending_context={has_pending_context}, pending_context={session.pending_context if session else None}")
 
         content = self.view.substr(sublime.Region(0, self.view.size()))
-        # print(f"[Claude] enter_input_mode: view_size={self.view.size()}, last_50_chars={repr(content[-50:])}")
         if content:
             lines = content.split('\n')
             # Check last few lines for stale input markers
             cleanup_start = -1
-            # print(f"[Claude] enter_input_mode: checking last 5 lines for cleanup: {lines[-5:]}")
             for i in range(len(lines) - 1, max(-1, len(lines) - 5), -1):
                 line = lines[i]
                 # Input marker: starts with "◎ " but no " ▶" (which prompts have)
@@ -271,7 +266,6 @@ class OutputView:
                 elif line.strip():
                     break
             if cleanup_start >= 0 and cleanup_start < self.view.size():
-                # print(f"[Claude] enter_input_mode: CLEANUP deleting from {cleanup_start} to {self.view.size()}")
                 self.view.set_read_only(False)
                 self.view.run_command("claude_replace", {
                     "start": cleanup_start,
@@ -281,16 +275,13 @@ class OutputView:
                 # Reset context region since we just deleted content
                 self._pending_context_region = (0, 0)
             # else:
-                # print(f"[Claude] enter_input_mode: no cleanup needed, cleanup_start={cleanup_start}")
 
         # Set read-only false first but DON'T set _input_mode yet
         # This prevents on_modified from saving wrong draft during setup
         self.view.set_read_only(False)
 
         # Clear any existing context region since we'll render it with input
-        # print(f"[Claude] enter_input_mode: _pending_context_region={self._pending_context_region}")
         if self._pending_context_region[1] > self._pending_context_region[0]:
-            # print(f"[Claude] enter_input_mode: clearing old context region")
             self._replace(self._pending_context_region[0], self._pending_context_region[1], "")
             self._pending_context_region = (0, 0)
             # _replace sets view to read-only, so set it back to False for append operations
@@ -298,18 +289,15 @@ class OutputView:
 
         # Build input area (context + marker)
         self._input_area_start = self.view.size()
-        # print(f"[Claude] enter_input_mode: building input area at position {self._input_area_start}")
 
         # Add newline prefix only if view has content AND doesn't already end with newline
         prefix = ""
         if self.view.size() > 0:
             last_char = self.view.substr(self.view.size() - 1)
-            # print(f"[Claude] enter_input_mode: view has content, last_char={repr(last_char)}")
             if last_char != "\n":
                 prefix = "\n"
 
         if prefix:
-            # print(f"[Claude] enter_input_mode: adding newline prefix")
             self.view.run_command("append", {"characters": prefix})
         self._input_area_start = self.view.size()
 
@@ -326,14 +314,11 @@ class OutputView:
         if session and session.pending_context:
             names = [item.name for item in session.pending_context]
             ctx_line = f"📎 {', '.join(names)}\n"
-            # print(f"[Claude] enter_input_mode: adding context line: {repr(ctx_line)}")
             self.view.run_command("append", {"characters": ctx_line})
         # else:
-            # print(f"[Claude] enter_input_mode: no pending context to add, session={session is not None}")
 
         self.view.run_command("append", {"characters": self._input_marker})
         self._input_start = self.view.size()  # After the marker
-        # print(f"[Claude] enter_input_mode: input marker added, _input_start={self._input_start}")
 
         # NOW set input mode - after _input_start is correctly positioned
         # This ensures on_modified won't save wrong content as draft
@@ -345,7 +330,6 @@ class OutputView:
         self.view.sel().add(sublime.Region(self._input_start, self._input_start))
         self.view.show(self._input_start)
 
-        # print(f"[Claude] enter_input_mode: COMPLETED, view_size={self.view.size()}, _input_mode={self._input_mode}, final_content={repr(self.view.substr(sublime.Region(0, self.view.size())))}")
 
     def exit_input_mode(self, keep_text: bool = False) -> str:
         """Exit input mode and return the input text."""
@@ -441,9 +425,7 @@ class OutputView:
 
     def set_pending_context(self, context_items: list) -> None:
         """Show pending context - integrated with input mode if active."""
-        # print(f"[Claude] set_pending_context: called with {len(context_items)} items, _input_mode={self._input_mode}")
         if not self.view or not self.view.is_valid():
-            # print(f"[Claude] set_pending_context: view invalid, returning")
             return
 
         # If in input mode, re-render the whole input area with new context
@@ -466,29 +448,23 @@ class OutputView:
             return
 
         # Not in input mode - show context at end of view
-        # print(f"[Claude] set_pending_context: not in input mode, showing at end")
         # Remove old context display
         start, end = self._pending_context_region
-        # print(f"[Claude] set_pending_context: old region ({start}, {end})")
         if end > start:
-            # print(f"[Claude] set_pending_context: removing old context display")
             self._replace(start, end, "")
 
         if not context_items:
-            # print(f"[Claude] set_pending_context: no items, clearing region")
             self._pending_context_region = (0, 0)
             return
 
         # Build context display
         names = [item.name for item in context_items]
         text = f"\n📎 {', '.join(names)} ({len(names)} file{'s' if len(names) > 1 else ''})\n"
-        # print(f"[Claude] set_pending_context: writing context text: {repr(text)}")
 
         # Write at end
         start = self.view.size()
         end = self._write(text)
         self._pending_context_region = (start, end)
-        # print(f"[Claude] set_pending_context: wrote at ({start}, {end}), view_size now={self.view.size()}")
         self._scroll_to_end()
 
     def prompt(self, text: str, context_names: List[str] = None) -> None:
@@ -560,10 +536,8 @@ class OutputView:
         if context_names:
             context_str = ", ".join(context_names)
             line = f"{prefix}◎ {indented} ▶\n  📎 {context_str}\n"
-            # print(f"[Claude] prompt: writing with context: {repr(line)}")
         else:
             line = f"{prefix}◎ {indented} ▶\n"
-            # print(f"[Claude] prompt: writing without context: {repr(line)}")
         end = self._write(line)
         self.current.region = (start, end)
         # Track with Sublime region so it auto-adjusts when view content shifts
@@ -838,17 +812,6 @@ class OutputView:
         self.view.erase_regions(PERMISSION_REGION_KEY)
 
     # --- Permission UI ---
-
-    def clear_stale_permission(self, current_pid: int) -> None:
-        """Clear permission UI if it's for an older request (bridge moved on)."""
-        if not self.pending_permission:
-            return
-
-        # If pending permission is for an older pid, it's stale
-        if self.pending_permission.id < current_pid:
-            self._clear_permission()
-            self.pending_permission = None
-            self._permission_queue.clear()  # Also clear queue - they're all stale
 
     def clear_all_permissions(self) -> None:
         """Clear all pending permissions (called when query finishes)."""

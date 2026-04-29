@@ -21,11 +21,6 @@ class PromptBuilderTest(unittest.TestCase):
         pb = PromptBuilder("Explain this code")
         self.assertEqual(pb.build(), "Explain this code")
 
-    def test_add_text(self):
-        """Text is appended."""
-        pb = PromptBuilder("Base").add_text(" more")
-        self.assertEqual(pb.build(), "Base more")
-
     def test_add_file(self):
         """File includes path and content."""
         pb = PromptBuilder().add_file("src/main.py", "print('hello')")
@@ -41,22 +36,21 @@ class PromptBuilderTest(unittest.TestCase):
         self.assertIn("Selection from src/main.py", result)
         self.assertIn("def foo(): pass", result)
 
-    def test_add_folder(self):
-        """Folder includes path."""
-        pb = PromptBuilder().add_folder("/project/src")
-        result = pb.build()
-        self.assertIn("Folder: /project/src", result)
-
     def test_chaining(self):
         """Methods can be chained."""
         pb = (PromptBuilder("Q")
-              .add_text("uestion")
               .add_file("a.py", "x = 1")
-              .add_folder("/proj"))
+              .add_selection("b.py", "y = 2"))
         result = pb.build()
-        self.assertIn("Question", result)
+        self.assertIn("Q", result)
         self.assertIn("a.py", result)
-        self.assertIn("/proj", result)
+        self.assertIn("b.py", result)
+
+    def test_returns_self_for_chaining(self):
+        """Each method returns self."""
+        pb = PromptBuilder()
+        self.assertIs(pb.add_file("a", "b"), pb)
+        self.assertIs(pb.add_selection("a", "b"), pb)
 
     def test_file_query_static(self):
         """Static file query builder works."""
@@ -71,23 +65,6 @@ class PromptBuilderTest(unittest.TestCase):
         self.assertIn("Refactor", result)
         self.assertIn("main.py", result)
         self.assertIn("def old(): pass", result)
-
-    def test_add_context_items(self):
-        """Context items are added."""
-        class FakeItem:
-            content = "item content"
-        
-        pb = PromptBuilder().add_context_items([FakeItem()])
-        result = pb.build()
-        self.assertIn("item content", result)
-
-    def test_returns_self_for_chaining(self):
-        """Each method returns self."""
-        pb = PromptBuilder()
-        self.assertIs(pb.add_text("x"), pb)
-        self.assertIs(pb.add_file("a", "b"), pb)
-        self.assertIs(pb.add_selection("a", "b"), pb)
-        self.assertIs(pb.add_folder("a"), pb)
 
 
 if __name__ == "__main__":
