@@ -15,6 +15,7 @@ PERM_ALLOW = "allow"
 PERM_DENY = "deny"
 PERM_ALLOW_ALL = "allow_all"
 PERM_ALLOW_SESSION = "allow_session"  # Allow same tool for 30s
+PERM_BATCH = "batch_allow"  # Allow all Write/Edit for current query
 
 PLAN_APPROVE = "approve"
 PLAN_REJECT = "reject"
@@ -41,6 +42,15 @@ class PermissionRequest:
     callback: Callable[[str], None]  # Called with PERM_ALLOW, PERM_DENY, or PERM_ALLOW_ALL
     region: tuple = (0, 0)  # Region in view
     button_regions: Dict[str, tuple] = field(default_factory=dict)  # button_type -> (start, end)
+
+
+@dataclass
+class PermissionBatch:
+    """A batch of permission requests shown as a single approval block."""
+    requests: List[PermissionRequest] = field(default_factory=list)
+    callback: Callable[[str], None] = None  # Called with PERM_ALLOW or PERM_DENY
+    region: tuple = (0, 0)
+    button_regions: Dict[str, tuple] = field(default_factory=dict)
 
 
 @dataclass

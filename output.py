@@ -15,9 +15,9 @@ from .constants import (
 from .output_format import format_tool_detail
 from .output_models import (
     PENDING, DONE, ERROR, BACKGROUND,
-    PERM_ALLOW, PERM_DENY, PERM_ALLOW_ALL, PERM_ALLOW_SESSION,
+    PERM_ALLOW, PERM_DENY, PERM_ALLOW_ALL, PERM_ALLOW_SESSION, PERM_BATCH,
     PLAN_APPROVE, PLAN_REJECT, PLAN_VIEW,
-    PlanApproval, PermissionRequest, QuestionRequest,
+    PlanApproval, PermissionRequest, PermissionBatch, QuestionRequest,
     ToolCall, TodoItem, Conversation,
 )
 
@@ -42,6 +42,10 @@ class OutputView:
         self.current: Optional[Conversation] = None
         self.pending_permission: Optional[PermissionRequest] = None
         self._permission_queue: List[PermissionRequest] = []  # Queue for multiple requests
+        self._pending_batch: Optional['PermissionBatch'] = None  # Batched Write/Edit requests
+        self._batch_timer: Optional[int] = None  # sublime.set_timeout handle for batch flush
+        self._batch_allow_active: bool = False  # True when [B] Batch Allow is active for current query
+        self._batch_allow_edits_only: bool = True  # Only batch Write/Edit, or all tools
         self.pending_plan: Optional[PlanApproval] = None
         self.pending_question: Optional[QuestionRequest] = None
         self.auto_allow_tools: set = set()  # Tools auto-allowed for this session
@@ -852,6 +856,7 @@ class OutputView:
             self._clear_permission()
             self.pending_permission = None
         self._permission_queue.clear()
+        self._batch_allow_active = False
 
     def permission_request(self, pid: int, tool: str, tool_input: dict, callback: Callable[[str], None]) -> None:
         """Show a permission request in the view."""
@@ -877,6 +882,12 @@ class OutputView:
         if self._last_allowed_tool == tool and (now - self._last_allowed_time) < 30:
             callback(PERM_ALLOW)
             return
+
+        # Check if batch allow is active for Write/Edit
+        if self._batch_allow_active:
+            if not self._batch_allow_edits_only or tool in ("Write", "Edit"):
+                callback(PERM_ALLOW)
+                return
 
         # Create the request
         perm = PermissionRequest(
@@ -990,6 +1001,9 @@ class OutputView:
         btn_y = "[Y] Allow"
         btn_n = "[N] Deny"
         btn_s = "[S] Allow 30s"
+        # Batch Allow: auto-approves all Write/Edit for current query
+        show_batch = tool in ("Write", "Edit")
+        btn_b = "[B] Batch Allow" if show_batch else None
 
         # Create descriptive "Always" button based on what pattern will be saved
         always_hint = ""
@@ -1014,6 +1028,9 @@ class OutputView:
         lines.append(btn_n)
         lines.append("  ")
         lines.append(btn_s)
+        if show_batch and btn_b:
+            lines.append("  ")
+            lines.append(btn_b)
         if not hide_always:
             lines.append("  ")
             lines.append(btn_a)
@@ -1045,6 +1062,9 @@ class OutputView:
         btn_start += len(btn_n) + 2
         perm.button_regions[PERM_ALLOW_SESSION] = (btn_start, btn_start + len(btn_s))
         btn_start += len(btn_s) + 2
+        if show_batch and btn_b:
+            perm.button_regions[PERM_BATCH] = (btn_start, btn_start + len(btn_b))
+            btn_start += len(btn_b) + 2
         if not hide_always:
             perm.button_regions[PERM_ALLOW_ALL] = (btn_start, btn_start + len(btn_a))
 
@@ -1258,6 +1278,12 @@ class OutputView:
             self._last_allowed_time = time.time()
             response = PERM_ALLOW
 
+        # Handle "batch allow" - auto-approve all Write/Edit for current query
+        if response == PERM_BATCH:
+            self._batch_allow_active = True
+            self._batch_allow_edits_only = True
+            response = PERM_ALLOW
+
         # Clear the UI
         self._clear_permission()
         self.pending_permission = None
@@ -1368,6 +1394,8 @@ class OutputView:
             response = PERM_ALLOW_SESSION
         elif key == "a":
             response = PERM_ALLOW_ALL
+        elif key == "b":
+            response = PERM_BATCH
 
         if response:
             # Mark as handled immediately

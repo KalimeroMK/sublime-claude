@@ -160,6 +160,7 @@ When a permission prompt appears:
 - **Y/N** - Allow or deny the tool
 - **S** - Allow same tool for 30 seconds
 - **A** - Always allow this tool pattern
+- **B** - **Batch Allow** — auto-approves all Write/Edit tools for the current query (useful for multi-file refactoring)
 
 For Write/Edit tools, the permission block shows a **diff preview** so you can see exactly what will change before approving.
 
