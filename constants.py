@@ -39,6 +39,7 @@ PERMISSION_REGION_KEY = "claude_permission_block"
 PLAN_REGION_KEY = "claude_plan_block"
 QUESTION_REGION_KEY = "claude_question_block"
 UNDO_BUTTON_REGION_KEY = "claude_undo_buttons"
+DIFF_HIGHLIGHT_REGION_KEY = "claude_diff_highlight"
 PENDING_CONTEXT_SESSION_SETTING = "claude_pending_context_session"
 PENDING_CONTEXT_TIME_SETTING = "claude_pending_context_time"
 FONT_SIZE = 12

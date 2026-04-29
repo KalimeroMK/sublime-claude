@@ -135,8 +135,8 @@ def find_line_number(file_path: str, old: str, new: str) -> int:
         return None
 
 
-def format_edit_diff(old: str, new: str) -> str:
-    """Format Edit diff."""
+def format_edit_diff(old: str, new: str, max_lines: int = 30) -> str:
+    """Format Edit diff with optional truncation."""
     if not old and not new:
         return ""
     old_lines = old.splitlines(keepends=True)
@@ -155,7 +155,7 @@ def format_edit_diff(old: str, new: str) -> str:
         diff_lines.append(line.rstrip('\n'))
     if not diff_lines:
         return ""
-    return "\n```diff\n" + "\n".join(diff_lines) + "\n```"
+    return _format_diff_block(diff_lines, max_lines=max_lines)
 
 
 def extract_diff_line_num(unified: str) -> int:
@@ -166,8 +166,8 @@ def extract_diff_line_num(unified: str) -> int:
     return 0
 
 
-def format_unified_diff(unified: str) -> str:
-    """Render a pre-computed unified diff, stripping headers."""
+def format_unified_diff(unified: str, max_lines: int = 30) -> str:
+    """Render a pre-computed unified diff, stripping headers, with optional truncation."""
     if not unified:
         return ""
     lines = []
@@ -177,6 +177,15 @@ def format_unified_diff(unified: str) -> str:
         lines.append(line)
     if not lines:
         return ""
+    return _format_diff_block(lines, max_lines=max_lines)
+
+
+def _format_diff_block(lines: list, max_lines: int = 30) -> str:
+    """Wrap diff lines in a fenced block with truncation."""
+    if len(lines) > max_lines:
+        omitted = len(lines) - max_lines
+        lines = lines[:max_lines]
+        lines.append(f"... ({omitted} more lines)")
     return "\n```diff\n" + "\n".join(lines) + "\n```"
 
 

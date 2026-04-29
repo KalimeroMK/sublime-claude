@@ -11,6 +11,7 @@ from .constants import (
     PLAN_REGION_KEY,
     QUESTION_REGION_KEY,
     UNDO_BUTTON_REGION_KEY,
+    DIFF_HIGHLIGHT_REGION_KEY,
 )
 from .output_format import format_tool_detail
 from .output_models import (
@@ -161,6 +162,70 @@ class OutputView:
         if len(name) > 24:
             name = name[:23] + "…"
         self.view.set_name(f"{prefix}{name}")
+
+    def _highlight_diff_blocks(self, start: int, end: int) -> None:
+        """Scan conversation region for ```diff blocks and add colored scopes.
+
+        Diff lines are indented, so source.diff syntax doesn't match them.
+        We add explicit regions with scopes that the theme already colors.
+        """
+        if not self.view or not self.view.is_valid():
+            return
+
+        # Erase old diff highlights first
+        self.view.erase_regions(DIFF_HIGHLIGHT_REGION_KEY)
+
+        text = self.view.substr(sublime.Region(start, end))
+        inserted = []   # + lines (green)
+        deleted = []    # - lines (red)
+        ranges = []     # @@ lines (purple)
+
+        in_diff_block = False
+        line_start = start
+
+        for i, ch in enumerate(text):
+            if ch == '\n':
+                line_end = start + i
+                line_text = text[line_start - start:line_end - start]
+                stripped = line_text.lstrip()
+
+                if stripped.startswith('```diff'):
+                    in_diff_block = True
+                elif stripped.startswith('```') and in_diff_block:
+                    in_diff_block = False
+                elif in_diff_block:
+                    # Inside a diff block — check for + / - / @@
+                    if stripped.startswith('+'):
+                        inserted.append(sublime.Region(line_start, line_end))
+                    elif stripped.startswith('-'):
+                        deleted.append(sublime.Region(line_start, line_end))
+                    elif stripped.startswith('@@'):
+                        ranges.append(sublime.Region(line_start, line_end))
+
+                line_start = line_end + 1
+
+        # Add regions with scopes (theme already defines colors for these)
+        if inserted:
+            self.view.add_regions(
+                f"{DIFF_HIGHLIGHT_REGION_KEY}_inserted",
+                inserted,
+                "markup.inserted.diff",
+                "", sublime.DRAW_NO_FILL,
+            )
+        if deleted:
+            self.view.add_regions(
+                f"{DIFF_HIGHLIGHT_REGION_KEY}_deleted",
+                deleted,
+                "markup.deleted.diff",
+                "", sublime.DRAW_NO_FILL,
+            )
+        if ranges:
+            self.view.add_regions(
+                f"{DIFF_HIGHLIGHT_REGION_KEY}_range",
+                ranges,
+                "meta.diff.range",
+                "", sublime.DRAW_NO_FILL,
+            )
 
     def _write(self, text: str, pos: Optional[int] = None) -> int:
         """Write text at position (or end). Returns end position."""
@@ -2052,6 +2117,9 @@ class OutputView:
                 "claude.permission.button.allow",
                 "", sublime.DRAW_NO_OUTLINE,
             )
+
+        # Highlight diff blocks with colors
+        self._highlight_diff_blocks(start, new_end)
 
         # Update title to reflect working state
         self._update_title()
