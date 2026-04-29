@@ -270,7 +270,7 @@ class OutputView:
         """Scroll to end, respecting user scroll position.
 
         Args:
-            force: If True, always scroll. If False, only scroll if cursor is near end.
+            force: If True, always scroll. If False, only scroll if viewport is near bottom.
         """
         if not self.view or not self.view.is_valid():
             return
@@ -280,15 +280,16 @@ class OutputView:
             self.view.show(self._input_start, keep_to_left=False, animate=False)
             return
 
-        # Check if we should auto-scroll
+        # Check if we should auto-scroll — use viewport position, not cursor position
         if not force:
-            sel = self.view.sel()
-            if sel:
-                cursor = sel[0].end()
-                size = self.view.size()
-                # Only auto-scroll if cursor is near end (within 200 chars)
-                if size > 200 and cursor < size - 200:
-                    return  # User is viewing history, don't auto-scroll
+            viewport_y = self.view.viewport_position()[1]
+            viewport_h = self.view.viewport_extent()[1]
+            layout_h = self.view.layout_extent()[1]
+            # Only auto-scroll if viewport bottom is near content bottom
+            # (within 300 pixels or 15% of viewport height, whichever is larger)
+            threshold = max(300, viewport_h * 0.15)
+            if layout_h > viewport_h and (layout_h - (viewport_y + viewport_h)) > threshold:
+                return  # User scrolled up, don't auto-scroll
 
         # Scroll to end without moving cursor
         end = self.view.size()

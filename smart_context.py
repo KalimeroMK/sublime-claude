@@ -13,6 +13,7 @@ PHP via Intelephense, LSP, or built-in syntax definitions).
 import os
 import re
 import subprocess
+import time
 from typing import List, Dict, Optional, Set, Tuple
 import sublime
 
@@ -21,12 +22,29 @@ try:
 except ImportError:
     OUTPUT_VIEW_SETTING = "claude_output"
 
+# ─── Caches ──────────────────────────────────────────────────────────────────
+_GIT_CACHE: Dict[str, Tuple[float, List[str]]] = {}  # cwd -> (timestamp, files)
+_GIT_CACHE_TTL = 10.0  # seconds
+
+_FILE_CONTENT_CACHE: Dict[str, Tuple[float, str]] = {}  # path -> (mtime, content)
+_FILE_CACHE_MAX_SIZE = 50  # Max entries to prevent unbounded growth
+
+_DEFAULT_MAX_FILE_SIZE = 50_000  # 50KB max per file
+_DEFAULT_MAX_CONTENT_LEN = 8_000  # 8K chars max per context item
+
 
 def get_git_modified_files(cwd: str, max_files: int = 5) -> List[str]:
     """Get recently modified files from git status and recent commits.
 
     Returns absolute paths to files that have been modified recently.
+    Results are cached for 10 seconds to avoid repeated git calls.
     """
+    global _GIT_CACHE
+    now = time.time()
+    cached = _GIT_CACHE.get(cwd)
+    if cached and (now - cached[0]) < _GIT_CACHE_TTL:
+        return cached[1][:max_files]
+
     files = []
     try:
         # Staged and unstaged changes
@@ -51,9 +69,60 @@ def get_git_modified_files(cwd: str, max_files: int = 5) -> List[str]:
                     if path not in files:
                         files.append(path)
 
-        return files[:max_files]
+        # Filter out ignored files (build artifacts, node_modules, etc.)
+        if files:
+            try:
+                check = subprocess.run(
+                    ["git", "-C", cwd, "check-ignore", "--no-index", "-z"] + files,
+                    capture_output=True, text=True, timeout=5
+                )
+                ignored = set()
+                if check.returncode in (0, 1):  # 0 = some ignored, 1 = none ignored
+                    for p in check.stdout.split("\0"):
+                        if p:
+                            ignored.add(os.path.normpath(p))
+                files = [f for f in files if f not in ignored]
+            except Exception:
+                pass
+
+        result_files = files[:max_files]
+        _GIT_CACHE[cwd] = (now, result_files)
+        return result_files
     except Exception:
         return []
+
+
+def _read_file_cached(path: str, max_size: int = _DEFAULT_MAX_FILE_SIZE, max_content: int = _DEFAULT_MAX_CONTENT_LEN) -> Optional[str]:
+    """Read file content with mtime-based caching and size limits.
+
+    Returns None if file is too large or cannot be read.
+    """
+    global _FILE_CONTENT_CACHE
+    try:
+        mtime = os.path.getmtime(path)
+        size = os.path.getsize(path)
+        if size > max_size:
+            return None
+
+        cached = _FILE_CONTENT_CACHE.get(path)
+        if cached and cached[0] == mtime:
+            return cached[1]
+
+        with open(path, "r", encoding="utf-8", errors="replace") as f:
+            content = f.read()
+
+        if len(content) > max_content:
+            content = content[:max_content] + "\n\n... [truncated]\n"
+
+        # Prune cache if too large (LRU-style: remove oldest)
+        if len(_FILE_CONTENT_CACHE) >= _FILE_CACHE_MAX_SIZE:
+            oldest = min(_FILE_CONTENT_CACHE.keys(), key=lambda k: _FILE_CONTENT_CACHE[k][0])
+            del _FILE_CONTENT_CACHE[oldest]
+
+        _FILE_CONTENT_CACHE[path] = (mtime, content)
+        return content
+    except Exception:
+        return None
 
 
 def get_symbols_in_view(view: sublime.View) -> List[Dict]:
@@ -301,22 +370,15 @@ def build_smart_context(
         for path in sym_files:
             if os.path.abspath(path) in exclude:
                 continue
-            if os.path.exists(path) and os.path.isfile(path):
-                try:
-                    with open(path, "r", encoding="utf-8", errors="replace") as f:
-                        content = f.read()
-                    # Limit content size to avoid context bloat
-                    if len(content) > 8000:
-                        content = content[:8000] + "\n\n... [truncated]\n"
-                    context_items.append({
-                        "type": "symbol",
-                        "path": path,
-                        "content": content,
-                        "reason": "symbol_definition",
-                    })
-                    exclude.add(os.path.abspath(path))
-                except Exception:
-                    pass
+            content = _read_file_cached(path)
+            if content is not None:
+                context_items.append({
+                    "type": "symbol",
+                    "path": path,
+                    "content": content,
+                    "reason": "symbol_definition",
+                })
+                exclude.add(os.path.abspath(path))
 
     # 3. Git recently modified files
     if cwd:
@@ -324,21 +386,17 @@ def build_smart_context(
         for path in git_files:
             if os.path.abspath(path) in exclude:
                 continue
-            if os.path.exists(path) and os.path.isfile(path):
-                try:
-                    with open(path, "r", encoding="utf-8", errors="replace") as f:
-                        content = f.read()
-                    context_items.append({
-                        "type": "git",
-                        "path": path,
-                        "content": content,
-                        "reason": "recently_modified",
-                    })
-                    exclude.add(os.path.abspath(path))
-                except Exception:
-                    pass
+            content = _read_file_cached(path)
+            if content is not None:
+                context_items.append({
+                    "type": "git",
+                    "path": path,
+                    "content": content,
+                    "reason": "recently_modified",
+                })
+                exclude.add(os.path.abspath(path))
 
-    # 3. Relevant open files
+    # 4. Relevant open files
     open_files = get_open_code_files(window, exclude)
     if current_file:
         scored = [
@@ -347,9 +405,8 @@ def build_smart_context(
         ]
         scored.sort(reverse=True)
         for _, path in scored[:max_open]:
-            try:
-                with open(path, "r", encoding="utf-8", errors="replace") as f:
-                    content = f.read()
+            content = _read_file_cached(path)
+            if content is not None:
                 context_items.append({
                     "type": "open",
                     "path": path,
@@ -357,7 +414,5 @@ def build_smart_context(
                     "reason": "open_file",
                 })
                 exclude.add(os.path.abspath(path))
-            except Exception:
-                pass
 
     return context_items
