@@ -1404,6 +1404,8 @@ class Session(SessionQueryMixin, SessionPermissionsMixin):
         """Update status bar with session info."""
         if self.is_sleeping:
             self._status("sleeping")
+        elif self.working:
+            self._status("working")
         else:
             self._status("ready")
 
