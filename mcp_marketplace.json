@@ -142,6 +142,71 @@
       "env": {
         "SENTRY_AUTH_TOKEN": "Your Sentry auth token"
       }
+    },
+    "firecrawl": {
+      "name": "Firecrawl",
+      "description": "Scrape any web page and convert to structured markdown",
+      "publisher": "mendableai",
+      "source": "https://github.com/mendableai/firecrawl-mcp",
+      "install_type": "npm",
+      "package": "firecrawl-mcp",
+      "runtime": "npx",
+      "args": ["-y", "firecrawl-mcp"],
+      "env": {
+        "FIRECRAWL_API_KEY": "Your Firecrawl API key"
+      }
+    },
+    "figma": {
+      "name": "Figma",
+      "description": "Read Figma files, extract design tokens and component specs",
+      "publisher": "glips",
+      "source": "https://github.com/GLips/figma-mcp",
+      "install_type": "npm",
+      "package": "figma-mcp",
+      "runtime": "npx",
+      "args": ["-y", "figma-mcp"],
+      "env": {
+        "FIGMA_API_KEY": "Your Figma API key"
+      }
+    },
+    "linear": {
+      "name": "Linear",
+      "description": "Create issues, search tickets, update status without leaving Claude",
+      "publisher": "linear",
+      "source": "https://github.com/jerhad/linear-mcp",
+      "install_type": "npm",
+      "package": "linear-mcp",
+      "runtime": "npx",
+      "args": ["-y", "linear-mcp"],
+      "env": {
+        "LINEAR_API_KEY": "Your Linear API key"
+      }
+    },
+    "perplexity": {
+      "name": "Perplexity",
+      "description": "AI-powered web search with citations via Perplexity API",
+      "publisher": "perplexity",
+      "source": "https://github.com/ppl-ai/mcp",
+      "install_type": "npm",
+      "package": "@perplexity/mcp",
+      "runtime": "npx",
+      "args": ["-y", "@perplexity/mcp"],
+      "env": {
+        "PERPLEXITY_API_KEY": "Your Perplexity API key"
+      }
+    },
+    "tavily": {
+      "name": "Tavily",
+      "description": "AI search engine optimized for LLMs — fast, accurate, cited",
+      "publisher": "tavily",
+      "source": "https://github.com/tavily-ai/tavily-mcp",
+      "install_type": "npm",
+      "package": "tavily-mcp",
+      "runtime": "npx",
+      "args": ["-y", "tavily-mcp"],
+      "env": {
+        "TAVILY_API_KEY": "Your Tavily API key"
+      }
     }
   }
 }
