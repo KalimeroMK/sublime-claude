@@ -20,10 +20,12 @@ This build extends the base project with additional features, bug fixes, and a f
 | **Drag & Drop** | Drop files or images directly onto the output view — automatically added to context |
 | **Token Usage Graph** | `Claude: Show Usage Graph` — ASCII bar chart of token usage per query, 100-query history persisted |
 | **Agent Swarm Monitor** | `Claude: Swarm Monitor` — dashboard showing all active sessions, subsessions, statuses, and costs |
-| **MCP Marketplace** | `Claude: MCP Marketplace` — browse and install 12 curated MCP servers (fetch, filesystem, github, git, postgres, sqlite, brave-search, puppeteer, sequential-thinking, memory, slack, sentry) with one-click auto-install |
-| **Diff Preview & Undo** | Unified diff preview for Write/Edit tools — see changes before approving, with one-click undo after execution |
-| **Smart Context** | Auto-adds current scope, git-modified files, relevant open files, and symbol definitions to queries |
-| **Comprehensive Test Suite** | 197 unit tests covering all core utilities, running in ~0.03s with a mock Sublime API |
+| **MCP Marketplace** | `Claude: MCP Marketplace` — browse and install 21 curated MCP servers with one-click auto-install |
+| **Diff Preview & Undo** | Unified diff preview for Write/Edit tools — see changes before approving, with colored diff lines (green/red) and one-click undo |
+| **Smart Context** | Auto-adds current scope, git-modified files, relevant open files, and symbol definitions to queries — with caching and `.gitignore` filtering |
+| **Persistent Memory** | AI remembers facts, preferences, and decisions across sessions via `.claude/memory.json` |
+| **Scroll Respect** | Viewport-aware auto-scroll — doesn't jump to bottom when reading history |
+| **Comprehensive Test Suite** | 211 unit tests covering all core utilities, running in ~0.03s with a mock Sublime API |
 
 ### Bug Fixes
 
@@ -132,6 +134,9 @@ All commands available via Command Palette (`Cmd+Shift+P`): type "Claude"
 | Configure Settings | - | Open settings file |
 | Undo Message | - | Rewind last conversation turn |
 | **Undo Last Edit** | - | Undo the most recent Write/Edit file change |
+| **Add Memory** | - | Save a persistent fact/preference for AI to remember |
+| **List Memories** | - | Browse and delete stored memories |
+| **Clear Memories** | - | Wipe all stored memories |
 | Restart Session | - | Restart current session, keep output view |
 | Resume Session... | - | Resume a previous session |
 | Switch Session... | - | Switch between active sessions |
@@ -255,6 +260,8 @@ Options: `"claude"`, `"openai"`, `"deepseek"`, `"codex"`
 - **allowed_tools** — Tools the AI can use without confirmation
 - **permission_mode** — `"default"`, `"acceptEdits"`, `"plan"`, `"bypassPermissions"`
 - **effort** — Reasoning effort: `"low"`, `"high"`, `"max"`
+- **smart_context_enabled** — Auto-expand queries with relevant context (`true` / `false`)
+- **auto_add_current_file** — Automatically add active file to context (`true` / `false`)
 - **claude_extra_args** — Extra CLI arguments for `claude` (e.g. `"--max-budget-usd 5 --verbose"`)
 - **claude_side_panel** — Show chat in a narrow right-side panel (`true` / `false`). Splits window into 2 columns (78% code, 22% chat) like VS Code. Default: `true`
 
@@ -402,6 +409,34 @@ Q  2: in [██████████░░░░░░░░░░] 8,000
 
 Tracks up to 100 queries per session, persisted across restarts.
 
+### Persistent Memory
+
+**Claude: Add Memory** — save facts, preferences, and decisions that AI remembers across sessions:
+
+```bash
+# Saved automatically in .claude/memory.json (project-level)
+# Or ~/.claude/memory.json (global fallback)
+```
+
+**How it works:**
+1. Before each query, top 5 relevant memories are injected as context:
+   ```
+   <memories>
+     [coding_style] Use camelCase for JS variables
+     [stack] Laravel 12 with PHP 8.3
+     [conventions] Always validate user input before DB queries
+   </memories>
+   ```
+2. After each response, AI extracts new memories automatically ("use X approach", "remember to Y")
+3. Relevance scoring based on keyword overlap + category boosts
+
+**Commands:**
+- **Add Memory** — save a new fact/preference
+- **List Memories** — browse and delete stored memories
+- **Clear All Memories** — wipe everything
+
+Max 50 memories per project, auto-pruned by relevance score.
+
 ## Output View
 
 The output view shows:
@@ -469,7 +504,7 @@ Claude: ready, effort:high, sonnet.4.5, ctx:45k, 🟡 ████████�
 
 **`Claude: MCP Marketplace`** — browse and install MCP servers with one click:
 
-Available servers (12 curated):
+Available servers (21 curated):
 - **Web Fetch** — fetch any web page for context
 - **File System** — read/write files in allowed directories
 - **GitHub** — search repos, read issues/PRs
@@ -481,6 +516,15 @@ Available servers (12 curated):
 - **Memory** — persistent knowledge graph across sessions
 - **Slack** — read channels, send messages
 - **Sentry** — read and analyze issues
+- **Firecrawl** — scrape any web page to structured markdown
+- **Figma** — read designs, extract tokens and component specs
+- **Linear** — create issues, search tickets, update status
+- **Perplexity** — AI-powered web search with citations
+- **Tavily** — AI search engine optimized for LLMs
+- **Chrome DevTools** — debug browser from Claude (DOM, console, network)
+- **Kubeshark** — Kubernetes network observability
+- **Exa** — AI-powered web search and content crawling
+- **Spec Workflow** — spec-driven development with dashboard
 
 **How it works:**
 1. Select a server from the quick panel
@@ -608,13 +652,15 @@ cd ~/PhpstormProjects/sublime-claude
 python3 -m unittest discover tests/ -v
 ```
 
-**197 tests** covering all core utilities:
+**211 tests** covering all core utilities:
 - Context window gauge, session tags, drag-drop, usage graph
 - Attach commands (image/file auto-detect, MIME mapping)
 - Swarm monitor (status icons, session tracking)
 - MCP marketplace (config loading, install logic, template variables)
 - Smart context (scope, git, open files, symbol definitions)
 - Diff preview and undo logic
+- Persistent memory (relevance scoring, auto-extraction)
+- Scroll behavior, incremental rendering
 - Constants, error handling, logging, prompt building
 - Command parsing, context parsing, session state machine
 - JSON-RPC client, tool routing, settings merging
