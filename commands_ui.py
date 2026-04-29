@@ -551,4 +551,66 @@ class ClaudeOpenLinkCommand(sublime_plugin.TextCommand):
         return True
 
 
+# --- Memory Management Commands ---
+
+class ClaudeMemoryAddCommand(sublime_plugin.TextCommand):
+    """Add a persistent memory for this project."""
+    def run(self, edit):
+        s = get_session_for_view(self.view)
+        cwd = s._cwd() if s and hasattr(s, '_cwd') else None
+
+        def on_done(fact):
+            if fact and len(fact) > 3:
+                from .memory import add_memory
+                if add_memory(cwd, fact.strip()):
+                    sublime.status_message(f"Claude: memory saved")
+                else:
+                    sublime.status_message("Claude: memory not saved (empty or duplicate)")
+
+        self.view.window().show_input_panel(
+            "Memory (fact/preference/decision):", "", on_done, None, None
+        )
+
+
+class ClaudeMemoryListCommand(sublime_plugin.TextCommand):
+    """List and manage persistent memories."""
+    def run(self, edit):
+        s = get_session_for_view(self.view)
+        cwd = s._cwd() if s and hasattr(s, '_cwd') else None
+
+        from .memory import list_memories, delete_memory
+        memories = list_memories(cwd)
+        if not memories:
+            sublime.status_message("Claude: no memories yet")
+            return
+
+        items = []
+        for mem in memories:
+            cat = mem.get("category", "note")
+            fact = mem.get("fact", "")[:60]
+            items.append([f"[{cat}] {fact}", f"Used {mem.get('use_count', 0)}x"])
+
+        def on_select(idx):
+            if idx < 0:
+                return
+            mem_id = memories[idx].get("id")
+            if mem_id and delete_memory(cwd, mem_id):
+                sublime.status_message("Claude: memory deleted")
+            else:
+                sublime.status_message("Claude: failed to delete memory")
+
+        self.view.window().show_quick_panel(items, on_select)
+
+
+class ClaudeMemoryClearCommand(sublime_plugin.TextCommand):
+    """Clear all persistent memories for this project."""
+    def run(self, edit):
+        s = get_session_for_view(self.view)
+        cwd = s._cwd() if s and hasattr(s, '_cwd') else None
+
+        from .memory import _save_memories
+        _save_memories(cwd, [])
+        sublime.status_message("Claude: all memories cleared")
+
+
 

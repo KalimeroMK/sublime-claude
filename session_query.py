@@ -7,6 +7,7 @@ import sublime
 
 from .smart_context import build_smart_context
 from .constants import OUTPUT_VIEW_SETTING
+from .memory import get_relevant_memories, format_memory_prompt, extract_memories_from_response
 
 
 class SessionQueryMixin:
@@ -49,6 +50,21 @@ class SessionQueryMixin:
         # --- @-commands: @codebase, @web, @file ---
         prompt = self._expand_at_commands(prompt)
 
+        # --- Persistent Memory: inject relevant memories ---
+        try:
+            cwd = self._cwd() if hasattr(self, '_cwd') else None
+            relevant = get_relevant_memories(cwd, prompt, max_memories=5, min_score=0.15)
+            if relevant:
+                memory_text = format_memory_prompt(relevant)
+                prompt = memory_text + "\n\n" + prompt
+                # Update use counts
+                import time as _time
+                for mem in relevant:
+                    mem["use_count"] = mem.get("use_count", 0) + 1
+                    mem["last_used"] = _time.time()
+        except Exception as e:
+            print(f"[Claude] Memory injection error: {e}")
+
         # Build prompt with context (may include images)
         full_prompt, images = self._build_prompt_with_context(prompt)
         context_names = [item.name for item in self.pending_context]
@@ -75,6 +91,21 @@ class SessionQueryMixin:
                 self._set_name(ui_prompt[:30].strip() + ("..." if len(ui_prompt) > 30 else ""))
             self.output.prompt(ui_prompt, context_names)
             self._animate()
+        # --- Auto-extract memories from previous response ---
+        try:
+            if self.current and self.current.events:
+                # Get last text chunk from previous turn
+                last_text = ""
+                for event in reversed(self.current.events):
+                    if isinstance(event, str):
+                        last_text = event
+                        break
+                if last_text:
+                    cwd = self._cwd() if hasattr(self, '_cwd') else None
+                    extract_memories_from_response(last_text, cwd)
+        except Exception as e:
+            print(f"[Claude] Memory extraction error: {e}")
+
         query_params = {"prompt": full_prompt}
         if hasattr(self, '_pending_images') and self._pending_images:
             query_params["images"] = self._pending_images

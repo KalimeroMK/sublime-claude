@@ -188,6 +188,18 @@
         "command": "claude_code_git_status"
     },
     {
+        "caption": "Claude: Add Memory",
+        "command": "claude_memory_add"
+    },
+    {
+        "caption": "Claude: List Memories",
+        "command": "claude_memory_list"
+    },
+    {
+        "caption": "Claude: Clear All Memories",
+        "command": "claude_memory_clear"
+    },
+    {
         "caption": "Claude: Voice Input",
         "command": "claude_voice_input"
     }
