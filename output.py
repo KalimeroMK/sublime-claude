@@ -188,13 +188,13 @@ class OutputView:
                 if ch == '\n':
                     line_end = start + i
                     line_text = text[line_start - start:line_end - start]
-                    # Diff lines are indented 4+ spaces and start with + / - / @@
-                    # Must have at least 4 leading spaces and then + / - / @@
+                    # Match new diff format: "    │ + │ content" or "    │ - │ content"
+                    # Also keep backward compat with old format: "    + content"
                     if len(line_text) >= 6 and line_text[:4] == '    ':
                         stripped = line_text.lstrip()
-                        if stripped.startswith('+'):
+                        if '│ + │' in line_text or stripped.startswith('+'):
                             inserted.append(sublime.Region(line_start, line_end))
-                        elif stripped.startswith('-'):
+                        elif '│ - │' in line_text or stripped.startswith('-'):
                             deleted.append(sublime.Region(line_start, line_end))
                         elif stripped.startswith('@@'):
                             ranges.append(sublime.Region(line_start, line_end))
@@ -206,9 +206,9 @@ class OutputView:
                 line_text = text[line_start - start:]
                 if len(line_text) >= 6 and line_text[:4] == '    ':
                     stripped = line_text.lstrip()
-                    if stripped.startswith('+'):
+                    if '│ + │' in line_text or stripped.startswith('+'):
                         inserted.append(sublime.Region(line_start, end))
-                    elif stripped.startswith('-'):
+                    elif '│ - │' in line_text or stripped.startswith('-'):
                         deleted.append(sublime.Region(line_start, end))
                     elif stripped.startswith('@@'):
                         ranges.append(sublime.Region(line_start, end))

@@ -181,13 +181,29 @@ def format_unified_diff(unified: str, max_lines: int = 30) -> str:
 
 
 def _format_diff_block(lines: list, max_lines: int = 30) -> str:
-    """Format diff lines indented (no fence markers for cleaner inline display)."""
+    """Format diff lines with VS Code-like style — aligned columns."""
     if len(lines) > max_lines:
         omitted = len(lines) - max_lines
         lines = lines[:max_lines]
         lines.append(f"... ({omitted} more lines)")
-    # Indent each line to align with tool detail (4 spaces)
-    return "\n" + "\n".join("    " + line for line in lines)
+
+    result = []
+    for line in lines:
+        if not line:
+            continue
+        marker = line[0]
+        content = line[1:] if len(line) > 1 else ""
+
+        if marker == "+":
+            result.append(f"    │ + │ {content}")
+        elif marker == "-":
+            result.append(f"    │ - │ {content}")
+        elif marker == "^":
+            result.append(f"    │ ^ │ {content}")
+        else:
+            result.append(f"    │   │ {content}")
+
+    return "\n" + "\n".join(result)
 
 
 def format_tool_detail(tool) -> str:
