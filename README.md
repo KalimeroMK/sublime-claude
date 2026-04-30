@@ -138,7 +138,10 @@ All commands available via Command Palette (`Cmd+Shift+P`): type "Claude"
 | **Undo Last Edit** | - | Undo the most recent Write/Edit file change |
 | **Add Memory** | - | Save a persistent fact/preference for AI to remember |
 | **List Memories** | - | Browse and delete stored memories |
-| **Clear Memories** | - | Wipe all stored memories |
+| **Clear All Memories** | - | Wipe all stored memories |
+| Copy Conversation | - | Copy full conversation to clipboard |
+| Save Checkpoint... | - | Save current conversation state |
+| View Session History... | - | Browse conversation history |
 | Restart Session | - | Restart current session, keep output view |
 | Resume Session... | - | Resume a previous session |
 | Switch Session... | - | Switch between active sessions |
@@ -146,9 +149,23 @@ All commands available via Command Palette (`Cmd+Shift+P`): type "Claude"
 | Fork Session... | - | Fork from a saved session |
 | Rename Session... | - | Name the current session |
 | **Tag Session...** | - | Add comma-separated tags to session |
+| Sleep Session | - | Put session to sleep (disconnect, keep view) |
+| Wake Session | - | Reconnect a sleeping session |
 | Stop Session | - | Disconnect and stop |
 | Toggle Output | `Cmd+Alt+C` | Show/hide output view |
 | Interrupt | `Alt+Escape` | Stop current query |
+| Queue Prompt | - | Queue a prompt while query is running |
+| Reset Input Mode | - | Force re-enter input mode |
+| Select Effort | - | Choose reasoning effort (low/high/max) |
+| Select Model | - | Switch model for current session |
+| Set Default Model | - | Set default model for new sessions |
+| Refresh Models | - | Refresh model list from API |
+| Search Sessions | - | Search across all saved sessions |
+| Clear Notifications | - | Clear all notification badges |
+| Permission Mode... | - | Toggle permission mode (default/acceptEdits/bypass) |
+| Manage Auto-Allowed Tools... | - | View/remove auto-allowed tool patterns |
+| Open Link at Cursor | - | Open URL under cursor in browser |
+| **Show Usage** | - | Show token usage for current query |
 | **Show Usage Graph** | - | ASCII bar chart of token usage per query |
 | **Attach File...** | `Cmd+Shift+F` | Attach any file or image to context (auto-detects type) |
 | **Swarm Monitor** | - | Dashboard of all active sessions and subsessions |
@@ -156,6 +173,9 @@ All commands available via Command Palette (`Cmd+Shift+P`): type "Claude"
 | **Generate Commit Message** | - | Generate commit message from `git diff --staged` |
 | **Git Status** | - | Show `git status --short` in output view |
 | **Voice Input** | `Cmd+Shift+R` | Record audio, transcribe via Whisper API, insert text (macOS only) |
+| **Skills Marketplace** | - | Browse and install 27 curated skills |
+| **List Active Skills** | - | Show currently active skills |
+| **Disable All Skills** | - | Disable all active skills |
 
 ### Inline Input Mode
 
