@@ -93,10 +93,10 @@ class SessionQueryMixin:
             self._animate()
         # --- Auto-extract memories from previous response ---
         try:
-            if self.current and self.current.events:
+            if self.output.current and self.output.current.events:
                 # Get last text chunk from previous turn
                 last_text = ""
-                for event in reversed(self.current.events):
+                for event in reversed(self.output.current.events):
                     if isinstance(event, str):
                         last_text = event
                         break
