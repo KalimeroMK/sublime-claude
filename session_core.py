@@ -77,6 +77,8 @@ class Session(SessionQueryMixin, SessionPermissionsMixin):
         self._response_callback: Optional[Callable[[str], None]] = None
         # Queue of prompts to send after current query completes
         self._queued_prompts: List[str] = []
+        # Heartbeat timer for auto-detecting dead bridges
+        self._heartbeat_timer: Optional[int] = None
         # Track if inject was sent (to skip "done" status until inject query completes)
         self._inject_pending: bool = False
 
@@ -329,6 +331,8 @@ class Session(SessionQueryMixin, SessionPermissionsMixin):
             self._status("ready")
         # Persist "open" state (so plugin_loaded can track which sessions had views)
         self._save_session()
+        # Start heartbeat to monitor bridge health
+        self._start_heartbeat()
         # Auto-enter input mode when ready
         self._enter_input_with_draft()
 
@@ -901,7 +905,8 @@ class Session(SessionQueryMixin, SessionPermissionsMixin):
     def stop(self) -> None:
         # Persist closed state before cleanup
         self._persist_state("closed")
-
+        # Stop heartbeat
+        self._stop_heartbeat()
         # Release persona if acquired
         if self.persona_session_id and self.persona_url:
             self._release_persona()
@@ -937,6 +942,7 @@ class Session(SessionQueryMixin, SessionPermissionsMixin):
             self.interrupt()
             sublime.set_timeout(self.sleep, 500)
             return
+        self._stop_heartbeat()
         if self.client:
             client = self.client
             self.client = None
@@ -1031,6 +1037,73 @@ class Session(SessionQueryMixin, SessionPermissionsMixin):
         self._persist_state("open")
         if self.output and self.output.view:
             self.output.set_name(self.display_name)
+
+    # ─── Heartbeat & Auto-Restart ─────────────────────────────────────────
+
+    def _start_heartbeat(self) -> None:
+        """Start periodic heartbeat to detect dead bridges early."""
+        self._stop_heartbeat()
+        self._heartbeat_timer = sublime.set_timeout(self._do_heartbeat, 30000)
+
+    def _stop_heartbeat(self) -> None:
+        """Stop the heartbeat timer."""
+        if self._heartbeat_timer:
+            sublime.cancel_timeout(self._heartbeat_timer)
+            self._heartbeat_timer = None
+
+    def _do_heartbeat(self) -> None:
+        """Periodic check: if bridge died silently, show warning."""
+        self._heartbeat_timer = None
+        if not self.client or not self.initialized:
+            return
+        if not self.client.is_alive() and not self.working:
+            # Bridge died silently while idle — auto-restart
+            print("[Claude] Heartbeat: bridge died silently, auto-restarting...")
+            self._auto_restart_bridge()
+        else:
+            # Schedule next beat
+            self._start_heartbeat()
+
+    def _ensure_bridge_alive(self, silent: bool = False) -> bool:
+        """Check bridge health; auto-restart if dead. Returns True if alive."""
+        if self.client and self.client.is_alive() and self.initialized:
+            return True
+        # Bridge is dead or not initialized — try auto-restart
+        if not silent:
+            self.output.text("\n*Bridge process died. Auto-restarting...*\n")
+        return self._auto_restart_bridge()
+
+    def _auto_restart_bridge(self) -> bool:
+        """Kill dead bridge and restart with resume. Returns True on success."""
+        # Clean up dead bridge
+        if self.client:
+            try:
+                self.client.stop()
+            except Exception:
+                pass
+            self.client = None
+        self.initialized = False
+        self.working = False
+        self._clear_deferred_state()
+
+        if not self.session_id:
+            # No session to resume — can't auto-restart
+            return False
+
+        # Restart with resume
+        self.resume_id = self.session_id
+        self.fork = False
+        resume_at = self._pending_resume_at
+        self.current_tool = "reconnecting..."
+        self._status("reconnecting...")
+        try:
+            self.start(resume_session_at=resume_at)
+            self._persist_state("open")
+            return True
+        except Exception as e:
+            print(f"[Claude] Auto-restart failed: {e}")
+            self._status("error: restart failed")
+            return False
 
     def _persist_state(self, state: str) -> None:
         """Save session with explicit state override."""

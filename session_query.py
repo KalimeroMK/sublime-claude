@@ -77,11 +77,11 @@ class SessionQueryMixin:
         # Use display_prompt for UI if provided, otherwise use full prompt
         ui_prompt = display_prompt if display_prompt else prompt
 
-        # Check if bridge is alive before sending
-        if not self.client.is_alive():
+        # Check if bridge is alive before sending; auto-restart if dead
+        if not self._ensure_bridge_alive(silent=silent):
             self._status("error: bridge died")
             if not silent:
-                self.output.text("\n\n*Bridge process died. Please restart the session.*\n")
+                self.output.text("\n\n*Bridge process died and auto-restart failed. Please use `Claude: Restart Session` (Cmd+Shift+R).*\n")
             return
 
         if not silent:
@@ -384,11 +384,16 @@ class SessionQueryMixin:
             if self.output.current:
                 self.output.current.working = False
                 self.output._render_current()
-            # If bridge died (e.g. Broken pipe), put session to sleep so user can wake/restart
+            # If bridge died (e.g. Broken pipe), auto-restart with resume
             if self.client and not self.client.is_alive():
-                self.initialized = False
-                self.client = None
-                self.output.text("\n*Bridge process died. Press Enter to wake, or use `Claude: Restart Session` (Cmd+Shift+R).*\n")
+                self.output.text("\n*Bridge process died. Auto-restarting...*\n")
+                if self._auto_restart_bridge():
+                    self.working = False
+                    self._clear_deferred_state()
+                    # Re-enter input mode so user can continue
+                    sublime.set_timeout(lambda: self._enter_input_with_draft() if not self.working else None, 200)
+                    return
+                # Auto-restart failed
                 self._apply_sleep_ui()
                 self.working = False
                 self._clear_deferred_state()
