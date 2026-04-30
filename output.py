@@ -1960,7 +1960,7 @@ class OutputView:
             last_event = self.current.events[-1] if self.current.events and isinstance(self.current.events[-1], str) else ""
             if last_event and len(last_event) > self._last_rendered_last_event_len:
                 delta = last_event[self._last_rendered_last_event_len:]
-                self._write(delta, pos=end)
+                self._write(delta, pos=self.view.size())
                 self._last_rendered_text_len = current_text_len
                 self._last_rendered_last_event_len = len(last_event)
                 self._scroll_to_end()
