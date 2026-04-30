@@ -43,8 +43,6 @@ class OutputView:
         self.current: Optional[Conversation] = None
         self.pending_permission: Optional[PermissionRequest] = None
         self._permission_queue: List[PermissionRequest] = []  # Queue for multiple requests
-        self._pending_batch: Optional['PermissionBatch'] = None  # Batched Write/Edit requests
-        self._batch_timer: Optional[int] = None  # sublime.set_timeout handle for batch flush
         self._batch_allow_active: bool = False  # True when [B] Batch Allow is active for current query
         self._batch_allow_edits_only: bool = True  # Only batch Write/Edit, or all tools
         self.pending_plan: Optional[PlanApproval] = None

@@ -45,15 +45,6 @@ class PermissionRequest:
 
 
 @dataclass
-class PermissionBatch:
-    """A batch of permission requests shown as a single approval block."""
-    requests: List[PermissionRequest] = field(default_factory=list)
-    callback: Callable[[str], None] = None  # Called with PERM_ALLOW or PERM_DENY
-    region: tuple = (0, 0)
-    button_regions: Dict[str, tuple] = field(default_factory=dict)
-
-
-@dataclass
 class QuestionRequest:
     """A pending inline question request."""
     qid: int

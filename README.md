@@ -111,8 +111,9 @@ The plugin auto-detects which backend to use based on your settings:
 | **OpenAI-compatible** | `openai_base_url` is set | Any OpenAI-compatible server |
 | **DeepSeek** | `deepseek_api_key` is set | Anthropic-compatible endpoint |
 | **Codex** | `default_backend: "codex"` | OpenAI Codex CLI |
+| **Copilot** | `default_backend: "copilot"` | GitHub Copilot SDK |
 
-You can also force a backend with `"default_backend": "claude" | "openai" | "deepseek" | "codex"`.
+You can also force a backend with `"default_backend": "claude" | "openai" | "deepseek" | "codex" | "copilot"`.
 
 ## Usage
 
@@ -122,8 +123,8 @@ All commands available via Command Palette (`Cmd+Shift+P`): type "Claude"
 
 | Command | Keybinding | Description |
 |---------|------------|-------------|
-| Query | `Cmd+Alt+C` | Send a query to Claude |
-| Query Selection | `Cmd+Shift+Alt+C` | Query about selected code |
+| Query | - | Send a query to Claude |
+| Query Selection | - | Query about selected code |
 | Query File | - | Query about current file |
 | Add Current File | - | Add file to context (+ auto-related files) |
 | Add Selection | - | Add selection to context |
@@ -151,7 +152,7 @@ All commands available via Command Palette (`Cmd+Shift+P`): type "Claude"
 | **Show Usage Graph** | - | ASCII bar chart of token usage per query |
 | **Attach File...** | `Cmd+Shift+F` | Attach any file or image to context (auto-detects type) |
 | **Swarm Monitor** | - | Dashboard of all active sessions and subsessions |
-| **MCP Marketplace** | - | Browse and install 12+ MCP servers with one click |
+| **MCP Marketplace** | - | Browse and install 21 MCP servers with one click |
 | **Generate Commit Message** | - | Generate commit message from `git diff --staged` |
 | **Git Status** | - | Show `git status --short` in output view |
 | **Voice Input** | `Cmd+Shift+R` | Record audio, transcribe via Whisper API, insert text (macOS only) |
@@ -259,7 +260,7 @@ Options: `"claude"`, `"openai"`, `"deepseek"`, `"codex"`
 
 - **python_path** — Path to Python 3.10+ interpreter. Leave as `"python3"` for auto-detection.
 - **allowed_tools** — Tools the AI can use without confirmation
-- **permission_mode** — `"default"`, `"acceptEdits"`, `"plan"`, `"bypassPermissions"`
+- **permission_mode** — `"default"`, `"acceptEdits"`, `"bypassPermissions"`
 - **effort** — Reasoning effort: `"low"`, `"high"`, `"max"`
 - **smart_context_enabled** — Auto-expand queries with relevant context (`true` / `false`)
 - **auto_add_current_file** — Automatically add active file to context (`true` / `false`)
@@ -676,7 +677,7 @@ cd ~/PhpstormProjects/sublime-claude
 python3 -m unittest discover tests/ -v
 ```
 
-**211 tests** covering all core utilities:
+**233 tests** covering all core utilities:
 - Context window gauge, session tags, drag-drop, usage graph
 - Attach commands (image/file auto-detect, MIME mapping)
 - Swarm monitor (status icons, session tracking)
