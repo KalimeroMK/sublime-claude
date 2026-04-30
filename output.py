@@ -855,8 +855,9 @@ class OutputView:
             self.pending_permission = None
         self._permission_queue.clear()
 
-        # Mark any pending tools in current conversation as error
+        # Reset any stale working state from previous bridge
         if self.current:
+            self.current.working = False
             had_pending = False
             for event in self.current.events:
                 if isinstance(event, ToolCall) and event.status in (PENDING, BACKGROUND):
