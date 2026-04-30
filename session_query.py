@@ -384,6 +384,15 @@ class SessionQueryMixin:
             if self.output.current:
                 self.output.current.working = False
                 self.output._render_current()
+            # If bridge died (e.g. Broken pipe), put session to sleep so user can wake/restart
+            if self.client and not self.client.is_alive():
+                self.initialized = False
+                self.client = None
+                self.output.text("\n*Bridge process died. Press Enter to wake, or use `Claude: Restart Session` (Cmd+Shift+R).*\n")
+                self._apply_sleep_ui()
+                self.working = False
+                self._clear_deferred_state()
+                return
         elif completion == "interrupted":
             self._status("interrupted")
             self.output.interrupted()
