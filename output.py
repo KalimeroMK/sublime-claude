@@ -383,7 +383,7 @@ class OutputView:
         bg_tools = self.active_background_tools()
         if bg_tools:
             for bt in bg_tools:
-                detail = self._format_tool_detail(bt)
+                detail = f": {bt.result[:60]}..." if bt.result and len(bt.result) > 60 else f": {bt.result}" if bt.result else ""
                 self.view.run_command("append", {"characters": f"  ⚙ {bt.name}{detail}\n"})
 
         # Add context line if any
