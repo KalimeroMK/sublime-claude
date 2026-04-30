@@ -458,8 +458,12 @@ class SessionQueryMixin:
 
         # Skip if we've already entered input mode after the last query
         # This prevents duplicate entries from multiple callers (on_activated, _on_done, etc.)
+        # BUT: reset if input mode was exited externally (e.g. sleep) without our knowledge
         if self._input_mode_entered:
-            return
+            if not self.output.is_input_mode():
+                self._input_mode_entered = False
+            else:
+                return
 
         self.output.enter_input_mode()
 

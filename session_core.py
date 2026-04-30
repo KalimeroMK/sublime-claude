@@ -958,6 +958,7 @@ class Session(SessionQueryMixin, SessionPermissionsMixin):
         if self.output.is_input_mode():
             self.draft_prompt = self.output.get_input_text().strip()
             self.output.exit_input_mode(keep_text=False)
+            self._input_mode_entered = False
         else:
             # Clean stale input marker from view content (e.g. after restart)
             # Only remove if the last non-empty line is exactly the marker
