@@ -409,6 +409,17 @@ Use **Claude: Resume Session...** to pick and continue a previous conversation.
 
 After Sublime restarts, orphaned output views are registered as sleeping sessions. Press Enter or use **Wake Session** to reconnect.
 
+### Auto-Restart on Bridge Crash
+
+If the bridge process dies (OOM, timeout, Broken pipe), the plugin **automatically restarts and resumes** the conversation:
+
+- **Heartbeat monitoring** — detects silently-dead bridges every 30s
+- **Pre-query health check** — auto-restarts before sending if bridge is dead
+- **Post-error recovery** — auto-restarts after a crash mid-query
+- Resume uses the same `session_id`, so Anthropic continues the conversation if still available
+
+You rarely need to manually restart — the agent just keeps working.
+
 ### Session Tags
 
 Tag sessions for organization:
