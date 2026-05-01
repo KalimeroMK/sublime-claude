@@ -2,497 +2,183 @@
 
 ## Architecture
 
+See [README.md](README.md) for full architecture diagram. Key files:
+
 ```
-sublime-claude/
-├── claude_code.py         # Plugin entry point, command registry
-├── session.py             # Session management, bridge communication
-├── rpc.py                 # JSON-RPC client
-├── output.py              # Structured output view with region tracking
-├── bridge/
-│   └── main.py            # Python 3.10+ bridge wrapping claude CLI v2.1+
-├── mcp/
-│   └── server.py          # MCP protocol server (stdio)
-├── mcp_server.py          # MCP socket server (Sublime context)
-│
-├── Core Utilities (Refactored 2024-12):
-├── constants.py           # Centralized config values & magic strings
-├── logger.py              # Unified logging (bridge & plugin)
-├── error_handler.py       # Reusable error handling patterns
-├── session_state.py       # Session state machine
-├── settings.py            # Shared settings loader
-├── prompt_builder.py      # Prompt construction utilities
-├── tool_router.py         # MCP tool routing (O(1) dispatch)
-└── context_parser.py      # @ trigger handling & context menus
+Core:
+  session.py              # Main Session class (combines all mixins)
+  session_core.py         # Lifecycle, bridge, heartbeat, auto-restart
+  session_query.py        # Query handling, smart context, @-commands
+  session_permissions.py  # Permission/plan/question UI
+  session_env.py          # Environment & persistence helpers
+
+Output:
+  output.py               # Rendering, incremental updates, input mode
+  output_models.py        # ToolCall, Conversation, Todo data classes
+  output_format.py        # Tool result formatting, diff rendering, icons
+
+Commands (split by domain):
+  commands_core.py        # Core commands (query, interrupt, toggle)
+  commands_session.py     # Session commands (new, resume, wake, fork)
+  commands_context.py     # Context commands (add file, attach, drag-drop)
+  commands_tools.py       # Tool commands (undo edit, MCP marketplace)
+  commands_ui.py          # UI commands (usage graph, swarm monitor)
+  commands_voice.py       # Voice input (macOS only)
+
+Context & Search:
+  smart_context.py        # Auto context expansion (git, symbols, scope)
+  codebase_search.py      # TF-IDF @codebase search (SQLite index)
+  web_search.py           # DuckDuckGo @web search (no API key)
+  context_parser.py       # Context menus & @ picker
+
+Bridge (Python 3.10+ subprocess):
+  bridge/
+    base.py               # Base bridge class
+    main.py               # Claude/Kimi bridge
+    openai_main.py        # Ollama/OpenAI bridge
+    codex_main.py         # Codex bridge
+    copilot_main.py       # Copilot bridge
+    rpc_helpers.py        # Shared JSON-RPC helpers
 ```
 
-## Recent Refactoring (Dec 2024)
+Plugin code runs in Sublime's Python 3.8 host. Bridge subprocess auto-detects Python 3.10+.
 
-### Code Quality Improvements
+## Sublime Text Module Caching
 
-**Extracted Self-Contained Modules:**
-- **constants.py** (107 lines) - Centralized all magic strings, paths, config values
-- **logger.py** (136 lines) - Unified logging; replaced 10+ duplicate file write blocks
-- **error_handler.py** (199 lines) - Reusable decorators & helpers for JSON/file/Sublime errors
-- **session_state.py** (204 lines) - Explicit state machine (UNINITIALIZED → READY → WORKING)
-- **prompt_builder.py** (82 lines) - Fluent API for prompt construction
-- **tool_router.py** (162 lines) - Registry-based tool dispatch; replaced 100+ line if/elif chain
-- **context_parser.py** (186 lines) - @ trigger detection & context menu logic
-
-**Key Wins:**
-- Removed ~400 lines of duplicated code
-- Faster tool routing (O(n) → O(1) dictionary lookup)
-- Removed blackboard functionality (simplified architecture)
-- Consistent error handling patterns
-- Better separation of concerns
-
-**Performance:** Noticeably faster due to optimized tool routing and reduced I/O overhead.
-
-## Key Findings
-
-### Sublime Text Module Caching
 - Sublime caches imported modules aggressively
 - Touching `claude_code.py` triggers reload of all `.py` files in package root
-- Enum classes cause issues when cached - switched to plain string constants
+- Enum classes cause issues when cached — use plain string constants
 - Dataclass definitions also get cached
 
-### Claude CLI Wrapper
+## Output View
 
-The plugin no longer depends on the private `claude-agent-sdk` PyPI package. Instead, it wraps the official `claude` CLI binary (v2.1+) which supports `--output-format=stream-json` and `--input-format=stream-json`.
-
-**Wrapper:** `claude_agent_sdk/__init__.py` provides a compatibility shim that:
-- Spawns `claude -p --output-format=stream-json --input-format=stream-json`
-- Converts CLI JSON stream events into SDK-compatible dataclass objects
-- Supports the same message types: AssistantMessage, ToolUseBlock, ToolResultBlock, etc.
-
-**Claude CLI v2.1+ features:**
-- Native binary (no Node.js/npm required)
-- `--model` flag for model selection
-- `--permission-mode` for automated permission handling
-- `--settings` for JSON config injection
-- `--max-budget-usd` for cost control
-
-**Message Flow:**
-```
-SystemMessage           → initialization (subtype: "init" or "compact_boundary")
-AssistantMessage        → contains ToolUseBlock (tool request) or TextBlock (response)
-  ├─ ToolUseBlock       → tool_name, tool_input, tool_use_id
-  └─ TextBlock          → text content
-UserMessage             → contains ToolResultBlock (⚠️ NOT in AssistantMessage!)
-  └─ ToolResultBlock    → tool_use_id, content (result or error)
-ResultMessage           → completion (session_id, duration_ms, total_cost_usd)
-```
-
-**Permission Callback:**
-```python
-from claude_agent_sdk import PermissionResultAllow, PermissionResultDeny
-
-async def can_use_tool(tool_name: str, tool_input: dict, context) -> PermissionResult:
-    # ⚠️ MUST return dataclass objects, NOT plain dicts
-    if user_allowed:
-        return PermissionResultAllow(updated_input=tool_input)
-    else:
-        return PermissionResultDeny(message="User denied")
-```
-
-**Subagents (AgentDefinition):**
-```python
-from claude_agent_sdk import AgentDefinition
-
-agents = {
-    "my-agent": AgentDefinition(
-        description="When to use this agent",
-        prompt="System prompt for the agent",
-        tools=["Read", "Grep"],  # restrict tools (optional)
-        model="haiku",  # haiku/sonnet/opus (optional)
-    )
-}
-options = ClaudeAgentOptions(..., agents=agents)
-```
-
-**⚠️ PITFALLS:**
-
-1. **ToolResultBlock location** - Results are in `UserMessage.content`, NOT `AssistantMessage`
-   ```python
-   # WRONG: looking for tool result in AssistantMessage
-   # RIGHT: check UserMessage for ToolResultBlock
-   if isinstance(msg, UserMessage):
-       for block in msg.content:
-           if isinstance(block, ToolResultBlock):
-               # Handle result
-   ```
-
-2. **Permission callback return type** - Must return `PermissionResultAllow`/`PermissionResultDeny` dataclasses
-   ```python
-   # WRONG: return {"allow": True}
-   # RIGHT: return PermissionResultAllow(updated_input=tool_input)
-   ```
-
-3. **Denied tool handling** - SDK sends `TextBlock` directly when denied, no `ToolResultBlock`
-   - Must manually mark tool as error in your UI when permission denied
-
-4. **AgentDefinition required** - Agents dict must use `AgentDefinition` objects
-   ```python
-   # WRONG: agents = {"name": {"description": "...", "prompt": "..."}}
-   # RIGHT: agents = {"name": AgentDefinition(description="...", prompt="...")}
-   ```
-
-5. **Async iteration** - Must use `async for` to iterate messages
-   ```python
-   # WRONG: for msg in agent.query(prompt)
-   # RIGHT: async for msg in agent.query(prompt)
-   ```
-
-6. **Session resume** - Pass `resume=session_id` to continue, get new session_id from `ResultMessage`
-
-7. **Text interleaving** - Text and tool calls arrive interleaved in time order
-   - Don't assume all tools come first then text
-   - Track events in arrival order for accurate display
-
-8. **Interrupt handling** - Call `agent.interrupt()` to stop, check `ResultMessage.status == "interrupted"`
-   - After `client.interrupt()`, let query task drain remaining messages (don't cancel immediately)
-   - Set `self.interrupted = True` flag before interrupt, check in query to return correct status
-   - Cancel pending permission futures on interrupt (deny them)
-   - Timeout after 5s if drain takes too long, then force cancel
-
-### Output View
 - Read-only scratch view controlled by plugin
 - Region-based rendering allows in-place updates
 - Custom syntax highlighting (ClaudeOutput.sublime-syntax)
 - Ayu Mirage theme (ClaudeOutput.hidden-tmTheme)
-- Syntax-specific settings (ClaudeOutput.sublime-settings) for font size
-- Prompt delimiters: `◎ prompt text ▶` (supports multiline with indented continuation)
-- Working indicator: `⋯` shown at bottom while processing
-- `@done(Xs)` pops conversation context in syntax
 
-### Permission UI
-Inline permission prompts in the output view:
-- `[Y] Allow` - one-time allow
-- `[N] Deny` - deny (marks tool as ✘)
-- `[S] Allow 30s` - auto-allow same tool for 30 seconds
-- `[A] Always` - auto-allow this tool for entire session
+**Symbols:**
+- `○` Tool pending / idle session
+- `●` Tool done (green) / error (red)
+- `⚙` Background tool
+- `◎` Prompt header
+- `── time · ctx ──` Completion footer
 
-Clickable buttons + keyboard shortcuts (Y/N/S/A keys).
+**Tool icons by type:**
+- Read: `📄` (with file-type icon: 🐍 .py, ⚛️ .tsx, ☕ .java)
+- Edit: `✎`
+- Write: `✍`
+- Bash: `⚡` (with box-drawing output borders)
+- Glob/Grep: `🔍`
+- WebSearch/WebFetch: `🌐`
+- Task: `⚙`
+- TodoWrite: `📋`
+- Skill: `🎯`
+- ask_user: `❓`
 
-Multiple permission requests are queued - only one shown at a time.
+**File paths:** Shortened with `_shorten_path()` — home dir collapsed, truncated from left.
 
-### Tool Tracking
-- Tools stored as ordered list (not dict by name) to support multiple calls to same tool
-- `tool_done` finds last pending tool with matching name
+**Diff format:** VS Code-like aligned columns:
+```
+│ + │ added line
+│ - │ removed line
+│   │ context line
+```
 
-### Session Management
-- Sessions keyed by output view id (not window id) - allows multiple sessions per window
-- Sessions saved to `.sessions.json` with name, project, cost, query count
-- Resume via session_id passed to SDK
+## Permission UI
+
+Inline permission prompts in output view:
+- `[Y] Allow` — one-time allow
+- `[N] Deny` — deny (marks tool as error)
+- `[S] Allow 30s` — auto-allow same tool for 30 seconds
+- `[A] Always` — auto-allow this tool pattern
+- `[B] Batch Allow` — auto-approve all Write/Edit for current query
+
+Clickable buttons + keyboard shortcuts (Y/N/S/A/B keys).
+
+**Permission modes:**
+| Mode | Behavior | Safest for |
+|------|----------|------------|
+| `default` | Prompt for all | Production code |
+| `acceptEdits` | Auto-accept file ops; prompt Bash/Web | Daily dev |
+| `bypassPermissions` | Skip all checks | Quick experiments |
+
+Multiple permission requests are queued — only one shown at a time.
+
+## Session Management
+
+- Sessions keyed by output view id (not window id) — multiple per window
+- Sessions saved to `.sessions.json` with name, project, cost, query count, tags
+- Resume via `session_id` passed to bridge
 - `plugin_loaded` hook reconnects orphaned output views after Sublime restart
 - Closing output view stops its session
+- **Auto-restart on bridge crash** — heartbeat every 30s, auto-restarts dead bridge
 
-**View title status indicators:**
+**View title indicators:**
 - `◉` Active + working
 - `◇` Active + idle
 - `•` Inactive + working
-- (no prefix) Inactive + idle
+- `⏸` Sleeping (bridge stopped)
+- `❓` Waiting for permission/question
 
-### UX Details
-- New Session command creates fresh view + immediately opens input prompt
-- Enter key in output view opens input prompt
-- Cmd+K clears output, Cmd+Z undoes clear (custom undo via `_cleared_content`)
-- Cmd+Escape interrupts current query
-- Context commands require active session
+## MCP Integration
 
-### MCP Integration
-- `mcp_server.py` - Unix socket server in Sublime, handles eval requests
-- `mcp/server.py` - MCP stdio server, connects to Sublime socket
-- Bridge loads MCP config from `.claude/settings.json` or `.mcp.json`
-- Status bar shows loaded MCP servers on init
+- `mcp_server.py` — Unix socket server in Sublime, handles eval requests
+- `mcp/server.py` — MCP stdio server, connects to Sublime socket
+- Bridge loads MCP config from `~/.claude.json`, then `.claude/settings.json`, then `.mcp.json`
+- Status bar shows `ready (MCP: sublime)` on init
 
 **MCP Tools:**
 - Editor: `get_window_summary`, `find_file`, `get_symbols`, `goto_symbol`, `read_view`
-- Terminal: `terminal_list`, `terminal_run`, `terminal_read`, `terminal_close`
-- Blackboard: `bb_write`, `bb_read`, `bb_list`, `bb_delete`
-- Sessions: `spawn_session`, `send_to_session`, `list_sessions`
+- Sessions: `spawn_session`, `list_sessions`
 - Alarms: `set_alarm`, `cancel_alarm`
-- User: `ask_user` - ask questions via quick panel
+- User: `ask_user` — ask questions via quick panel
 - Custom: `sublime_eval`, `sublime_tool`, `list_tools`
 
-**Editor tools:**
-- `get_window_summary()` - Open files, active file with selection, project folders, layout
-- `find_file(query, pattern?, limit?)` - Fuzzy find by partial name, optional glob filter
-- `get_symbols(query, file_path?, limit?)` - Batch symbol lookup (comma-separated or JSON array)
-- `read_view(file_path?, view_name?, head?, tail?, grep?, grep_i?)` - Read content from any view with head/tail/grep filtering
+## Alarm System (Event-Driven Waiting)
 
-**Terminal tools (uses Terminus plugin):**
-- `terminal_run(command, tag?)` - Run command in terminal. PREFER over Bash for long-running/interactive commands
-- `terminal_read(tag?, lines?)` - Read terminal output (default 100 lines from end)
-- `terminal_list()` - List open terminals
-- `terminal_close(tag?)` - Close a terminal
-
-**Blackboard patterns:**
-- `plan` - implementation steps, architecture decisions
-- `walkthrough` - progress report for user (markdown)
-- `decisions` - key choices and rationale
-- `commands` - project-specific commands that work
-- Data persists across sessions, survives context loss
-
-**Terminal usage (Terminus plugin required):**
-- Agent should use `terminal_run` instead of `Bash` for long-running commands
-- Pattern: `terminal_run("make build", wait=2)` → returns output after wait
-- Opens new terminal automatically if none exists (tag: `claude-agent`)
-- Output stays in Terminus view (avoids buffer explosion in Claude output)
-
-**Terminus API notes:**
-- `terminus_open` args: `cmd`, `shell_cmd`, `cwd`, `title`, `tag`, `auto_close`, `focus`, `post_window_hooks`
-- `terminus_send_string` args: `string`, `tag`, `visible_only` - window command, uses tag to target
-- `post_window_hooks`: list of `[command, args]` to run after terminal ready
-- Threading: MCP socket runs in background thread; `sublime.set_timeout` callbacks don't run while sleeping
-- Solution: use `post_window_hooks` to queue command on terminal open
-
-**Terminal wait implementation:**
-- `terminal_run(cmd, wait=N)` - uses `sublime.set_timeout(do_read, delay_ms)` for delay
-- This lets main thread process `terminus_open` + `post_window_hooks` before reading
-- New terminal gets 1s extra startup delay (vs 0.2s for existing)
-- Background thread waits on `Event` for the delayed read to complete
-- `terminus_open` must be scheduled via `set_timeout(do_open, 10)` to actually execute
-
-### Subagents
-- Loaded from `.claude/settings.json` `agents` key
-- Built-in agents merged with project-defined (project overrides)
-
-**Built-in agents:**
-- `planner` - creates implementation plan, saves to blackboard (haiku)
-- `reporter` - updates walkthrough/progress report (haiku)
-
-**Agent definition:**
-```json
-{
-  "description": "When to use this agent",
-  "prompt": "System prompt for the agent",
-  "tools": ["Read", "Grep"],  // restrict available tools
-  "model": "haiku"  // haiku/sonnet/opus
-}
-```
-
-### Alarm System (Event-Driven Waiting)
-
-Instead of polling for subsession completion or other events, sessions can set alarms to "sleep" and wake when events occur. The alarm fires by injecting a wake_prompt into the session.
-
-**Architecture:**
-- Bridge stores alarms and monitors events asynchronously
-- Uses `asyncio.Event` for subsession completion signaling
-- Uses `asyncio.sleep` for time-based alarms
-- When alarm fires, bridge injects wake_prompt as a new query
-
-**Available as MCP tools:**
-- `set_alarm(event_type, event_params, wake_prompt, alarm_id=None)`
-- `cancel_alarm(alarm_id)`
+Sessions set alarms to "sleep" and wake when events occur. Alarm fires by injecting `wake_prompt` into the session.
 
 **Event types:**
-- `time_elapsed` - Fire after N seconds: `{seconds: int}`
-- `subsession_complete` - Fire when subsession finishes: `{subsession_id: str}` (view_id)
-- `agent_complete` - Same as subsession_complete: `{agent_id: str}`
+- `time_elapsed` — fire after N seconds
+- `subsession_complete` — fire when subsession finishes
+- `agent_complete` — alias for subsession_complete
 
-**Usage pattern:**
-1. Main session spawns a subsession
-2. Main session sets alarm to wait for subsession completion
-3. Main session ends query (goes idle, but alarm keeps monitoring)
-4. When subsession completes, it sends notification to bridge
-5. Bridge fires alarm, injecting wake_prompt into main session
-6. Main session wakes up and continues with the wake_prompt
-
-**Example (MCP tools):**
+**Usage:**
 ```python
-# Spawn a subsession to run tests
-result = spawn_session("Run all tests and report results", name="test-runner")
-subsession_id = str(result["view_id"])
-
-# Set alarm to wake when tests complete
-# This allows main session to end its query and go idle
 set_alarm(
     event_type="subsession_complete",
     event_params={"subsession_id": subsession_id},
-    wake_prompt="The tests have completed. Check test-runner session output and summarize results."
+    wake_prompt="Tests completed. Summarize results."
 )
 ```
 
-**Implementation details:**
-- Alarms stored in `Bridge.alarms` dict (alarm_id → alarm config)
-- Monitoring tasks in `Bridge.alarm_tasks` (alarm_id → asyncio.Task)
-- Subsession events in `Bridge.subsession_events` (subsession_id → asyncio.Event)
-- When subsession query completes, it sends `subsession_complete` notification
-- Bridge signals the event, waking any monitoring tasks
-- Monitoring task calls `_fire_alarm()` which injects wake_prompt via `client.query()`
+## Subagents
 
-**API:**
-- `session.set_alarm(event_type, event_params, wake_prompt, alarm_id=None, callback=None)`
-- `session.cancel_alarm(alarm_id, callback=None)`
-- Bridge methods: `set_alarm()`, `cancel_alarm()`, `signal_subsession_complete(subsession_id)`
+Loaded from `.claude/settings.json` `agents` key. Built-in agents merged with project-defined (project overrides).
 
-### Quick Prompts
-Single-key shortcuts in output view (when idle):
-- `F` - "Fuck, read the damn docs" - re-read docs, continue
-- `R` - Retry: read error, try different approach
-- `C` - Continue
+**Built-in agents:**
+- `planner` — creates implementation plan (haiku)
+- `reporter` — updates progress report (haiku)
 
-### Todo Display
-- TodoWrite tool input captured and displayed at end of response
-- Icons: `○` pending, `▸` in_progress, `✓` completed
-- Incomplete todos carry forward to next conversation
-- When all done: shown once, then cleared for next conversation
+## Critical Invariants for AI Agents
 
-### Diff Display
-- Edit tool shows inline diff in output view
-- Uses ```diff fenced block with syntax highlighting
-- `-` lines (old) and `+` lines (new)
-
-### Sublime Text Commands
-To modify a read-only view, need custom TextCommands:
-- `claude_insert` - insert at position
-- `claude_replace` - replace region
-
-## AI Agent Guidelines
-
-### Critical Invariants
-
-**Session Resume - MUST pass `resume_id` when reconnecting sessions:**
+**Session Resume — MUST pass `resume_id`:**
 ```python
-# CORRECT - preserves conversation context
+# CORRECT
 session = Session(window, resume_id=saved_session_id)
-
-# WRONG - loses ALL conversation history (DO NOT do this for reconnects)
+# WRONG — loses ALL history
 session = Session(window)
 ```
 
-**Permission Block Tracking:**
-Use Sublime's tracked regions (`add_regions`/`get_regions`) for UI elements. Stored coordinates become stale when text shifts.
+**Red Flags — STOP and Verify:**
+1. Removing function parameters — likely breaks callers
+2. Changing default values — silent behavior change
+3. "Simplifying" by removing steps — those existed for a reason
+4. Any change justified by "cleaner" — clean != correct
 
-### Red Flags - STOP and Verify
-
-1. **Removing function parameters** - likely breaks callers
-2. **Changing default values** - silent behavior change
-3. **"Simplifying" by removing steps** - those steps existed for a reason
-4. **"Avoiding duplicates" by skipping operations** - probably load-bearing
-5. **Any change justified by "cleaner" or "simpler"** - clean != correct
-
-### Rules for AI Agents
-
-1. **No Silent Behavior Changes** - If changing HOW something works, explicitly state:
-   - What the old behavior was
-   - What the new behavior is
-   - Why the change is acceptable
-
-2. **Distrust Your Own Simplifications** - When you want to remove code that seems unnecessary, STOP. Check git history. Ask the user.
-
-3. **Context Loss is the Enemy** - Write critical decisions to blackboard/comments IMMEDIATELY. Don't trust that you'll remember.
-
-4. **Preserve Load-Bearing Code** - Some code looks unnecessary but is critical. "To avoid duplicates" was used to justify breaking session resume - that was WRONG.
-
-5. **Name Things by Purpose** - `resume_id` is better than `session_id` because it implies "this is FOR resuming" - harder to accidentally drop.
-
-## TODO
-- [ ] Streaming text (currently waits for full response?)
-- [ ] Image/file drag-drop to context
-- [ ] Cost tracking dashboard
-- [ ] Session search/filter
-- [ ] Click to expand/collapse tool sections
-- [ ] MCP tool parameters (pass args to saved tools)
-
-## Recent Changes (2025-12-12)
-
-### New Features
-- **User-level settings**: Bridge now loads from `~/.claude/settings.json` and merges with project settings. User settings apply globally, project settings override.
-- **Marketplace.json support**: Plugin system now reads `.claude-plugin/marketplace.json` to find plugin locations, compatible with official Claude Code plugin format.
-- **Plugin format**: Supports official `"plugin@marketplace": true` format in `enabledPlugins` (backward compatible with old object format).
-- **Auto-allowed MCP tools**: Automatically allow tools without permission prompts
-  - Settings: `autoAllowedMcpTools` array with patterns (e.g., `"mcp__*__*"`, `"Bash"`)
-  - Command: `Claude: Manage Auto-Allowed Tools...` to add/remove patterns via quick panel
-  - Permission dialog: Press `[A] Always` to save tool to auto-allow list in project settings
-  - Bridge checks patterns with `fnmatch` before prompting
-  ```json
-  {
-    "autoAllowedMcpTools": [
-      "mcp__plugin_*",
-      "Read",
-      "Bash"
-    ]
-  }
-  ```
-- **Alarm system**: Event-driven waiting instead of polling for subsession completion
-  - Sessions can set alarms to "sleep" and wake when events occur
-  - Supports `time_elapsed`, `subsession_complete`, and `agent_complete` events
-  - Alarm fires by injecting wake_prompt into the session as a new query
-  - Uses `asyncio.Event` for efficient async coordination
-  - API: `session.set_alarm(event_type, event_params, wake_prompt, alarm_id=None)`
-  - Subsessions automatically notify bridge when they complete
-  - See "Alarm System" section in NOTES.md for usage patterns
-
-### Bug Fixes
-- **Mouse selection**: Fixed issue where dragging to select text would make view unresponsive. Dynamic `read_only` toggling based on cursor position now allows selection everywhere while protecting conversation history from edits.
-- **Input mode protection**: Conversation history is now truly read-only when in input mode. Typing, pasting, or any modification outside the input area is blocked via dynamic `read_only` state.
-- **Reset input mode**: Fixed command to properly re-enter input mode after cleanup, not leave view in unusable state.
-- **Orphaned view reconnection**: Fixed blank lines being added each time an orphaned view is reconnected after restart. Now checks if content already ends with newline before adding separator.
-
-## Recent Changes (2025-12-11)
-
-### New Features
-- **`read_view` MCP tool**: Read content from any view (file buffer or scratch) in Sublime Text with filtering.
-  - Accepts `file_path` for file buffers (absolute or relative to project)
-  - Accepts `view_name` for scratch buffers (e.g., output panels, unnamed buffers)
-  - Filtering options (applied in order: grep → head/tail):
-    - `head=N` - Read first N lines
-    - `tail=N` - Read last N lines
-    - `grep="pattern"` - Filter lines matching regex (case-sensitive)
-    - `grep_i="pattern"` - Filter lines matching regex (case-insensitive)
-  - Returns: `content`, `size`, `line_count`, `original_line_count`, and filter info
-  ```python
-  read_view(file_path="src/main.py", head=50)
-  read_view(view_name="Output", grep="ERROR")
-  read_view(file_path="log.txt", grep_i="warning", tail=100)
-  ```
-
-## Recent Changes (2025-12-10)
-
-### Bug Fixes
-- **Concurrent permission requests**: Fixed bug where multiple tool permissions arriving simultaneously would clear earlier ones as "stale". Now properly queued and processed in order.
-- **Permission timeout reduced**: 5min → 30s. Prevents long hangs when permission UI gets stuck.
-- **Session rename persistence**: `session_id` now set immediately on resume, so renames save before first query completes.
-
-### Improvements
-- **Tool status colors**: Distinct muted colors for tool done (`#5a9484` teal) and error (`#a06a74` mauve). No longer conflicts with diff highlighting.
-
-### New Features
-- **Queued prompt**: Queue a prompt while Claude is working. Auto-sends when current query finishes.
-  - Type in input mode + Enter to queue (when working)
-  - Or use `Claude: Queue Prompt` command
-  - Shows `⏳ <preview>...` indicator in output view
-  - Shows `[queued]` in status bar spinner
-- **View session history**: `Claude: View Session History...` command to browse saved sessions and view user prompts from Claude's stored `.jsonl` files.
-
-## Recent Changes (2025-12-09)
-
-### Bug Fixes
-- **Garbled output fix** (`output.py:_do_render`): Extended replacement region to `view_size` when orphaned content exists after the conversation region. Prevents fragmented text appearing after `⋯` indicator.
-
-### Improvements
-- **Edit diff format**: Now uses `difflib.unified_diff` for readable diffs with context lines and `@@` hunks, instead of listing all `-` then all `+` lines.
-- **Bash output**: Shows 3 head + 5 tail lines (was 5 head only). Better visibility of command results.
-
-### New Features
-- **`ask_user` MCP tool**: Ask user questions via quick panel. Workaround for missing `AskUserQuestion` support in Agent SDK.
-  ```
-  ask_user("Which auth method?", ["OAuth", "JWT", "Session"])
-  ```
-  Returns `{"answer": "OAuth", "question": "..."}` or `{"cancelled": true}`
-
-## Done
-- [x] Multi-session per window
-- [x] Session resume/fork
-- [x] Permission prompts (Y/N/S/A)
-- [x] Blackboard (cross-session state)
-- [x] Built-in subagents (planner, reporter)
-- [x] Quick prompts (F/R/C)
-- [x] Todo display from TodoWrite
-- [x] Diff display for Edit tool
-- [x] MCP integration (editor, blackboard, sessions)
-- [x] Time-ordered events (text + tools interleaved as they arrive)
-- [x] View title status indicators (◉/◇/•)
-- [x] Smart auto-scroll (only when cursor near end)
-- [x] Session reconnect resets stale states
+**Rules:**
+1. No silent behavior changes — state old vs new behavior
+2. Distrust your own simplifications — check git history first
+3. Context loss is the enemy — write decisions immediately
+4. Preserve load-bearing code — "unnecessary" code is often critical
