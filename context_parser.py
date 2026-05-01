@@ -76,6 +76,13 @@ class ContextParser:
             description="Add git diff (staged or unstaged) to context"
         ))
 
+        # @web -- DuckDuckGo search
+        items.append(ContextMenuItem(
+            action="web",
+            label="@web",
+            description="Search the web via DuckDuckGo (no API key)"
+        ))
+
         # Browse option
         items.append(ContextMenuItem(
             action="browse",
@@ -143,6 +150,7 @@ class ContextMenuHandler:
         on_add_file: Callable[[str, str], None],  # (path, content) -> None
         on_codebase: Optional[Callable[[], None]] = None,
         on_git: Optional[Callable[[], None]] = None,
+        on_web: Optional[Callable[[], None]] = None,
     ):
         """Initialize handler with action callbacks.
 
@@ -152,12 +160,14 @@ class ContextMenuHandler:
             on_add_file: Callback when a file is selected (path, content)
             on_codebase: Callback when @codebase is selected
             on_git: Callback when @git is selected
+            on_web: Callback when @web is selected
         """
         self.on_browse = on_browse
         self.on_clear = on_clear
         self.on_add_file = on_add_file
         self.on_codebase = on_codebase
         self.on_git = on_git
+        self.on_web = on_web
 
     def handle_selection(self, items: List[ContextMenuItem], index: int) -> None:
         """Handle menu item selection.
@@ -177,6 +187,9 @@ class ContextMenuHandler:
         elif selected.action == "git":
             if self.on_git:
                 self.on_git()
+        elif selected.action == "web":
+            if self.on_web:
+                self.on_web()
         elif selected.action == "browse":
             self.on_browse()
         elif selected.action == "clear":

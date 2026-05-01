@@ -92,7 +92,7 @@ git clone https://github.com/KalimeroMK/sublime-claude ClaudeCode
 | Feature | tommo/sublime-claude | This Extended Version |
 |---------|---------------------|----------------------|
 | **Backends** | Claude only | Claude, Kimi, Ollama, DeepSeek, OpenAI, Codex, Copilot |
-| **Context Tools** | Manual add only | Smart Context, @codebase TF-IDF search, auto-related files |
+| **Context Tools** | Manual add only | Smart Context, @codebase TF-IDF search, @web DuckDuckGo, auto-related files |
 | **MCP Marketplace** | — | 21 curated MCP servers, one-click install |
 | **Skills Marketplace** | — | 27 curated skills (global / per-project) |
 | **Monitoring** | — | Swarm Monitor, Token Usage Graph, Context Gauge |
@@ -291,7 +291,7 @@ The output view features an inline input area (marked with `◎`) where you type
 
 - **Enter** - Submit prompt
 - **Shift+Enter** - Insert newline (multiline prompts)
-- **@** - Open context menu (add files, @codebase, @git, folder, or clear context)
+- **@** - Open context menu (add files, @codebase, @git, @web, folder, or clear context)
 - **Alt+Escape** - Interrupt current query
 
 When a permission prompt appears:
@@ -468,6 +468,7 @@ Type `@` in the inline input area to trigger the context menu, or type commands 
 | `@codebase <query>` | Search entire project for relevant code (TF-IDF, no API needed) |
 | `@git` | Add `git diff --staged` (or unstaged) to context |
 | `@file:<path>` | Inline reference to a specific file |
+| `@web <query>` | Search the web via DuckDuckGo (no API key) |
 
 **`@codebase`** finds the most relevant files based on your query keywords and adds them to context automatically:
 
@@ -481,6 +482,19 @@ This will:
 3. Add top 5 matching code chunks to your query context
 
 **How it works:** Uses TF-IDF over a local SQLite database — no embeddings API or Ollama required. Indexes are stored in `.claude_codebase.db` inside your project root and auto-refresh every 24 hours.
+
+**`@web`** searches DuckDuckGo and adds top results to your query context — no API key required:
+
+```
+◎ @web latest python asyncio best practices ▶
+```
+
+This will:
+1. Query DuckDuckGo Lite via HTTPS
+2. Parse title, URL, and snippet from results
+3. Add top 5 results as context for your query
+
+**Privacy note:** Searches go directly to DuckDuckGo (not your AI backend). No tracking, no API key needed.
 
 ### Related Files (Manual)
 

@@ -204,9 +204,9 @@ class SessionQueryMixin:
         """Expand @-commands in prompt and add results to pending_context.
 
         Supported:
-            @codebase <query>  -- search project for relevant code
+            @codebase <query>  -- search project for relevant code (TF-IDF)
             @file:<path>       -- inline file reference
-            @web <query>       -- web search (placeholder)
+            @web <query>       -- web search via DuckDuckGo (no API key)
 
         Returns the prompt with @-markers removed.
         """
@@ -278,6 +278,36 @@ class SessionQueryMixin:
 
         prompt = re.sub(r'@file:(\S+)', replace_file, prompt)
 
+        # @web <query> -- DuckDuckGo search
+        def replace_web(match):
+            query_text = match.group(1).strip()
+            if not query_text:
+                return ""
+            try:
+                from .web_search import search as web_search
+                results = web_search(query_text, top_k=5)
+                if results:
+                    lines = [f"[web search: '{query_text}']"]
+                    for i, r in enumerate(results, 1):
+                        lines.append(f"\n{i}. {r['title']}")
+                        lines.append(f"   URL: {r['url']}")
+                        if r.get('snippet'):
+                            snippet = r['snippet'][:200] + "..." if len(r['snippet']) > 200 else r['snippet']
+                            lines.append(f"   {snippet}")
+                    self.pending_context.append(ContextItem(
+                        kind="note",
+                        name=f"web:{query_text[:30]}",
+                        content="\n".join(lines),
+                    ))
+                    print(f"[Claude] @web: added {len(results)} results for '{query_text}'")
+                else:
+                    print(f"[Claude] @web: no results for '{query_text}'")
+            except Exception as e:
+                print(f"[Claude] @web error: {e}")
+            return query_text
+
+        prompt = re.sub(r'@web\s+([^@\n]+)', replace_web, prompt)
+
         # @git -- add git diff --staged as context
         if "@git" in prompt:
             try:
@@ -321,9 +351,10 @@ class SessionQueryMixin:
                 print(f"[Claude] @git error: {e}")
             prompt = prompt.replace("@git", "").strip()
 
-        # Clean up any remaining standalone @codebase or @file without args
+        # Clean up any remaining standalone @-commands without args
         prompt = re.sub(r'@codebase\b', '', prompt)
         prompt = re.sub(r'@file\b', '', prompt)
+        prompt = re.sub(r'@web\b', '', prompt)
 
         return prompt.strip()
 
