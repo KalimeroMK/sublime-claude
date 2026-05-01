@@ -2091,9 +2091,12 @@ class OutputView:
                     else:
                         symbol = self.SYMBOLS[event.status]
                     detail = format_tool_detail(event)
-                    # Tool icon based on type
-                    tool_icon = self._tool_icon(event.name)
-                    line = f"  {symbol} {tool_icon} {event.name}{detail}\n"
+                    # Tool icon based on type (skip for file tools — file icon is in detail)
+                    if event.name in ("Read", "Edit", "Write"):
+                        line = f"  {symbol} {event.name}{detail}\n"
+                    else:
+                        tool_icon = self._tool_icon(event.name)
+                        line = f"  {symbol} {tool_icon} {event.name}{detail}\n"
                     # Track [Undo] button position
                     if getattr(event, "snapshot", None) is not None and event.status == DONE:
                         undo_idx = line.find("[Undo]")

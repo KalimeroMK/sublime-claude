@@ -8,6 +8,51 @@ import difflib
 from .constants import TOOL_STATUS_DONE as DONE, TOOL_STATUS_ERROR as ERROR, TOOL_STATUS_BACKGROUND as BACKGROUND
 
 
+_FILE_ICONS = {
+    ".py": "🐍", ".js": "📜", ".ts": "📘", ".tsx": "⚛️", ".jsx": "⚛️",
+    ".json": "📋", ".md": "📝", ".txt": "📄", ".html": "🌐", ".css": "🎨",
+    ".scss": "🎨", ".sass": "🎨", ".less": "🎨", ".php": "🐘", ".go": "🐹",
+    ".rs": "🦀", ".java": "☕", ".kt": "🟣", ".rb": "💎", ".swift": "🍎",
+    ".c": "🔧", ".cpp": "🔧", ".h": "🔧", ".hpp": "🔧", ".cs": "🔷",
+    ".sh": "⚡", ".bash": "⚡", ".zsh": "⚡", ".fish": "⚡", ".ps1": "⚡",
+    ".sql": "🗃️", ".yml": "⚙️", ".yaml": "⚙️", ".toml": "⚙️", ".ini": "⚙️",
+    ".xml": "📰", ".svg": "🎨", ".png": "🖼️", ".jpg": "🖼️", ".jpeg": "🖼️",
+    ".gif": "🖼️", ".mp4": "🎬", ".mp3": "🎵", ".zip": "📦", ".tar": "📦",
+    ".gz": "📦", ".dockerfile": "🐳", ".env": "🔐", ".lock": "🔒",
+}
+
+
+def _file_icon(path: str) -> str:
+    """Get icon for file path based on extension."""
+    ext = os.path.splitext(path.lower())[1]
+    if ext in _FILE_ICONS:
+        return _FILE_ICONS[ext]
+    basename = os.path.basename(path).lower()
+    if basename in _FILE_ICONS:
+        return _FILE_ICONS[basename]
+    return "📄"
+
+
+def _shorten_path(path: str, max_len: int = 50) -> str:
+    """Shorten file path for display — home dir collapsed, truncated from left."""
+    if not path:
+        return ""
+    # Collapse home directory
+    home = os.path.expanduser("~")
+    if path.startswith(home):
+        path = "~" + path[len(home):]
+    if len(path) <= max_len:
+        return path
+    # Truncate from left, keep last 2 components
+    parts = path.replace("\\", "/").split("/")
+    if len(parts) > 2:
+        short = ".../" + "/".join(parts[-2:])
+        if len(short) <= max_len:
+            return short
+    # Fallback: just truncate from left
+    return "..." + path[-(max_len - 3):]
+
+
 def format_bash_result(result: str) -> str:
     """Format Bash command output with box-drawing style."""
     if not result or not result.strip():
@@ -232,16 +277,20 @@ def format_tool_detail(tool) -> str:
         if tool.result and tool.status in (DONE, ERROR):
             detail += format_bash_result(tool.result)
     elif tool.name == "Read" and "file_path" in tool_input:
-        detail = f": {tool_input['file_path']}"
+        fp = _shorten_path(tool_input['file_path'])
+        icon = _file_icon(tool_input['file_path'])
+        detail = f" {icon} {fp}"
         if tool.result and tool.status == DONE:
             detail += format_read_result(tool.result)
     elif tool.name == "Edit" and "file_path" in tool_input:
         file_path = tool_input['file_path']
+        fp = _shorten_path(file_path)
+        icon = _file_icon(file_path)
         # Prefer pre-computed diff from snapshot (actual file changes)
         if getattr(tool, "diff", None):
             diff_str = format_unified_diff(tool.diff)
             line_num = extract_diff_line_num(tool.diff)
-            detail = f": {file_path}:{line_num}" if line_num else f": {file_path}"
+            detail = f" {icon} {fp}:{line_num}" if line_num else f" {icon} {fp}"
             if diff_str:
                 detail += diff_str
         else:
@@ -251,18 +300,20 @@ def format_tool_detail(tool) -> str:
             if unified:
                 diff_str = format_unified_diff(unified)
                 line_num = extract_diff_line_num(unified)
-                detail = f": {file_path}:{line_num}" if line_num else f": {file_path}"
+                detail = f" {icon} {fp}:{line_num}" if line_num else f" {icon} {fp}"
             else:
                 line_num = find_line_number(file_path, old, new)
                 diff_str = format_edit_diff(old, new)
-                detail = f": {file_path}:{line_num}" if line_num else f": {file_path}"
+                detail = f" {icon} {fp}:{line_num}" if line_num else f" {icon} {fp}"
             if diff_str:
                 detail += diff_str
         if getattr(tool, "snapshot", None) is not None and tool.status == DONE:
             detail += "  [Undo]"
     elif tool.name == "Write" and "file_path" in tool_input:
         file_path = tool_input['file_path']
-        detail = f": {file_path}"
+        fp = _shorten_path(file_path)
+        icon = _file_icon(file_path)
+        detail = f" {icon} {fp}"
         if getattr(tool, "diff", None):
             diff_str = format_unified_diff(tool.diff)
             if diff_str:
