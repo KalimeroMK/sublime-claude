@@ -674,6 +674,7 @@ class OutputView:
             line = f"{prefix}◎ {indented} ▶\n  📎 {context_str}\n"
         else:
             line = f"{prefix}◎ {indented} ▶\n"
+        line += "  ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─\n"
         end = self._write(line)
         self.current.region = (start, end)
         # Track with Sublime region so it auto-adjusts when view content shifts
@@ -2063,6 +2064,8 @@ class OutputView:
             lines.append(f"  📎 {context_str}\n")
         else:
             lines.append(f"{prefix}◎ {indented_prompt} ▶\n")
+        # Thin separator after prompt header
+        lines.append("  ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─\n")
 
         # Events in time order (text chunks and tools interleaved)
         # Find the last pending tool to animate it when working
@@ -2138,7 +2141,7 @@ class OutputView:
                         meta_parts.append(f"{input_t // 1000}k ctx")
                     else:
                         meta_parts.append(f"{input_t} ctx")
-            lines.append(f"\n  @done({', '.join(meta_parts)})\n")
+            lines.append(f"\n  ── {' · '.join(meta_parts)} ──\n")
 
         text = "".join(lines)
 
