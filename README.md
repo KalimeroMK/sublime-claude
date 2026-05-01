@@ -1016,13 +1016,4 @@ Yes. Set up Ollama (free, local) or DeepSeek (cheaper than Claude):
 
 ## License
 
-VCL (Vibe-Coded License)
-
-> **Do whatever you want — just don't kill the vibe.**
->
-> - Use it for personal projects, startups, or enterprises
-> - Fork it, modify it, sell it
-> - Credit is appreciated but not required
-> - Don't use it to build something that makes the world worse
-
-See [LICENSE](LICENSE) for the full text.
+MIT License — see [LICENSE](LICENSE) for the full text.
