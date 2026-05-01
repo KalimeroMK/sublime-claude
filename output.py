@@ -1,4 +1,5 @@
 """Structured output view with region tracking."""
+import re
 import sublime
 import sublime_plugin
 from typing import List, Optional, Dict, Callable, Any
@@ -30,9 +31,9 @@ class OutputView:
     """Structured output view - readonly, plugin-controlled."""
 
     SYMBOLS = {
-        "pending": "☐",
-        "done": "✔",
-        "error": "✘",
+        "pending": "○",
+        "done": "●",
+        "error": "●",
         "background": "⚙",
     }
 
@@ -161,6 +162,26 @@ class OutputView:
             name = name[:23] + "…"
         self.view.set_name(f"{prefix}{name}")
 
+    @staticmethod
+    def _tool_icon(name: str) -> str:
+        """Get icon for tool type."""
+        icons = {
+            "Read": "📄",
+            "Edit": "✎",
+            "Write": "✍",
+            "Bash": "⚡",
+            "Glob": "🔍",
+            "Grep": "🔍",
+            "WebSearch": "🌐",
+            "WebFetch": "🌐",
+            "Task": "⚙",
+            "TodoWrite": "📋",
+            "Skill": "🎯",
+            "NotebookEdit": "📓",
+            "ask_user": "❓",
+        }
+        return icons.get(name, "")
+
     def _highlight_diff_blocks(self, start: int, end: int) -> None:
         """Scan conversation region for diff lines and add colored scopes.
 
@@ -238,6 +259,43 @@ class OutputView:
         except Exception as e:
             # Never let diff highlighting break the render
             print(f"[Claude] _highlight_diff_blocks error: {e}")
+
+    def _highlight_tool_status(self, start: int, end: int) -> None:
+        """Add colored scopes to tool status symbols (● green=done, ● red=error, ○ gray=pending)."""
+        if not self.view or not self.view.is_valid():
+            return
+        try:
+            self.view.erase_regions("claude_status_done")
+            self.view.erase_regions("claude_status_error")
+            self.view.erase_regions("claude_status_pending")
+            text = self.view.substr(sublime.Region(start, end))
+            done_regs = []
+            error_regs = []
+            pending_regs = []
+            # Find lines with status symbols: "  ● tool..." or "  ○ tool..."
+            for m in re.finditer(r'^  (●|○) ', text, re.MULTILINE):
+                sym = m.group(1)
+                abs_start = start + m.start(1)
+                abs_end = start + m.end(1)
+                region = sublime.Region(abs_start, abs_end)
+                if sym == "●":
+                    # Distinguish done vs error by looking at tool name line
+                    line_end = text.find('\n', m.end())
+                    line = text[m.end():line_end if line_end != -1 else len(text)]
+                    if "✘" in line or "error" in line.lower():
+                        error_regs.append(region)
+                    else:
+                        done_regs.append(region)
+                else:
+                    pending_regs.append(region)
+            if done_regs:
+                self.view.add_regions("claude_status_done", done_regs, "markup.inserted.diff", "", sublime.DRAW_NO_FILL)
+            if error_regs:
+                self.view.add_regions("claude_status_error", error_regs, "markup.deleted.diff", "", sublime.DRAW_NO_FILL)
+            if pending_regs:
+                self.view.add_regions("claude_status_pending", pending_regs, "comment", "", sublime.DRAW_NO_FILL)
+        except Exception as e:
+            print(f"[Claude] _highlight_tool_status error: {e}")
 
     def _write(self, text: str, pos: Optional[int] = None) -> int:
         """Write text at position (or end). Returns end position."""
@@ -2033,7 +2091,9 @@ class OutputView:
                     else:
                         symbol = self.SYMBOLS[event.status]
                     detail = format_tool_detail(event)
-                    line = f"  {symbol} {event.name}{detail}\n"
+                    # Tool icon based on type
+                    tool_icon = self._tool_icon(event.name)
+                    line = f"  {symbol} {tool_icon} {event.name}{detail}\n"
                     # Track [Undo] button position
                     if getattr(event, "snapshot", None) is not None and event.status == DONE:
                         undo_idx = line.find("[Undo]")
@@ -2134,6 +2194,8 @@ class OutputView:
 
         # Highlight diff blocks with colors
         self._highlight_diff_blocks(start, new_end)
+        # Highlight tool status symbols
+        self._highlight_tool_status(start, new_end)
 
         # Update title to reflect working state
         self._update_title()

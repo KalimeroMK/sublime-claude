@@ -9,18 +9,19 @@ from .constants import TOOL_STATUS_DONE as DONE, TOOL_STATUS_ERROR as ERROR, TOO
 
 
 def format_bash_result(result: str) -> str:
-    """Format Bash command output (head + tail if long)."""
+    """Format Bash command output with box-drawing style."""
     if not result or not result.strip():
         return ""
     lines = result.strip().split("\n")
     max_head = 3
     max_tail = 5
     max_width = 80
-    output_lines = []
 
     def truncate(line):
         return line[:max_width] + "…" if len(line) > max_width else line
 
+    # Box drawing style like VS Code terminal
+    output_lines = ["    ┌─ OUT ─────────────────────────────────────────"]
     if len(lines) <= max_head + max_tail:
         for line in lines:
             output_lines.append(f"    │ {truncate(line)}")
@@ -31,6 +32,7 @@ def format_bash_result(result: str) -> str:
         output_lines.append(f"    │ ... ({omitted} more lines)")
         for line in lines[-max_tail:]:
             output_lines.append(f"    │ {truncate(line)}")
+    output_lines.append("    └───────────────────────────────────────────────")
 
     return "\n" + "\n".join(output_lines)
 
