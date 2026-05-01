@@ -85,6 +85,8 @@ git clone https://github.com/KalimeroMK/sublime-claude ClaudeCode
 
 **That's it.** The plugin auto-detects your backend, starts the bridge, and opens the output view.
 
+[↑ Back to Top](#table-of-contents)
+
 ---
 
 ## Comparison with Original
@@ -103,6 +105,8 @@ git clone https://github.com/KalimeroMK/sublime-claude ClaudeCode
 | **Session Tags** | — | Label sessions for organization |
 | **Auto-Restart** | — | Heartbeat + auto-restart on bridge crash |
 | **Tests** | Minimal | 233 unit tests, mock Sublime API |
+
+[↑ Back to Top](#table-of-contents)
 
 ---
 
@@ -141,6 +145,8 @@ This build extends the base project with additional features, bug fixes, and a f
 | Duplicate event handlers | Removed duplicate `on_activated` and non-existent imports that caused runtime errors |
 | Dead code cleanup | Removed unused commands and modules that added unnecessary bloat |
 
+[↑ Back to Top](#table-of-contents)
+
 ---
 
 ## Requirements
@@ -168,6 +174,8 @@ npm install -g @openai/codex
 ```
 
 **Note:** Authenticate your chosen CLI before using this plugin. For Kimi/Claude, run `claude` once to authenticate.
+
+[↑ Back to Top](#table-of-contents)
 
 ---
 
@@ -204,6 +212,8 @@ npm install -g @openai/codex
 
 2. Configure your backend (see [Settings](#settings))
 
+[↑ Back to Top](#table-of-contents)
+
 ---
 
 ## Backends
@@ -220,6 +230,8 @@ The plugin auto-detects which backend to use based on your settings:
 | **Copilot** | `default_backend: "copilot"` | GitHub Copilot SDK |
 
 You can also force a backend with `"default_backend": "claude" | "openai" | "deepseek" | "codex" | "copilot"`.
+
+[↑ Back to Top](#table-of-contents)
 
 ---
 
@@ -322,6 +334,8 @@ Tools > Claude Code
 ### Context Menu
 
 Right-click selected text and choose "Ask Claude" to query about the selection.
+
+[↑ Back to Top](#table-of-contents)
 
 ---
 
@@ -426,6 +440,8 @@ Options: `"claude"`, `"openai"`, `"deepseek"`, `"codex"`
 - **claude_additional_dirs** — Extra `--add-dir` paths for CLI access
 - **claude_env** — Environment variables passed to bridge
 
+[↑ Back to Top](#table-of-contents)
+
 ---
 
 ## Context
@@ -508,6 +524,8 @@ Supported: Python, JavaScript/TypeScript, PHP, Go.
 
 Disable by removing the `_add_related_files` call in `session.py` if you prefer manual context only.
 
+[↑ Back to Top](#table-of-contents)
+
 ---
 
 ## Voice Input
@@ -526,6 +544,8 @@ Disable by removing the `_add_related_files` call in `session.py` if you prefer 
 - OpenAI API key set in settings: `"openai_api_key": "sk-..."`
 
 **Privacy note:** Audio is sent to OpenAI's Whisper API for transcription. For local-only transcription, use macOS built-in dictation (Fn twice) instead.
+
+[↑ Back to Top](#table-of-contents)
 
 ---
 
@@ -604,6 +624,8 @@ Tracks up to 100 queries per session, persisted across restarts.
 - **Clear All Memories** — wipe everything
 
 Max 50 memories per project, auto-pruned by relevance score.
+
+[↑ Back to Top](#table-of-contents)
 
 ---
 
@@ -725,6 +747,8 @@ Available servers (21 curated):
 4. Uses `npx -y` — no manual `npm install` needed
 5. Template variables auto-resolved: `${project_root}`, `${database_path}`
 
+[↑ Back to Top](#table-of-contents)
+
 ---
 
 ## MCP Tools (Sublime Integration)
@@ -806,6 +830,8 @@ set_alarm(
 
 Subsessions automatically notify the bridge when they complete. The alarm fires by injecting the wake_prompt into the main session as a new query.
 
+[↑ Back to Top](#table-of-contents)
+
 ---
 
 ## Subagents
@@ -839,6 +865,8 @@ Define additional agents in `.claude/settings.json`:
 
 Agents run with separate context, preventing conversation bloat. Custom agents override built-ins with the same name.
 
+[↑ Back to Top](#table-of-contents)
+
 ---
 
 ## Tests
@@ -864,6 +892,8 @@ python3 -m unittest discover tests/ -v
 - JSON-RPC client, tool routing, settings merging
 
 All tests run in ~0.03s without requiring Sublime Text to be open (uses mock API).
+
+[↑ Back to Top](#table-of-contents)
 
 ---
 
@@ -939,6 +969,8 @@ sublime-claude/
 ```
 
 All bridges emit identical JSON-RPC notifications to Sublime, so the output view, permissions, and MCP tools work the same regardless of backend.
+
+[↑ Back to Top](#table-of-contents)
 
 ---
 
@@ -1026,8 +1058,12 @@ Yes. Set up Ollama (free, local) or DeepSeek (cheaper than Claude):
 }
 ```
 
+[↑ Back to Top](#table-of-contents)
+
 ---
 
 ## License
 
 MIT License — see [LICENSE](LICENSE) for the full text.
+
+[↑ Back to Top](#table-of-contents)
