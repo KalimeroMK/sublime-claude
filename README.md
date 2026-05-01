@@ -6,6 +6,106 @@ A Sublime Text plugin for [Kimi](https://kimi.ai/), [Claude Code](https://claude
 
 **Repository:** https://github.com/KalimeroMK/sublime-claude
 
+---
+
+## Table of Contents
+
+- [Quick Start](#quick-start)
+- [Comparison with Original](#comparison-with-original)
+- [What's New](#whats-new)
+- [Requirements](#requirements)
+- [Installation](#installation)
+- [Backends](#backends)
+- [Usage](#usage)
+  - [Commands](#commands)
+  - [Inline Input Mode](#inline-input-mode)
+  - [Attach File / Image](#attach-file--image)
+  - [Drag & Drop](#drag--drop)
+- [Settings](#settings)
+  - [Backend Selection](#backend-selection)
+  - [General Settings](#general-settings)
+  - [Permission Modes](#permission-modes)
+  - [Project Settings](#project-settings-sublime-project)
+- [Context](#context)
+  - [Smart Context (Auto)](#smart-context-auto)
+  - [@-Commands](#-commands)
+  - [Related Files (Manual)](#related-files-manual)
+- [Voice Input](#voice-input)
+- [Sessions](#sessions)
+  - [Auto-Restart on Bridge Crash](#auto-restart-on-bridge-crash)
+  - [Session Tags](#session-tags)
+  - [Token Usage Graph](#token-usage-graph)
+  - [Persistent Memory](#persistent-memory)
+- [Output View](#output-view)
+  - [Diff Preview & Undo](#diff-preview--undo)
+  - [Context Window Gauge](#context-window-gauge)
+  - [Agent Swarm Monitor](#agent-swarm-monitor)
+  - [Skills Marketplace](#skills-marketplace)
+  - [MCP Marketplace](#mcp-marketplace)
+- [MCP Tools (Sublime Integration)](#mcp-tools-sublime-integration)
+- [Subagents](#subagents)
+- [Tests](#tests)
+- [Architecture](#architecture)
+- [Troubleshooting & FAQ](#troubleshooting--faq)
+- [License](#license)
+
+---
+
+## Quick Start
+
+Get up and running in 3 minutes:
+
+```bash
+# 1. Clone into Sublime Text Packages
+# macOS:
+cd ~/Library/Application\ Support/Sublime\ Text/Packages
+git clone https://github.com/KalimeroMK/sublime-claude ClaudeCode
+
+# Linux:
+cd ~/.config/sublime-text/Packages
+git clone https://github.com/KalimeroMK/sublime-claude ClaudeCode
+
+# Windows:
+cd "%APPDATA%\Sublime Text\Packages"
+git clone https://github.com/KalimeroMK/sublime-claude ClaudeCode
+```
+
+```json
+// 2. Add your API key (Preferences > Package Settings > Claude Code > Settings)
+{
+    "anthropic_api_key": "sk-ant-api03-...",
+    "anthropic_model": "claude-sonnet-4-6"
+}
+```
+
+```
+// 3. Open Command Palette (Cmd+Shift+P) → "Claude: New Session"
+// 4. Type your prompt and press Enter
+```
+
+**That's it.** The plugin auto-detects your backend, starts the bridge, and opens the output view.
+
+---
+
+## Comparison with Original
+
+| Feature | tommo/sublime-claude | This Extended Version |
+|---------|---------------------|----------------------|
+| **Backends** | Claude only | Claude, Kimi, Ollama, DeepSeek, OpenAI, Codex, Copilot |
+| **Context Tools** | Manual add only | Smart Context, @codebase TF-IDF search, auto-related files |
+| **MCP Marketplace** | — | 21 curated MCP servers, one-click install |
+| **Skills Marketplace** | — | 27 curated skills (global / per-project) |
+| **Monitoring** | — | Swarm Monitor, Token Usage Graph, Context Gauge |
+| **Diff Preview** | — | Unified diff with colored lines + one-click undo |
+| **Voice Input** | — | macOS voice-to-text via Whisper |
+| **Drag & Drop** | — | Drop files/images onto output view |
+| **Persistent Memory** | — | AI remembers facts across sessions |
+| **Session Tags** | — | Label sessions for organization |
+| **Auto-Restart** | — | Heartbeat + auto-restart on bridge crash |
+| **Tests** | Minimal | 233 unit tests, mock Sublime API |
+
+---
+
 ## What's New
 
 This build extends the base project with additional features, bug fixes, and a full test suite.
@@ -41,6 +141,8 @@ This build extends the base project with additional features, bug fixes, and a f
 | Duplicate event handlers | Removed duplicate `on_activated` and non-existent imports that caused runtime errors |
 | Dead code cleanup | Removed unused commands and modules that added unnecessary bloat |
 
+---
+
 ## Requirements
 
 - Sublime Text 4
@@ -66,6 +168,8 @@ npm install -g @openai/codex
 ```
 
 **Note:** Authenticate your chosen CLI before using this plugin. For Kimi/Claude, run `claude` once to authenticate.
+
+---
 
 ## Installation
 
@@ -98,7 +202,9 @@ npm install -g @openai/codex
    mklink /D "%APPDATA%\Sublime Text\Packages\ClaudeCode" C:\path\to\sublime-claude
    ```
 
-2. Configure your backend (see Settings below)
+2. Configure your backend (see [Settings](#settings))
+
+---
 
 ## Backends
 
@@ -115,6 +221,8 @@ The plugin auto-detects which backend to use based on your settings:
 
 You can also force a backend with `"default_backend": "claude" | "openai" | "deepseek" | "codex" | "copilot"`.
 
+---
+
 ## Usage
 
 ### Commands
@@ -123,59 +231,59 @@ All commands available via Command Palette (`Cmd+Shift+P`): type "Claude"
 
 | Command | Keybinding | Description |
 |---------|------------|-------------|
-| Query | - | Send a query to Claude |
-| Query Selection | - | Query about selected code |
-| Query File | - | Query about current file |
-| Add Current File | - | Add file to context (+ auto-related files) |
-| Add Selection | - | Add selection to context |
-| Add Open Files | - | Add all open files to context |
-| Add Current Folder | - | Add folder path to context |
-| Clear Context | - | Clear pending context |
-| New Session | - | Start a fresh session (auto-detects backend) |
-| New Session with Backend... | - | Pick backend manually |
-| Configure Settings | - | Open settings file |
-| Undo Message | - | Rewind last conversation turn |
-| **Undo Last Edit** | - | Undo the most recent Write/Edit file change |
-| **Add Memory** | - | Save a persistent fact/preference for AI to remember |
-| **List Memories** | - | Browse and delete stored memories |
-| **Clear All Memories** | - | Wipe all stored memories |
-| Copy Conversation | - | Copy full conversation to clipboard |
-| Save Checkpoint... | - | Save current conversation state |
-| View Session History... | - | Browse conversation history |
-| Restart Session | - | Restart current session, keep output view |
-| Resume Session... | - | Resume a previous session |
-| Switch Session... | - | Switch between active sessions |
-| Fork Session | - | Fork current session (branch conversation) |
-| Fork Session... | - | Fork from a saved session |
-| Rename Session... | - | Name the current session |
-| **Tag Session...** | - | Add comma-separated tags to session |
-| Sleep Session | - | Put session to sleep (disconnect, keep view) |
-| Wake Session | - | Reconnect a sleeping session |
-| Stop Session | - | Disconnect and stop |
+| Query | — | Send a query to Claude |
+| Query Selection | — | Query about selected code |
+| Query File | — | Query about current file |
+| Add Current File | — | Add file to context (+ auto-related files) |
+| Add Selection | — | Add selection to context |
+| Add Open Files | — | Add all open files to context |
+| Add Current Folder | — | Add folder path to context |
+| Clear Context | — | Clear pending context |
+| New Session | — | Start a fresh session (auto-detects backend) |
+| New Session with Backend... | — | Pick backend manually |
+| Configure Settings | — | Open settings file |
+| Undo Message | — | Rewind last conversation turn |
+| **Undo Last Edit** | — | Undo the most recent Write/Edit file change |
+| **Add Memory** | — | Save a persistent fact/preference for AI to remember |
+| **List Memories** | — | Browse and delete stored memories |
+| **Clear All Memories** | — | Wipe all stored memories |
+| Copy Conversation | — | Copy full conversation to clipboard |
+| Save Checkpoint... | — | Save current conversation state |
+| View Session History... | — | Browse conversation history |
+| Restart Session | — | Restart current session, keep output view |
+| Resume Session... | — | Resume a previous session |
+| Switch Session... | — | Switch between active sessions |
+| Fork Session | — | Fork current session (branch conversation) |
+| Fork Session... | — | Fork from a saved session |
+| Rename Session... | — | Name the current session |
+| **Tag Session...** | — | Add comma-separated tags to session |
+| Sleep Session | — | Put session to sleep (disconnect, keep view) |
+| Wake Session | — | Reconnect a sleeping session |
+| Stop Session | — | Disconnect and stop |
 | Toggle Output | `Cmd+Alt+C` | Show/hide output view |
 | Interrupt | `Alt+Escape` | Stop current query |
-| Queue Prompt | - | Queue a prompt while query is running |
-| Reset Input Mode | - | Force re-enter input mode |
-| Select Effort | - | Choose reasoning effort (low/high/max) |
-| Select Model | - | Switch model for current session |
-| Set Default Model | - | Set default model for new sessions |
-| Refresh Models | - | Refresh model list from API |
-| Search Sessions | - | Search across all saved sessions |
-| Clear Notifications | - | Clear all notification badges |
-| Permission Mode... | - | Toggle permission mode (default/acceptEdits/bypass) |
-| Manage Auto-Allowed Tools... | - | View/remove auto-allowed tool patterns |
-| Open Link at Cursor | - | Open URL under cursor in browser |
-| **Show Usage** | - | Show token usage for current query |
-| **Show Usage Graph** | - | ASCII bar chart of token usage per query |
+| Queue Prompt | — | Queue a prompt while query is running |
+| Reset Input Mode | — | Force re-enter input mode |
+| Select Effort | — | Choose reasoning effort (low/high/max) |
+| Select Model | — | Switch model for current session |
+| Set Default Model | — | Set default model for new sessions |
+| Refresh Models | — | Refresh model list from API |
+| Search Sessions | — | Search across all saved sessions |
+| Clear Notifications | — | Clear all notification badges |
+| Permission Mode... | — | Toggle permission mode (default/acceptEdits/bypass) |
+| Manage Auto-Allowed Tools... | — | View/remove auto-allowed tool patterns |
+| Open Link at Cursor | — | Open URL under cursor in browser |
+| **Show Usage** | — | Show token usage for current query |
+| **Show Usage Graph** | — | ASCII bar chart of token usage per query |
 | **Attach File...** | `Cmd+Shift+F` | Attach any file or image to context (auto-detects type) |
-| **Swarm Monitor** | - | Dashboard of all active sessions and subsessions |
-| **MCP Marketplace** | - | Browse and install 21 MCP servers with one click |
-| **Generate Commit Message** | - | Generate commit message from `git diff --staged` |
-| **Git Status** | - | Show `git status --short` in output view |
+| **Swarm Monitor** | — | Dashboard of all active sessions and subsessions |
+| **MCP Marketplace** | — | Browse and install 21 MCP servers with one click |
+| **Generate Commit Message** | — | Generate commit message from `git diff --staged` |
+| **Git Status** | — | Show `git status --short` in output view |
 | **Voice Input** | `Cmd+Shift+R` | Record audio, transcribe via Whisper API, insert text (macOS only) |
-| **Skills Marketplace** | - | Browse and install 27 curated skills |
-| **List Active Skills** | - | Show currently active skills |
-| **Disable All Skills** | - | Disable all active skills |
+| **Skills Marketplace** | — | Browse and install 27 curated skills |
+| **List Active Skills** | — | Show currently active skills |
+| **Disable All Skills** | — | Disable all active skills |
 
 ### Inline Input Mode
 
@@ -214,6 +322,8 @@ Tools > Claude Code
 ### Context Menu
 
 Right-click selected text and choose "Ask Claude" to query about the selection.
+
+---
 
 ## Settings
 
@@ -289,9 +399,13 @@ Options: `"claude"`, `"openai"`, `"deepseek"`, `"codex"`
 
 ### Permission Modes
 
-- `default` - Prompt for all tool actions
-- `acceptEdits` - Auto-accept file operations
-- `bypassPermissions` - Skip all permission checks
+| Mode | Behavior | Safest for |
+|------|----------|------------|
+| `default` | Prompt for all tool actions | Sensitive codebases, production repos |
+| `acceptEdits` | Auto-accept Read/Write/Edit; prompt for Bash/Web | Daily development, trusted projects |
+| `bypassPermissions` | Skip all permission checks | Local testing, throwaway code |
+
+**Recommendation:** Use `acceptEdits` for normal work — it removes friction for file operations while still confirming destructive commands (`Bash`, `WebSearch`). Use `default` when touching production code. Use `bypassPermissions` only for quick experiments.
 
 ### Project Settings (.sublime-project)
 
@@ -311,6 +425,8 @@ Options: `"claude"`, `"openai"`, `"deepseek"`, `"codex"`
 
 - **claude_additional_dirs** — Extra `--add-dir` paths for CLI access
 - **claude_env** — Environment variables passed to bridge
+
+---
 
 ## Context
 
@@ -378,6 +494,8 @@ Supported: Python, JavaScript/TypeScript, PHP, Go.
 
 Disable by removing the `_add_related_files` call in `session.py` if you prefer manual context only.
 
+---
+
 ## Voice Input
 
 **`Claude: Voice Input`** (`Cmd+Shift+R`) — speak instead of typing (macOS only):
@@ -390,9 +508,12 @@ Disable by removing the `_add_related_files` call in `session.py` if you prefer 
 
 **Requirements:**
 - macOS (`afrecord` for audio capture)
+- **Microphone permission** for Sublime Text in System Settings → Privacy & Security → Microphone
 - OpenAI API key set in settings: `"openai_api_key": "sk-..."`
 
 **Privacy note:** Audio is sent to OpenAI's Whisper API for transcription. For local-only transcription, use macOS built-in dictation (Fn twice) instead.
+
+---
 
 ## Sessions
 
@@ -470,17 +591,18 @@ Tracks up to 100 queries per session, persisted across restarts.
 
 Max 50 memories per project, auto-pruned by relevance score.
 
+---
+
 ## Output View
 
 The output view shows:
 
 - `◎ prompt ▶` - Your query (multiline supported)
 - `⋯` - Working indicator (disappears when done)
-- `☐ Tool` - Tool pending
-- `✔ Tool` - Tool completed (with diff preview for Write/Edit)
-- `✘ Tool` - Tool error
+- `○ Tool` - Tool pending
+- `● Tool` - Tool completed (with diff preview for Write/Edit)
 - Response text with syntax highlighting
-- `@done(Xs)` - Completion time
+- `── time · ctx ──` - Completion footer
 
 ### Diff Preview & Undo
 
@@ -589,6 +711,8 @@ Available servers (21 curated):
 4. Uses `npx -y` — no manual `npm install` needed
 5. Template variables auto-resolved: `${project_root}`, `${database_path}`
 
+---
+
 ## MCP Tools (Sublime Integration)
 
 Allow Claude to query Sublime Text's editor state via MCP (Model Context Protocol).
@@ -668,6 +792,8 @@ set_alarm(
 
 Subsessions automatically notify the bridge when they complete. The alarm fires by injecting the wake_prompt into the main session as a new query.
 
+---
+
 ## Subagents
 
 ### Custom Agents
@@ -699,6 +825,8 @@ Define additional agents in `.claude/settings.json`:
 
 Agents run with separate context, preventing conversation bloat. Custom agents override built-ins with the same name.
 
+---
+
 ## Tests
 
 Run the test suite from the project root:
@@ -722,6 +850,8 @@ python3 -m unittest discover tests/ -v
 - JSON-RPC client, tool routing, settings merging
 
 All tests run in ~0.03s without requiring Sublime Text to be open (uses mock API).
+
+---
 
 ## Architecture
 
@@ -796,6 +926,103 @@ sublime-claude/
 
 All bridges emit identical JSON-RPC notifications to Sublime, so the output view, permissions, and MCP tools work the same regardless of backend.
 
+---
+
+## Troubleshooting & FAQ
+
+### "python3 not found" or bridge won't start
+
+Sublime Text's `PATH` can differ from your terminal's. The plugin searches for Python in this order:
+1. `python3.13`, `python3.12`, `python3.11`, `python3.10`
+2. `python3`
+3. `uv`
+4. `pyenv`
+
+**Fix:** Set the full path in settings:
+```json
+{ "python_path": "/usr/local/bin/python3.12" }
+```
+
+Find your Python path with: `which python3.12` (or `pyenv which python`)
+
+### Session stuck / Enter doesn't work
+
+Usually means the input mode state got corrupted. Try:
+1. `Cmd+Shift+P` → "Claude: Reset Input Mode"
+2. If that fails, `Claude: Restart Session` (keeps conversation history)
+3. If Sublime froze entirely, check Console (`View > Show Console`) for `plugin_host` errors
+
+### @codebase index is broken / outdated
+
+Delete the index file to force a rebuild:
+```bash
+rm .claude_codebase.db
+```
+
+Next `@codebase` query will re-index automatically.
+
+### "Broken pipe" or bridge crashes repeatedly
+
+The plugin has auto-restart built-in. If it keeps failing:
+1. Check Python version: `python3 --version` (must be 3.10+)
+2. Check the claude CLI is authenticated: `claude --version`
+3. Check `~/.claude/settings.json` for invalid config
+4. Restart Sublime Text (some plugin state can only be cleared on restart)
+
+### Voice Input not working (macOS)
+
+1. Grant microphone permission to Sublime Text:
+   **System Settings → Privacy & Security → Microphone → Sublime Text**
+2. Ensure `afrecord` is available: `which afrecord`
+3. Ensure OpenAI API key is set in plugin settings
+
+### Diff colors not showing
+
+Diff highlighting requires a color scheme that defines these scopes:
+- `diff.inserted` (green)
+- `diff.deleted` (red)
+- `comment` (gray for unchanged lines)
+
+Most popular schemes (Monokai, Mariana, One Dark) support these out of the box.
+
+### How do I migrate from tommo/sublime-claude?
+
+1. Backup your sessions: `cp .sessions.json .sessions.json.backup`
+2. Remove the old plugin: `rm -rf "Packages/sublime-claude"`
+3. Install this version: `git clone https://github.com/KalimeroMK/sublime-claude ClaudeCode`
+4. Copy your API keys from old settings to new settings file
+
+### Can I use this without Claude API?
+
+Yes. Set up Ollama (free, local) or DeepSeek (cheaper than Claude):
+```json
+// Ollama
+{ "openai_base_url": "http://localhost:11434", "openai_model": "qwen2.5:7b" }
+
+// DeepSeek
+{ "deepseek_api_key": "sk-..." }
+```
+
+### How do I disable auto-context?
+
+```json
+{
+    "smart_context_enabled": false,
+    "auto_add_current_file": false
+}
+```
+
+---
+
 ## License
 
-VCL (Vibe-Coded License) - see LICENSE
+VCL (Vibe-Coded License)
+
+> **Do whatever you want — just don't kill the vibe.**
+>
+> - Use it for personal projects, startups, or enterprises
+> - Fork it, modify it, sell it
+> - Credit is appreciated but not required
+> - Don't use it to build something that makes the world worse
+
+See [LICENSE](LICENSE) for the full text.
