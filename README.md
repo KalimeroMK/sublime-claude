@@ -934,38 +934,65 @@ The plugin runs in Sublime's Python 3.8 environment and spawns a separate bridge
 
 ```
 sublime-claude/
-├── claude_code.py         # Plugin entry point
-├── core.py                # Session lifecycle
-├── commands.py            # Plugin commands
-├── session_core.py        # Session class (lifecycle, bridge, notifications)
-├── session_query.py       # Query handling (smart context, file attachment)
-├── session_permissions.py # Permission/plan/question UI handling
-├── session_env.py         # Environment & session persistence helpers
-├── output.py              # Output view rendering
-├── output_models.py       # Data classes (ToolCall, Conversation, etc.)
-├── output_format.py       # Tool result formatting (diffs, etc.)
-├── listeners.py           # Event handlers
-├── rpc.py                 # JSON-RPC client
-├── mcp_server.py          # MCP socket server
-├── smart_context.py       # Auto context expansion (git, symbols, scope)
-├── bridge/
-│   ├── main.py            # Claude bridge (Claude CLI wrapper)
-│   ├── openai_main.py     # Ollama/OpenAI bridge
-│   ├── codex_main.py      # Codex bridge (app-server)
-│   ├── copilot_main.py    # Copilot bridge (Copilot SDK)
-│   └── rpc_helpers.py     # Shared JSON-RPC helpers
-├── mcp/server.py          # MCP protocol server
+├── Core:
+│   ├── claude_code.py          # Plugin entry point
+│   ├── core.py                 # Session lifecycle coordination
+│   ├── session.py              # Main Session class (combines all mixins)
+│   ├── session_core.py         # Session lifecycle, bridge, heartbeat
+│   ├── session_query.py        # Query handling, smart context, @-commands
+│   ├── session_permissions.py  # Permission/plan/question UI
+│   └── session_env.py          # Environment & persistence helpers
 │
-└── Utilities:
-    ├── constants.py       # Config & magic strings
-    ├── context_parser.py  # Context menus & @ picker
-    ├── error_handler.py   # Error handling decorators
-    ├── logger.py          # File-based logging
-    ├── prompt_builder.py  # Prompt construction
-    ├── command_parser.py  # Slash command parsing
-    ├── session_state.py   # Session state machine
-    ├── settings.py        # Settings loading & merging
-    └── tool_router.py     # MCP tool dispatch
+├── Output & Rendering:
+│   ├── output.py               # Output view rendering, incremental updates
+│   ├── output_models.py        # Data classes (ToolCall, Conversation, Todo)
+│   └── output_format.py        # Tool result formatting (diffs, icons, paths)
+│
+├── Commands (split by domain):
+│   ├── commands.py             # Main command definitions
+│   ├── commands_core.py        # Core commands (query, interrupt, toggle)
+│   ├── commands_session.py     # Session commands (new, resume, wake, fork)
+│   ├── commands_context.py     # Context commands (add file, attach, drag-drop)
+│   ├── commands_tools.py       # Tool commands (undo edit, MCP marketplace)
+│   ├── commands_ui.py          # UI commands (usage graph, swarm monitor)
+│   └── commands_voice.py       # Voice input commands (macOS only)
+│
+├── Context & Search:
+│   ├── smart_context.py        # Auto context expansion (git, symbols, scope)
+│   ├── codebase_search.py      # TF-IDF @codebase search (SQLite index)
+│   ├── web_search.py           # DuckDuckGo @web search (no API key)
+│   └── context_parser.py       # Context menus & @ picker
+│
+├── MCP & Extensions:
+│   ├── mcp_server.py           # MCP socket server (Unix socket)
+│   ├── tool_router.py          # MCP tool dispatch to Sublime
+│   ├── persona_client.py       # Persona server client
+│   └── skills_manager.py       # Skills marketplace (install/manage)
+│
+├── Infrastructure:
+│   ├── rpc.py                  # JSON-RPC client (stdio)
+│   ├── listeners.py            # Event handlers (input, clicks, drag-drop)
+│   ├── settings.py             # Settings loading & merging
+│   ├── constants.py            # Config & magic strings
+│   ├── error_handler.py        # Error handling decorators
+│   ├── logger.py               # File-based logging
+│   ├── prompt_builder.py       # Prompt construction
+│   ├── command_parser.py       # Slash command parsing
+│   ├── memory.py               # Persistent memory across sessions
+│   └── notalone.py             # Notalone integration
+│
+├── Bridge (Python 3.10+ subprocesses):
+│   └── bridge/
+│       ├── base.py             # Base bridge class
+│       ├── main.py             # Claude/Kimi bridge (CLI wrapper)
+│       ├── openai_main.py      # Ollama/OpenAI bridge
+│       ├── codex_main.py       # Codex bridge (app-server)
+│       ├── copilot_main.py     # Copilot bridge (Copilot SDK)
+│       └── rpc_helpers.py      # Shared JSON-RPC helpers
+│
+└── MCP Protocol:
+    └── mcp/
+        └── server.py           # MCP protocol server implementation
 ```
 
 All bridges emit identical JSON-RPC notifications to Sublime, so the output view, permissions, and MCP tools work the same regardless of backend.
