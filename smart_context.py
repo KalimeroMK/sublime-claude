@@ -32,6 +32,27 @@ _FILE_CACHE_MAX_SIZE = 50  # Max entries to prevent unbounded growth
 _DEFAULT_MAX_FILE_SIZE = 50_000  # 50KB max per file
 _DEFAULT_MAX_CONTENT_LEN = 8_000  # 8K chars max per context item
 
+# Suffixes/basenames that almost never carry semantic meaning for an LLM —
+# build artefacts, test caches, scaffolding samples, lock files. Skip these
+# even when they show up as recently modified in git.
+_NOISE_SUFFIXES = (
+    ".cache", ".example", ".lock", ".log",
+    ".min.js", ".min.css", ".map",
+    ".tmp", ".bak", ".orig", ".swp",
+)
+_NOISE_BASENAMES = {
+    ".env.example", ".env.testing", ".env.staging",
+    ".phpunit.result.cache", "phpunit.xml.dist",
+    "package-lock.json", "yarn.lock", "composer.lock", "uv.lock", "Cargo.lock",
+}
+
+
+def _is_noise(path: str) -> bool:
+    base = os.path.basename(path).lower()
+    if base in {b.lower() for b in _NOISE_BASENAMES}:
+        return True
+    return any(base.endswith(suf) for suf in _NOISE_SUFFIXES)
+
 
 def get_git_modified_files(cwd: str, max_files: int = 5) -> List[str]:
     """Get recently modified files from git status and recent commits.
@@ -85,6 +106,7 @@ def get_git_modified_files(cwd: str, max_files: int = 5) -> List[str]:
             except Exception:
                 pass
 
+        files = [f for f in files if not _is_noise(f)]
         result_files = files[:max_files]
         _GIT_CACHE[cwd] = (now, result_files)
         return result_files
@@ -212,6 +234,8 @@ def get_open_code_files(window: sublime.Window, exclude: Set[str]) -> List[str]:
             continue
         # Skip Claude output views and scratch buffers
         if view.settings().get(OUTPUT_VIEW_SETTING) or view.is_scratch():
+            continue
+        if _is_noise(path):
             continue
         files.append(path)
     return files
@@ -369,6 +393,8 @@ def build_smart_context(
         sym_files = get_symbol_related_files(window, current_file, max_symbols=3)
         for path in sym_files:
             if os.path.abspath(path) in exclude:
+                continue
+            if _is_noise(path):
                 continue
             content = _read_file_cached(path)
             if content is not None:
