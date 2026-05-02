@@ -1056,9 +1056,17 @@ class Session(SessionQueryMixin, SessionPermissionsMixin):
         self._heartbeat_timer = None
         if not self.client or not self.initialized:
             return
-        if not self.client.is_alive() and not self.working:
-            # Bridge died silently while idle — auto-restart
-            print("[Claude] Heartbeat: bridge died silently, auto-restarting...")
+        if not self.client.is_alive():
+            # Bridge died silently — auto-restart. If we were mid-query, the
+            # in-flight response is lost; surface it to the user so they can resubmit.
+            if self.working:
+                print("[Claude] Heartbeat: bridge died mid-query, auto-restarting (in-flight query lost)...")
+                try:
+                    self.output.text("\n\n*Bridge process died mid-query. Auto-restarting — please resubmit your last prompt.*\n")
+                except Exception:
+                    pass
+            else:
+                print("[Claude] Heartbeat: bridge died silently, auto-restarting...")
             self._auto_restart_bridge()
         else:
             # Schedule next beat

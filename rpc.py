@@ -99,17 +99,34 @@ class JsonRpcClient:
 
     def _read_loop(self) -> None:
         import sublime
+        died = False
         while self.running and self.proc and self.proc.stdout:
             try:
                 line = self.proc.stdout.readline()
                 if not line:
                     print("[Claude RPC] read_loop: got empty line, breaking")
+                    died = True
                     break
                 msg = json.loads(line.decode())
                 sublime.set_timeout(lambda m=msg: self._handle(m), 0)
             except Exception as e:
                 print(f"[Claude RPC] read_loop error: {e}")
                 continue
+        if died:
+            sublime.set_timeout(self._fail_pending, 0)
+
+    def _fail_pending(self) -> None:
+        """Bridge died — invoke any pending callbacks with an error so callers don't hang."""
+        if not self.pending:
+            return
+        callbacks = list(self.pending.items())
+        self.pending.clear()
+        err = {"error": {"message": "Bridge process died before response"}}
+        for _, cb in callbacks:
+            try:
+                cb(err)
+            except Exception as e:
+                print(f"[Claude RPC] pending callback error after bridge death: {e}")
 
     def _handle(self, msg: dict) -> None:
         if "id" in msg and msg["id"] in self.pending:

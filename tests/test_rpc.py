@@ -168,9 +168,45 @@ class RpcClientTest(unittest.TestCase):
     def test_send_wait_dead_bridge(self):
         """send_wait returns error when bridge is dead."""
         result = self.client.send_wait("test", {})
-        
+
         self.assertIn("error", result)
         self.assertIn("dead", result["error"]["message"])
+
+    def test_fail_pending_invokes_callbacks_with_error(self):
+        """_fail_pending fires every pending callback with an error and clears the map."""
+        cb1 = MagicMock()
+        cb2 = MagicMock()
+        self.client.pending[1] = cb1
+        self.client.pending[2] = cb2
+
+        self.client._fail_pending()
+
+        self.assertEqual(len(self.client.pending), 0)
+        cb1.assert_called_once()
+        cb2.assert_called_once()
+        for call in (cb1.call_args, cb2.call_args):
+            payload = call[0][0]
+            self.assertIn("error", payload)
+            self.assertIn("died", payload["error"]["message"])
+
+    def test_fail_pending_no_pending_is_noop(self):
+        """_fail_pending with no pending callbacks does nothing."""
+        # Should not raise
+        self.client._fail_pending()
+        self.assertEqual(len(self.client.pending), 0)
+
+    def test_fail_pending_swallows_callback_exception(self):
+        """A throwing callback should not stop other callbacks from firing."""
+        bad = MagicMock(side_effect=RuntimeError("boom"))
+        good = MagicMock()
+        self.client.pending[1] = bad
+        self.client.pending[2] = good
+
+        self.client._fail_pending()
+
+        bad.assert_called_once()
+        good.assert_called_once()
+        self.assertEqual(len(self.client.pending), 0)
 
 
 if __name__ == "__main__":
