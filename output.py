@@ -289,11 +289,11 @@ class OutputView:
                 else:
                     pending_regs.append(region)
             if done_regs:
-                self.view.add_regions("claude_status_done", done_regs, "markup.inserted.diff", "", sublime.DRAW_NO_FILL)
+                self.view.add_regions("claude_status_done", done_regs, "markup.inserted.diff", "", sublime.DRAW_NO_FILL | sublime.DRAW_NO_OUTLINE)
             if error_regs:
-                self.view.add_regions("claude_status_error", error_regs, "markup.deleted.diff", "", sublime.DRAW_NO_FILL)
+                self.view.add_regions("claude_status_error", error_regs, "markup.deleted.diff", "", sublime.DRAW_NO_FILL | sublime.DRAW_NO_OUTLINE)
             if pending_regs:
-                self.view.add_regions("claude_status_pending", pending_regs, "comment", "", sublime.DRAW_NO_FILL)
+                self.view.add_regions("claude_status_pending", pending_regs, "comment", "", sublime.DRAW_NO_FILL | sublime.DRAW_NO_OUTLINE)
         except Exception as e:
             print(f"[Claude] _highlight_tool_status error: {e}")
 
