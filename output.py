@@ -323,10 +323,11 @@ class OutputView:
         return end + (new_size - old_size)
 
     def _scroll_to_end(self, force: bool = False) -> None:
-        """Scroll to end, respecting user scroll position.
+        """Scroll to end. Sticky behavior: always tracks the bottom so the
+        input prompt stays visible without manual scrolling.
 
         Args:
-            force: If True, always scroll. If False, only scroll if viewport is near bottom.
+            force: kept for API compatibility; currently every call scrolls.
         """
         if not self.view or not self.view.is_valid():
             return
@@ -336,18 +337,7 @@ class OutputView:
             self.view.show(self._input_start, keep_to_left=False, animate=False)
             return
 
-        # Check if we should auto-scroll — use viewport position, not cursor position
-        if not force:
-            viewport_y = self.view.viewport_position()[1]
-            viewport_h = self.view.viewport_extent()[1]
-            layout_h = self.view.layout_extent()[1]
-            # Only auto-scroll if viewport bottom is near content bottom
-            # (within 300 pixels or 15% of viewport height, whichever is larger)
-            threshold = max(300, viewport_h * 0.15)
-            if layout_h > viewport_h and (layout_h - (viewport_y + viewport_h)) > threshold:
-                return  # User scrolled up, don't auto-scroll
-
-        # Scroll to end without moving cursor
+        # Sticky scroll: always pin to the bottom on every render
         end = self.view.size()
         self.view.show(end, keep_to_left=False, animate=False)
 
@@ -2141,7 +2131,7 @@ class OutputView:
                         meta_parts.append(f"{input_t // 1000}k ctx")
                     else:
                         meta_parts.append(f"{input_t} ctx")
-            lines.append(f"\n  ── {' · '.join(meta_parts)} ──\n")
+            lines.append(f"\n  ── ✓ {' · '.join(meta_parts)} ──\n")
 
         text = "".join(lines)
 
