@@ -240,21 +240,21 @@ class OutputView:
                     f"{DIFF_HIGHLIGHT_REGION_KEY}_inserted",
                     inserted,
                     "markup.inserted.diff",
-                    "", sublime.DRAW_NO_FILL,
+                    "", sublime.DRAW_NO_FILL | sublime.DRAW_NO_OUTLINE,
                 )
             if deleted:
                 self.view.add_regions(
                     f"{DIFF_HIGHLIGHT_REGION_KEY}_deleted",
                     deleted,
                     "markup.deleted.diff",
-                    "", sublime.DRAW_NO_FILL,
+                    "", sublime.DRAW_NO_FILL | sublime.DRAW_NO_OUTLINE,
                 )
             if ranges:
                 self.view.add_regions(
                     f"{DIFF_HIGHLIGHT_REGION_KEY}_range",
                     ranges,
                     "meta.diff.range",
-                    "", sublime.DRAW_NO_FILL,
+                    "", sublime.DRAW_NO_FILL | sublime.DRAW_NO_OUTLINE,
                 )
         except Exception as e:
             # Never let diff highlighting break the render
