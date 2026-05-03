@@ -105,8 +105,12 @@ git clone https://github.com/KalimeroMK/sublime-claude ClaudeCode
 | **Persistent Memory** | — | AI remembers facts across sessions |
 | **Session Tags** | — | Label sessions for organization |
 | **Auto-Restart** | — | Heartbeat + auto-restart on bridge crash |
-| **Terminal** | — | PTY-based terminal panel with `@terminal` context |
-| **Tests** | Minimal | 256 unit tests, mock Sublime API |
+| **Terminal** | — | Embedded PTY terminal with agent blocking, SSH/REPL support |
+| **Undo** | Immediate rewind | Selectable rewind target via quick panel |
+| **Navigation** | — | Cmd+R jumps between prompts (Symbols) |
+| **Session Bookmarks** | — | Star sessions to pin them to top of lists |
+| **Live Settings** | — | Output view settings apply without restart |
+| **Tests** | Minimal | 284 unit tests, mock Sublime API |
 
 [↑ Back to Top](#table-of-contents)
 
@@ -122,6 +126,9 @@ This build extends the base project with additional features, bug fixes, and a f
 |---------|-------------|
 | **Context Window Gauge** | Visual 10-segment bar in the status bar showing context usage percentage with color coding (🟢🟡🔴) |
 | **Session Tags** | Label sessions with comma-separated tags (e.g. `bugfix, refactor`) — shown in status bar and persisted across restarts |
+| **Session Bookmarks** | Star/unstar sessions via Switch Session panel — starred sessions float to the top of resume/switch lists |
+| **Undo Quick Panel** | Cmd+Z shows a quick panel listing all undoable turns — select exactly how far to rewind |
+| **Symbols Navigation** | Cmd+R (Goto Symbol) jumps between prompt entries in the output view |
 | **Attach File / Image** | Single command (`Cmd+Shift+F`) for attaching any file or image to context — auto-detects file type and sends images as binary |
 | **Drag & Drop** | Drop files or images directly onto the output view — automatically added to context |
 | **Token Usage Graph** | `Claude: Show Usage Graph` — ASCII bar chart of token usage per query, 100-query history persisted |
@@ -132,9 +139,10 @@ This build extends the base project with additional features, bug fixes, and a f
 | **Smart Context** | Auto-adds current scope, git-modified files, relevant open files, and symbol definitions to queries — with caching and `.gitignore` filtering |
 | **Persistent Memory** | AI remembers facts, preferences, and decisions across sessions via `.claude/memory.json` |
 | **Scroll Respect** | Viewport-aware auto-scroll — doesn't jump to bottom when reading history |
-| **Terminal Integration** | PTY-based terminal panel — interactive shell with `@terminal` context mention |
+| **Terminal Integration** | Embedded PTY terminal — agent can run interactive commands (`htop`, `vim`, SSH, REPLs) and block until completion |
+| **Live Output Settings** | Changes to `ClaudeOutput.sublime-settings` apply live to all open output views |
 | **Persistent CLI** | One `claude` subprocess per session (not per-query) — eliminates session lock deadlocks |
-| **Comprehensive Test Suite** | 256 unit tests covering all core utilities, running in ~0.03s with a mock Sublime API |
+| **Comprehensive Test Suite** | 284 unit tests covering all core utilities, running in ~0.03s with a mock Sublime API |
 
 ### Bug Fixes
 
@@ -263,7 +271,7 @@ All commands available via Command Palette (`Cmd+Shift+P`): type "Claude"
 | New Session | — | Start a fresh session (auto-detects backend) |
 | New Session with Backend... | — | Pick backend manually |
 | Configure Settings | — | Open settings file |
-| Undo Message | — | Rewind last conversation turn |
+| Undo Message | `Cmd+Z` | Rewind conversation — shows quick panel to select target turn |
 | **Undo Last Edit** | — | Undo the most recent Write/Edit file change |
 | **Add Memory** | — | Save a persistent fact/preference for AI to remember |
 | **List Memories** | — | Browse and delete stored memories |
@@ -302,8 +310,10 @@ All commands available via Command Palette (`Cmd+Shift+P`): type "Claude"
 | **Generate Commit Message** | — | Generate commit message from `git diff --staged` |
 | **Git Status** | — | Show `git status --short` in output view |
 | **Voice Input** | `Cmd+Shift+R` | Record audio, transcribe via Whisper API, insert text (macOS only) |
+| **Open Terminal** | — | Open a new embedded PTY terminal tab |
 | **Toggle Terminal** | ``Ctrl+` `` | Show/hide PTY-based terminal panel |
 | **Send to Terminal** | ``Ctrl+Shift+` `` | Send command to terminal panel |
+| **Output Settings** | — | Edit `ClaudeOutput.sublime-settings` |
 | **Skills Marketplace** | — | Browse and install 27 curated skills |
 | **List Active Skills** | — | Show currently active skills |
 | **Disable All Skills** | — | Disable all active skills |
@@ -576,29 +586,44 @@ Disable by removing the `_add_related_files` call in `session.py` if you prefer 
 
 ## Terminal Integration
 
-A persistent PTY-based terminal panel embedded inside Sublime Text. The AI can run interactive shell commands (`htop`, `git log`, `npm init`) and you can send commands manually.
+A full embedded PTY terminal inside Sublime Text — shared between you and the AI agent. You can type commands interactively; the agent can run commands and **block until they complete**, reading the captured output.
 
 ### Keybindings
 
 | Keybinding | Action |
 |-----------|--------|
+| `Cmd+Shift+P` → "Claude: Open Terminal" | Open a new terminal tab |
 | ``Ctrl+` `` | Toggle terminal panel |
 | ``Ctrl+Shift+` `` | Send command to terminal |
 
 ### Features
 
-- **Persistent shell session** — cwd, env vars, and shell history survive across queries
-- **Interactive commands** — `htop`, `vim`, `less`, `npm init` work correctly via PTY
-- **AI integration** — AI sees terminal output via `@terminal` context mention
-- **Real-time streaming** — Terminal output streams live via JSON-RPC notifications
-- **ANSI stripping** — Escape codes stripped for clean display in Sublime output panel
+- **Real PTY** — `htop`, `vim`, `less`, `npm init`, SSH, and REPLs work correctly
+- **Agent blocking** — `terminal_run("npm test", wait=60)` blocks until the shell returns to prompt
+- **Multiple tabs** — Each session gets its own terminal; users can open additional tabs
+- **Index targeting** — Target any terminal by its `#N` index (shown in tab title)
+- **Shell integration** — OSC 133 hooks for zsh/bash/fish give ~50ms prompt detection
+- **SSH/REPL support** — 300ms output quiescence fallback for remote shells and interactive programs
+- **Session restore** — Terminal tabs reopen after Sublime restart with cwd preserved
+- **ANSI rendering** — Full color support via custom color scheme (not stripped)
+
+### Agent MCP Tools
+
+The agent gets four terminal tools via MCP:
+
+- `terminal_run(command, wait=30, index=None)` — Run command and block until done
+- `terminal_read(lines=100, index=None)` — Read current screen buffer
+- `terminal_send(text, index=None)` — Send keystrokes to a running program
+- `terminal_close(index=None)` — Close a terminal tab
+
+See [`docs/terminal.md`](docs/terminal.md) for the full agent guide.
 
 ### How It Works
 
-1. The bridge process spawns a real pseudo-terminal (`pty.openpty()`)
-2. A background thread reads output via `select.select` + `os.read`
-3. Output is streamed to Sublime via `terminal_output` JSON-RPC notifications
-4. The `TerminalView` class manages a dedicated output panel per session
+1. The `Terminal` class spawns a real PTY via `ptyprocess`
+2. A `pyte` screen emulator parses ANSI sequences into a buffer
+3. A render thread syncs the buffer to a Sublime view every ~30ms
+4. For agent commands, `start_capture()` records raw output until prompt detection fires (OSC 133 → PGID → quiescence)
 
 [↑ Back to Top](#table-of-contents)
 
@@ -609,6 +634,7 @@ A persistent PTY-based terminal panel embedded inside Sublime Text. The AI can r
 Sessions are automatically saved and can be resumed later. Each session tracks:
 - Session name (auto-generated from first prompt, or manually set)
 - **Tags** — comma-separated labels for organization (e.g. `bugfix, refactor`)
+- **Bookmarks** — star sessions to pin them to the top of resume/switch lists
 - Project directory
 - Cumulative cost
 - Per-query token usage history (up to 100 queries)
@@ -618,6 +644,16 @@ Sessions are automatically saved and can be resumed later. Each session tracks:
 Use **Claude: Resume Session...** to pick and continue a previous conversation.
 
 After Sublime restarts, orphaned output views are registered as sleeping sessions. Press Enter or use **Wake Session** to reconnect.
+
+### Undo
+
+**`Cmd+Z`** (Undo Message) shows a quick panel listing all undoable turns, newest first:
+```
+3 — refactor auth middleware…
+2 — add user validation…
+1 — initial project setup…
+```
+Selecting one rewinds the session to before that turn. You can undo multiple steps in one action.
 
 ### Auto-Restart on Bridge Crash
 
@@ -638,6 +674,15 @@ Tag sessions for organization:
 1. **Claude: Tag Session...** — enter comma-separated tags
 2. Tags appear in status bar as `[tag1,tag2]`
 3. Tags are persisted in `.sessions.json` and restored on reconnect
+
+### Session Bookmarks
+
+Star sessions to keep them at the top of the resume/switch panels:
+1. **Claude: Switch Session...**
+2. Select **☆ Star Session** (or **★ Unstar Session** if already starred)
+3. Starred sessions show a `★` prefix and float above unstarred ones
+
+Bookmarks are persisted per-project in `.claude/bookmarks.json`.
 
 ### Token Usage Graph
 
@@ -935,7 +980,7 @@ cd ~/PhpstormProjects/sublime-claude
 python3 -m unittest discover tests/ -v
 ```
 
-**256 tests** covering all core utilities:
+**284 tests** covering all core utilities:
 - Context window gauge, session tags, drag-drop, usage graph
 - Attach commands (image/file auto-detect, MIME mapping)
 - Swarm monitor (status icons, session tracking)
@@ -947,7 +992,10 @@ python3 -m unittest discover tests/ -v
 - Constants, error handling, logging, prompt building
 - Command parsing, context parsing, session state machine
 - JSON-RPC client, tool routing, settings merging
-- Terminal integration (PTY lifecycle, ANSI stripping, buffer read/write)
+- BackendSpec registry, TOOL_FORMATTERS registry
+- Terminal integration (PTY lifecycle, ANSI rendering, blocking capture, quiescence)
+- Undo quick panel, session bookmarks, live output settings
+- Sleep protection (background tool abort, orphan cleanup)
 
 All tests run in ~0.03s without requiring Sublime Text to be open (uses mock API).
 
@@ -997,12 +1045,16 @@ All tests run in ~0.03s without requiring Sublime Text to be open (uses mock API
 │  (socket server)│              │  (MCP server)   │
 └─────────────────┘              └─────────────────┘
         │
-        │ PTY (via bridge)
+        │ PTY (embedded terminal)
         ▼
-┌─────────────────┐
-│  TerminalManager│  bridge/terminal.py
-│  (pty.openpty)  │  Persistent shell session
-└─────────────────┘
+┌─────────────────────────────────────────┐
+│  terminal/ package                      │
+│  ├─ terminal.py   — PTY lifecycle,     │
+│  │                  blocking capture    │
+│  ├─ ptty.py       — pyte screen emu    │
+│  ├─ render.py     — ANSI → Sublime     │
+│  └─ commands.py   — open/key/paste     │
+└─────────────────────────────────────────┘
 ```
 
 The plugin runs in Sublime's Python 3.8 environment and spawns a separate bridge process using Python 3.10+. Each bridge translates between Sublime's JSON-RPC protocol and the backend CLI:
@@ -1031,16 +1083,29 @@ sublime-claude/
 ├── Core:
 │   ├── claude_code.py          # Plugin entry point
 │   ├── core.py                 # Session lifecycle coordination
-│   ├── session.py              # Main Session class (combines all mixins)
-│   ├── session_core.py         # Session lifecycle, bridge, heartbeat
+│   ├── session.py              # Re-export compatibility layer
+│   ├── session_core.py         # Session facade (delegates to collaborators)
+│   ├── session_bridge.py       # Bridge lifecycle (start/stop/sleep/wake)
 │   ├── session_query.py        # Query handling, smart context, @-commands
+│   ├── session_context.py      # Pending files/selections, prompt building
 │   ├── session_permissions.py  # Permission/plan/question UI
+│   ├── session_state.py        # sessions.json, retain files, rewind
+│   ├── session_notifications.py # Bridge notification dispatcher
+│   ├── session_status.py       # Status bar, spinner, context gauge
+│   ├── session_ui.py           # Phantom overlays (connecting, sleeping)
+│   ├── session_services.py     # Notification subscriptions
+│   ├── session_heartbeat.py    # Stall detection, auto-restart
+│   ├── session_terminal.py     # Terminal adapter integration
 │   └── session_env.py          # Environment & persistence helpers
 │
 ├── Output & Rendering:
-│   ├── output.py               # Output view rendering, incremental updates
+│   ├── output.py               # Output view facade (mixins + incremental render)
 │   ├── output_models.py        # Data classes (ToolCall, Conversation, Todo)
-│   └── output_format.py        # Tool result formatting (diffs, icons, paths)
+│   ├── output_format.py        # TOOL_FORMATTERS registry + result formatters
+│   ├── output_plan.py          # Plan UI renderer mixin
+│   ├── output_permissions.py   # Permission UI renderer mixin
+│   ├── output_question.py      # Question UI renderer mixin
+│   └── output_input.py         # Input mode controller mixin
 │
 ├── Commands (split by domain):
 │   ├── commands.py             # Main command definitions
@@ -1057,18 +1122,31 @@ sublime-claude/
 │   ├── web_search.py           # DuckDuckGo @web search (no API key)
 │   └── context_parser.py       # Context menus & @ picker
 │
+├── Backends & Config:
+│   ├── backends.py             # BackendSpec registry (centralized config)
+│   ├── settings.py             # Settings loading & merging
+│   └── constants.py            # Config & magic strings
+│
 ├── MCP & Extensions:
 │   ├── mcp_server.py           # MCP socket server (Unix socket)
 │   ├── tool_router.py          # MCP tool dispatch to Sublime
 │   ├── persona_client.py       # Persona server client
 │   └── skills_manager.py       # Skills marketplace (install/manage)
 │
+├── Terminal (embedded PTY):
+│   └── terminal/
+│       ├── terminal.py         # PTY lifecycle, blocking capture
+│       ├── ptty.py             # pyte screen emulator
+│       ├── render.py           # ANSI → Sublime view rendering
+│       ├── commands.py         # Terminal commands (open/key/paste)
+│       ├── event.py            # Terminal view lifecycle listener
+│       └── key.py              # ANSI key-code generator
+│
 ├── Infrastructure:
 │   ├── rpc.py                  # JSON-RPC client (stdio)
-│   ├── terminal_view.py        # Terminal output panel (PTY output display)
+│   ├── terminal_view.py        # Legacy terminal output panel
 │   ├── listeners.py            # Event handlers (input, clicks, drag-drop)
-│   ├── settings.py             # Settings loading & merging
-│   ├── constants.py            # Config & magic strings
+│   ├── permissions.py          # Shared permission pattern matching
 │   ├── error_handler.py        # Error handling decorators
 │   ├── logger.py               # File-based logging
 │   ├── prompt_builder.py       # Prompt construction
@@ -1080,7 +1158,7 @@ sublime-claude/
 │   └── bridge/
 │       ├── base.py             # Base bridge class
 │       ├── main.py             # Claude/Kimi bridge (CLI wrapper)
-│       ├── terminal.py         # PTY-based terminal manager
+│       ├── terminal.py         # Legacy PTY terminal manager
 │       ├── openai_main.py      # Ollama/OpenAI bridge
 │       ├── codex_main.py       # Codex bridge (app-server)
 │       ├── copilot_main.py     # Copilot bridge (Copilot SDK)
