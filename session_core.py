@@ -15,6 +15,7 @@ from .session_heartbeat import HeartbeatMonitor
 from .session_terminal import TerminalAdapter
 from .session_state import StateManager
 from .session_ui import SessionUIHelper
+from .session_status import StatusManager
 from .constants import CONVERSATION_REGION_KEY, MAX_RELATED_FILES
 from .session_env import (
     _find_python_310_plus,
@@ -91,6 +92,8 @@ class Session(SessionQueryMixin, SessionPermissionsMixin):
         self._state = StateManager(self)
         # UI overlay helper
         self._ui = SessionUIHelper(self)
+        # Status bar and spinner manager
+        self._status_mgr = StatusManager(self)
 
         # Extract subsession_id and parent_view_id if provided
         if initial_context:
@@ -1215,126 +1218,20 @@ class Session(SessionQueryMixin, SessionPermissionsMixin):
 
 
     def _status(self, text: str) -> None:
-        """Update status on output view only."""
-        if not self.output.view or not self.output.view.is_valid():
-            return
-        label = self.backend.title() if self.backend != "claude" else "Claude"
-        prefix = "[PLAN] " if self.plan_mode else ""
-        parts = [f"{prefix}{text}"]
-        if self.backend == "claude":
-            settings = sublime.load_settings("ClaudeCode.sublime-settings")
-            effort = settings.get("effort", "high")
-            parts.append(f"effort:{effort}")
-        # Show model (short form) and profile
-        model_info = []
-        if self.sdk_model:
-            # Shorten model name: claude-opus-4-5-20251101 -> opus.4.5
-            short = self.sdk_model.replace("claude-", "").split("-202")[0].replace("-", ".")
-            model_info.append(short)
-        if self.profile_name:
-            model_info.append(f"@{self.profile_name}")
-        if model_info:
-            parts.append("".join(model_info))
-        if self.tags:
-            parts.append("[" + ",".join(self.tags) + "]")
-        if self.total_cost > 0:
-            parts.append(f"${self.total_cost:.4f}")
-        if self.query_count > 0:
-            parts.append(f"{self.query_count}q")
-        if self.context_usage:
-            ctx_k = self._context_tokens_k()
-            if ctx_k is not None:
-                parts.append(f"ctx:{ctx_k}k")
-            gauge = self._context_window_gauge()
-            if gauge:
-                parts.append(gauge)
-        self.output.view.set_status("claude", f"{label}: {', '.join(parts)}")
+        """Delegate to StatusManager."""
+        self._status_mgr.status(text)
 
     def _update_status_bar(self) -> None:
-        """Update status bar with session info."""
-        if self.is_sleeping:
-            self._status("sleeping")
-        elif self.working:
-            self._status("working")
-        else:
-            self._status("ready")
-
-    def _context_tokens_k(self) -> Optional[int]:
-        """Get context token count in thousands from latest usage data."""
-        if not self.context_usage:
-            return None
-        u = self.context_usage
-        input_t = (u.get("input_tokens", 0)
-                 + u.get("cache_read_input_tokens", 0)
-                 + u.get("cache_creation_input_tokens", 0))
-        if not input_t:
-            return None
-        return max(1, input_t // 1000)
-
-    def _context_window_gauge(self) -> Optional[str]:
-        """Return a visual gauge showing context window utilization.
-
-        Format: ▓▓▓▓░░░░░ 45% (colored by severity)
-        """
-        if not self.context_usage:
-            return None
-        u = self.context_usage
-        used = (u.get("input_tokens", 0)
-                + u.get("cache_read_input_tokens", 0)
-                + u.get("cache_creation_input_tokens", 0))
-        if not used:
-            return None
-
-        # Determine max context for this model
-        max_ctx = None
-        model_id = self.sdk_model or ""
-        if model_id:
-            # Check suffix overrides first
-            for suffix, tokens in _CONTEXT_LIMITS.items():
-                if model_id.endswith(suffix):
-                    max_ctx = tokens
-                    break
-            # Fall back to model family lookup
-            if max_ctx is None:
-                for family, tokens in _MODEL_CONTEXT_LIMITS.items():
-                    if family in model_id.lower():
-                        max_ctx = tokens
-                        break
-        # Ultimate fallback: 200k for Claude, 128k for others
-        if max_ctx is None:
-            max_ctx = 200000 if self.backend in ("claude", "kimi", "default", "") else 128000
-
-        pct = min(100, int(used / max_ctx * 100))
-        # Build bar: 10 segments
-        filled = min(10, round(pct / 10))
-        bar = "█" * filled + "░" * (10 - filled)
-        # Color thresholds
-        if pct >= 90:
-            color = "🔴"
-        elif pct >= 70:
-            color = "🟡"
-        else:
-            color = "🟢"
-        return f"{color} {bar} {pct}%"
+        """Delegate to StatusManager."""
+        self._status_mgr.update_status_bar()
 
     def _clear_status(self) -> None:
-        if self.output.view and self.output.view.is_valid():
-            self.output.view.erase_status("claude")
+        """Delegate to StatusManager."""
+        self._status_mgr.clear()
 
     def _animate(self) -> None:
-        if not self.working:
-            # Restore normal title when done
-            self.output.set_name(self.name or "Claude")
-            return
-        chars = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
-        s = chars[self.spinner_frame % len(chars)]
-        self.spinner_frame += 1
-        # Show spinner in status bar only (not title - causes cursor flicker)
-        status = self.current_tool or "thinking..."
-        self._status(f"{s} {status}")
-        # Animate spinner in output view
-        self.output.advance_spinner()
-        sublime.set_timeout(self._animate, 200)
+        """Delegate to StatusManager."""
+        self._status_mgr.animate()
 
     def subscribe_to_service(
         self,
