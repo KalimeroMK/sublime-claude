@@ -214,5 +214,13 @@
     {
         "caption": "Claude: Disable All Skills",
         "command": "claude_skills_disable_all"
+    },
+    {
+        "caption": "Claude: Toggle Terminal",
+        "command": "claude_toggle_terminal"
+    },
+    {
+        "caption": "Claude: Terminal Send",
+        "command": "claude_terminal_send"
     }
 ]

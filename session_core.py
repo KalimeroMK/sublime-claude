@@ -82,6 +82,9 @@ class Session(SessionQueryMixin, SessionPermissionsMixin):
         # Track if inject was sent (to skip "done" status until inject query completes)
         self._inject_pending: bool = False
 
+        # Terminal panel for persistent shell session
+        self.terminal_view = None
+
         # Extract subsession_id and parent_view_id if provided
         if initial_context:
             self.subsession_id = initial_context.get("subsession_id")
@@ -1209,6 +1212,15 @@ class Session(SessionQueryMixin, SessionPermissionsMixin):
                 self.query(message)
             return
 
+        if method == "terminal_output":
+            text = params.get("text", "")
+            if text and self.terminal_view:
+                try:
+                    self.terminal_view.append(text)
+                except Exception as e:
+                    print(f"[Claude] terminal output error: {e}")
+            return
+
         if method == "notification_wake":
             # Notification fired - start a new query with the wake prompt
             wake_prompt = params.get("wake_prompt", "")
@@ -1429,6 +1441,18 @@ class Session(SessionQueryMixin, SessionPermissionsMixin):
                             self._queued_prompts.append(wake_prompt)
                         else:
                             self.query(wake_prompt, display_prompt=f"⚙ {summary}", silent=True)
+
+    def toggle_terminal(self) -> None:
+        """Toggle the integrated terminal panel."""
+        if not self.terminal_view:
+            from .terminal_view import TerminalView
+            self.terminal_view = TerminalView(self.window)
+        if self.terminal_view.is_visible():
+            self.terminal_view.hide()
+        else:
+            self.terminal_view.show(focus=False)
+            if self.client and self.initialized:
+                self.client.send("terminal_start", {})
 
     def _set_name(self, name: str) -> None:
         """Set session name and update UI."""

@@ -313,6 +313,32 @@ class SessionQueryMixin:
 
         prompt = re.sub(r'@web\s+([^@\n]+)', replace_web, prompt)
 
+        # @terminal -- add terminal output as context
+        if "@terminal" in prompt:
+            try:
+                if self.client and self.client.is_alive():
+                    result = self.client.send_wait("terminal_read", {"max_chars": 10000}, timeout=5.0)
+                    if "error" not in result:
+                        text = result.get("text", "")
+                        if text:
+                            if len(text) > 10000:
+                                text = text[:10000] + "\n\n... [truncated]\n"
+                            self.pending_context.append(ContextItem(
+                                kind="note",
+                                name="terminal",
+                                content=f"[terminal output]\n```\n{text}\n```",
+                            ))
+                            print(f"[Claude] @terminal: added {len(text)} chars")
+                        else:
+                            print("[Claude] @terminal: no output")
+                    else:
+                        print(f"[Claude] @terminal: error reading terminal")
+                else:
+                    print("[Claude] @terminal: bridge not available")
+            except Exception as e:
+                print(f"[Claude] @terminal error: {e}")
+            prompt = prompt.replace("@terminal", "").strip()
+
         # @git -- add git diff --staged as context
         if "@git" in prompt:
             try:
@@ -360,6 +386,7 @@ class SessionQueryMixin:
         prompt = re.sub(r'@codebase\b', '', prompt)
         prompt = re.sub(r'@file\b', '', prompt)
         prompt = re.sub(r'@web\b', '', prompt)
+        prompt = re.sub(r'@terminal\b', '', prompt)
 
         return prompt.strip()
 

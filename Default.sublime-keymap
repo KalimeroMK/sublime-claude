@@ -239,5 +239,17 @@
                 "operand": true
             }
         ]
+    },
+    {
+        "keys": [
+            "ctrl+`"
+        ],
+        "command": "claude_toggle_terminal"
+    },
+    {
+        "keys": [
+            "ctrl+shift+`"
+        ],
+        "command": "claude_terminal_send"
     }
 ]
