@@ -123,7 +123,6 @@ class ClaudeSDKClient:
     def __init__(self, options: ClaudeAgentOptions):
         self.options = options
         self._session_id: Optional[str] = options.resume
-        self._pending_prompt: Union[str, list, None] = None
         self._message_queue: asyncio.Queue[Any] = asyncio.Queue()
         self._reader_task: Optional[asyncio.Task] = None
         self._proc: Optional[asyncio.subprocess.Process] = None
@@ -163,142 +162,22 @@ class ClaudeSDKClient:
         self._model = model
 
     async def query(self, prompt: Union[str, AsyncIterator]) -> None:
-        """Store the prompt to be sent on the next receive_messages() call."""
+        """Write the prompt directly to the persistent CLI stdin."""
+        await self._ensure_process()
+
         if isinstance(prompt, str):
-            self._pending_prompt = prompt
+            content = [{"type": "text", "text": prompt}]
         else:
             # async generator of messages (multimodal)
             messages = []
             async for msg in prompt:
                 messages.append(msg)
-            self._pending_prompt = messages
-
-    async def receive_messages(self) -> AsyncIterator[Any]:
-        """Yield SDK message objects by running claude CLI."""
-        if self._pending_prompt is not None:
-            await self._start_query(self._pending_prompt)
-            self._pending_prompt = None
-
-        while True:
-            msg = await self._message_queue.get()
-            if msg is None:
-                break
-            yield msg
-
-    async def _start_query(self, prompt: Union[str, list]) -> None:
-        """Launch claude subprocess and feed it the prompt."""
-        self._interrupted = False
-        # Drain any stale messages (e.g. None sentinel from previous interrupt)
-        # so the new receive_messages() loop doesn't break immediately.
-        while not self._message_queue.empty():
-            try:
-                self._message_queue.get_nowait()
-            except asyncio.QueueEmpty:
-                break
-        cmd = [
-            self.options.cli_path,
-            "-p",
-            "--output-format", "stream-json",
-            "--input-format", "stream-json",
-            "--verbose",
-            "--include-partial-messages",
-        ]
-
-        # Permission handling: we use permission-mode so CLI doesn't hang on
-        # interactive prompts, but the bridge handles its own UI.
-        if self.options.permission_mode:
-            cmd.extend(["--permission-mode", self.options.permission_mode])
-
-        # Session handling
-        if self.options.resume:
-            cmd.extend(["--resume", self._session_id])
-        elif self._session_id:
-            cmd.extend(["--session-id", self._session_id])
-        else:
-            self._session_id = str(uuid.uuid4())
-            cmd.extend(["--session-id", self._session_id])
-
-        # Fork
-        if self.options.fork_session:
-            cmd.append("--fork-session")
-
-        # Model
-        if self._model:
-            cmd.extend(["--model", self._model])
-
-        # Allowed tools
-        if self.options.allowed_tools:
-            tools_str = ",".join(self.options.allowed_tools)
-            cmd.extend(["--allowed-tools", tools_str])
-
-        # CWD
-        cwd = self.options.cwd or os.getcwd()
-
-        # System prompt
-        if self.options.system_prompt:
-            cmd.extend(["--append-system-prompt", self.options.system_prompt])
-
-        # Effort
-        if self.options.effort:
-            cmd.extend(["--effort", self.options.effort])
-
-        # Betas
-        if self.options.betas:
-            for beta in self.options.betas:
-                cmd.extend(["--betas", beta])
-
-        # Extra args (session-id, add-dir, resume-session-at)
-        if self.options.extra_args:
-            for key, val in self.options.extra_args.items():
-                arg_name = f"--{key}"
-                if isinstance(val, list):
-                    for v in val:
-                        cmd.extend([arg_name, str(v)])
-                else:
-                    cmd.extend([arg_name, str(val)])
-
-        # MCP servers — use a per-session temp file to avoid races
-        if self.options.mcp_servers:
-            mcp_path = f"/tmp/claude_mcp_servers_{self._session_id}.json"
-            with open(mcp_path, "w") as f:
-                json.dump({"mcpServers": self.options.mcp_servers}, f)
-            cmd.extend(["--mcp-config", mcp_path])
-
-        # Agents
-        if self.options.agents:
-            agents_json = json.dumps(self.options.agents)
-            cmd.extend(["--agents", agents_json])
-
-        # Plugins
-        if self.options.plugins:
-            for plugin_dir in self.options.plugins:
-                cmd.extend(["--plugin-dir", plugin_dir])
-
-        self._log(f"cmd={cmd}")
-        # Redirect stderr to a per-session log file instead of a pipe.
-        # With --verbose the CLI can write more than the OS pipe buffer (~64 KB);
-        # if nobody drains stderr the subprocess deadlocks and stdout stops forever.
-        self._stderr_file = open(f"/tmp/claude_cli_stderr_{self._session_id}.log", "wb")
-        self._proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=self._stderr_file,
-            cwd=cwd,
-        )
-
-        # Build JSON input
-        if isinstance(prompt, str):
-            content = [{"type": "text", "text": prompt}]
-        elif isinstance(prompt, list) and len(prompt) > 0:
-            first = prompt[0]
+            first = messages[0]
             if isinstance(first, dict) and "message" in first:
                 msg = first["message"]
                 content = msg.get("content", [])
             else:
-                content = [{"type": "text", "text": str(prompt)}]
-        else:
-            content = [{"type": "text", "text": ""}]
+                content = [{"type": "text", "text": str(messages)}]
 
         input_msg = {
             "type": "user",
@@ -308,9 +187,130 @@ class ClaudeSDKClient:
         self._log(f"input={input_line[:200]}")
         self._proc.stdin.write(input_line.encode())
         await self._proc.stdin.drain()
-        self._proc.stdin.close()  # Signal EOF so CLI processes the input
 
-        # Start background reader
+    async def receive_messages(self) -> AsyncIterator[Any]:
+        """Yield SDK message objects from the persistent CLI output queue."""
+        while True:
+            msg = await self._message_queue.get()
+            if msg is None:
+                break
+            yield msg
+
+    async def _ensure_process(self) -> None:
+        """Start the persistent CLI process if not already running."""
+        proc_alive = self._proc is not None and self._proc.returncode is None
+        reader_alive = self._reader_task is not None and not self._reader_task.done()
+
+        if proc_alive and reader_alive:
+            return  # Process is healthy
+
+        self._interrupted = False
+
+        # Drain stale queue messages (e.g. None sentinel from dead reader)
+        while not self._message_queue.empty():
+            try:
+                self._message_queue.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+
+        # Clean up old process
+        if self._proc:
+            try:
+                if self._proc.returncode is None:
+                    self._proc.kill()
+            except ProcessLookupError:
+                pass
+            self._proc = None
+
+        if self._reader_task and not self._reader_task.done():
+            self._reader_task.cancel()
+            try:
+                await self._reader_task
+            except asyncio.CancelledError:
+                pass
+            self._reader_task = None
+
+        if self._stderr_file:
+            try:
+                self._stderr_file.close()
+            except Exception:
+                pass
+            self._stderr_file = None
+
+        cmd = [
+            self.options.cli_path,
+            "-p",
+            "--output-format", "stream-json",
+            "--input-format", "stream-json",
+            "--verbose",
+            "--include-partial-messages",
+        ]
+
+        if self.options.permission_mode:
+            cmd.extend(["--permission-mode", self.options.permission_mode])
+
+        if self.options.resume:
+            cmd.extend(["--resume", self._session_id])
+        elif self._session_id:
+            cmd.extend(["--session-id", self._session_id])
+        else:
+            self._session_id = str(uuid.uuid4())
+            cmd.extend(["--session-id", self._session_id])
+
+        if self.options.fork_session:
+            cmd.append("--fork-session")
+
+        if self._model:
+            cmd.extend(["--model", self._model])
+
+        if self.options.allowed_tools:
+            tools_str = ",".join(self.options.allowed_tools)
+            cmd.extend(["--allowed-tools", tools_str])
+
+        cwd = self.options.cwd or os.getcwd()
+
+        if self.options.system_prompt:
+            cmd.extend(["--append-system-prompt", self.options.system_prompt])
+
+        if self.options.effort:
+            cmd.extend(["--effort", self.options.effort])
+
+        if self.options.betas:
+            for beta in self.options.betas:
+                cmd.extend(["--betas", beta])
+
+        if self.options.extra_args:
+            for key, val in self.options.extra_args.items():
+                arg_name = f"--{key}"
+                if isinstance(val, list):
+                    for v in val:
+                        cmd.extend([arg_name, str(v)])
+                else:
+                    cmd.extend([arg_name, str(val)])
+
+        if self.options.mcp_servers:
+            mcp_path = f"/tmp/claude_mcp_servers_{self._session_id}.json"
+            with open(mcp_path, "w") as f:
+                json.dump({"mcpServers": self.options.mcp_servers}, f)
+            cmd.extend(["--mcp-config", mcp_path])
+
+        if self.options.agents:
+            agents_json = json.dumps(self.options.agents)
+            cmd.extend(["--agents", agents_json])
+
+        if self.options.plugins:
+            for plugin_dir in self.options.plugins:
+                cmd.extend(["--plugin-dir", plugin_dir])
+
+        self._log(f"cmd={cmd}")
+        self._stderr_file = open(f"/tmp/claude_cli_stderr_{self._session_id}.log", "wb")
+        self._proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=self._stderr_file,
+            cwd=cwd,
+        )
         self._reader_task = asyncio.create_task(self._read_stdout())
 
     async def _read_stdout(self) -> None:
