@@ -11,6 +11,10 @@ from .rpc import JsonRpcClient
 from .output import OutputView
 from .session_query import SessionQueryMixin
 from .session_permissions import SessionPermissionsMixin
+from .session_heartbeat import HeartbeatMonitor
+from .session_terminal import TerminalAdapter
+from .session_state import StateManager
+from .session_ui import SessionUIHelper
 from .constants import CONVERSATION_REGION_KEY, MAX_RELATED_FILES, MAX_SESSIONS
 from .session_env import (
     _find_python_310_plus,
@@ -77,13 +81,17 @@ class Session(SessionQueryMixin, SessionPermissionsMixin):
         self._response_callback: Optional[Callable[[str], None]] = None
         # Queue of prompts to send after current query completes
         self._queued_prompts: List[str] = []
-        # Heartbeat timer for auto-detecting dead bridges
-        self._heartbeat_timer: Optional[int] = None
+        # Heartbeat monitor for auto-detecting dead bridges
+        self._heartbeat = HeartbeatMonitor(self)
         # Track if inject was sent (to skip "done" status until inject query completes)
         self._inject_pending: bool = False
 
-        # Terminal panel for persistent shell session
-        self.terminal_view = None
+        # Terminal adapter for persistent shell session
+        self._terminal = TerminalAdapter(self)
+        # State manager for persistence
+        self._state = StateManager(self)
+        # UI overlay helper
+        self._ui = SessionUIHelper(self)
 
         # Extract subsession_id and parent_view_id if provided
         if initial_context:
@@ -105,7 +113,6 @@ class Session(SessionQueryMixin, SessionPermissionsMixin):
 
         # Activity tracking for auto-sleep
         self.last_activity: float = time.time()
-        self._stall_warning_shown: bool = False  # Reset per-query; throttles "still waiting" hint
 
         # Plan mode state
         self.plan_mode: bool = False
@@ -115,7 +122,7 @@ class Session(SessionQueryMixin, SessionPermissionsMixin):
         self._pending_retain: Optional[str] = None
 
     def start(self, resume_session_at: str = None) -> None:
-        self._show_connecting_phantom()
+        self._ui.show_connecting()
 
         settings = sublime.load_settings("ClaudeCode.sublime-settings")
         python_path = settings.get("python_path", "python3")
@@ -293,7 +300,7 @@ class Session(SessionQueryMixin, SessionPermissionsMixin):
 
     def _on_init(self, result: dict) -> None:
         if "error" in result:
-            self._clear_overlay_phantom()
+            self._ui.clear_overlay()
             error_msg = result['error'].get('message', str(result['error']))
             print(f"[Claude] init error: {error_msg}")
             self._status("error")
@@ -308,7 +315,7 @@ class Session(SessionQueryMixin, SessionPermissionsMixin):
             else:
                 self.output.text(f"\n*Failed to connect: {error_msg}*\n\nTry `Claude: Restart Session` (Cmd+Shift+R).\n")
             return
-        self._clear_overlay_phantom()
+        self._ui.clear_overlay()
         self.initialized = True
         self.working = False
         self.current_tool = None
@@ -378,30 +385,16 @@ class Session(SessionQueryMixin, SessionPermissionsMixin):
         return env
 
     def _sync_project_retain(self):
-        """Sync sublime project retain setting to file for hook."""
-        cwd = self._cwd()
-        if not cwd:
-            return
+        """Delegate to StateManager."""
         project_data = self.window.project_data() or {}
         project_settings = project_data.get("settings", {})
         retain_content = project_settings.get("claude_retain", "")
-
-        retain_path = os.path.join(cwd, ".claude", "sublime_project_retain.md")
-        if retain_content:
-            os.makedirs(os.path.dirname(retain_path), exist_ok=True)
-            with open(retain_path, "w") as f:
-                f.write(retain_content)
-        elif os.path.exists(retain_path):
-            os.remove(retain_path)
+        self._state.sync_project_retain(retain_content)
 
     def _get_retain_path(self) -> Optional[str]:
         """Get path to session's dynamic retain file."""
-        if not self.session_id:
-            return None
-        cwd = self._cwd()
-        if not cwd:
-            return None
-        return os.path.join(cwd, ".claude", "sessions", f"{self.session_id}_retain.md")
+        return self._state.get_retain_path()
+
 
     def retain(self, content: str = None, append: bool = False) -> Optional[str]:
         """Write to or read session's retain file for compaction.
@@ -413,95 +406,31 @@ class Session(SessionQueryMixin, SessionPermissionsMixin):
         Returns:
             Current retain content if reading, None if writing
         """
-        path = self._get_retain_path()
-        if not path:
-            print("[Claude] Cannot access retain file - no session_id yet")
-            return None
+        return self._state.retain(content, append)
 
-        if content is None:
-            # Read mode
-            if os.path.exists(path):
-                with open(path, "r") as f:
-                    return f.read()
-            return ""
-
-        # Write mode - ensure directory exists
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-
-        mode = "a" if append else "w"
-        with open(path, mode) as f:
-            if append and os.path.exists(path):
-                f.write("\n")
-            f.write(content)
-        print(f"[Claude] Retain file updated: {path}")
-        return None
 
     def clear_retain(self):
         """Clear session's retain file."""
-        path = self._get_retain_path()
-        if path and os.path.exists(path):
-            os.remove(path)
-            print(f"[Claude] Retain file cleared: {path}")
+        self._state.clear_retain()
+
 
     def _strip_comment_only_content(self, content: str) -> str:
         """Strip lines that are only comments or whitespace."""
-        lines = content.split('\n')
-        filtered = [line for line in lines if line.strip() and not line.strip().startswith('#')]
-        return '\n'.join(filtered).strip()
+        return self._state._strip_comment_only_content(content)
+
 
     def _gather_retain_content(self) -> Optional[str]:
         """Gather all retain content from various sources.
 
         Returns combined retain content string, or None if no content found.
         """
-        prompts = []
-        cwd = self._cwd()
+        return self._state.gather_retain_content()
 
-        # 1. Static retain file (.claude/RETAIN.md)
-        if cwd:
-            static_path = os.path.join(cwd, ".claude", "RETAIN.md")
-            if os.path.exists(static_path):
-                try:
-                    with open(static_path, "r") as f:
-                        content = self._strip_comment_only_content(f.read())
-                    if content:
-                        prompts.append(content)
-                except Exception as e:
-                    print(f"[Claude] Error reading static retain: {e}")
-
-        # 2. Sublime project retain file
-        if cwd:
-            sublime_retain_path = os.path.join(cwd, ".claude", "sublime_project_retain.md")
-            if os.path.exists(sublime_retain_path):
-                try:
-                    with open(sublime_retain_path, "r") as f:
-                        content = self._strip_comment_only_content(f.read())
-                    if content:
-                        prompts.append(content)
-                except Exception as e:
-                    print(f"[Claude] Error reading sublime project retain: {e}")
-
-        # 3. Session retain file
-        session_retain = self._strip_comment_only_content(self.retain() or "")
-        if session_retain:
-            prompts.append(session_retain)
-
-        # 4. Profile pre_compact_prompt
-        if self.profile and self.profile.get("pre_compact_prompt"):
-            prompts.append(self.profile["pre_compact_prompt"])
-
-        if prompts:
-            return "\n\n---\n\n".join(prompts)
-        return None
 
     def _inject_retain_midquery(self) -> None:
         """Inject retain content by interrupting and restarting with retain prompt."""
-        content = self._gather_retain_content()
-        if content:
-            print(f"[Claude] Interrupting to inject retain content ({len(content)} chars)")
-            # Store retain content to send after interrupt completes
-            self._pending_retain = f"[retain context]\n\n{content}"
-            self.interrupt(break_channel=False)
+        self._state.inject_retain_midquery()
+
 
     def _build_profile_docs_list(self) -> None:
         """Build list of available docs from profile preload_docs patterns (no reading yet)."""
@@ -791,94 +720,12 @@ class Session(SessionQueryMixin, SessionPermissionsMixin):
         # _on_init will reset _input_mode_entered and call _enter_input_with_draft
 
     def _find_rewind_point(self) -> tuple:
-        """Find the assistant entry uuid to rewind to (before last visible turn).
-        Respects current _pending_resume_at to support consecutive undos.
-        Returns (uuid, undone_prompt) or (None, "") if can't rewind."""
-        jsonl_path = self._find_jsonl_path()
-        if not jsonl_path:
-            return None, ""
-        # Collect user prompt turns and their preceding assistant uuid
-        turns = []  # [(prompt, prev_assistant_uuid)]
-        last_assistant_uuid = None
-        try:
-            with open(jsonl_path, "r") as f:
-                for line in f:
-                    line = line.strip()
-                    if not line:
-                        continue
-                    entry = json.loads(line)
-                    if entry.get("isSidechain") or entry.get("isMeta"):
-                        continue
-                    etype = entry.get("type")
-                    if etype == "assistant":
-                        uuid = entry.get("uuid")
-                        if uuid:
-                            last_assistant_uuid = uuid
-                    elif etype == "user":
-                        msg = entry.get("message", {})
-                        content = msg.get("content", [])
-                        has_tool_result = (
-                            isinstance(content, list) and
-                            any(isinstance(b, dict) and b.get("type") == "tool_result" for b in content)
-                        )
-                        if has_tool_result:
-                            continue
-                        prompt = ""
-                        if isinstance(content, str):
-                            prompt = content
-                        elif isinstance(content, list):
-                            for block in content:
-                                if isinstance(block, dict) and block.get("type") == "text":
-                                    prompt += block.get("text", "")
-                        turns.append((prompt, last_assistant_uuid))
-        except Exception as e:
-            print(f"[Claude] _find_rewind_point error: {e}")
-            return None, ""
-        # If already rewound, find the turn whose prev_assistant_uuid == current rewind point
-        # and rewind one step further back
-        if self._pending_resume_at:
-            # Find which turn we're currently rewound to
-            for i, (prompt, asst_uuid) in enumerate(turns):
-                if asst_uuid == self._pending_resume_at:
-                    # This turn starts after the current rewind point
-                    # We want to undo the turn BEFORE this one
-                    if i < 2:
-                        return None, ""  # Can't undo further
-                    undone_prompt = turns[i - 1][0]
-                    rewind_to = turns[i - 1][1]
-                    if not rewind_to:
-                        return None, ""
-                    return rewind_to, undone_prompt
-            # Fallback: current rewind point not found in turns
-            return None, ""
-        # Normal case: undo the last turn
-        if len(turns) < 2:
-            return None, ""
-        undone_prompt = turns[-1][0]
-        rewind_to = turns[-1][1]
-        if not rewind_to:
-            return None, ""
-        return rewind_to, undone_prompt
+        """Delegate to StateManager."""
+        return self._state.find_rewind_point()
 
     def _find_jsonl_path(self) -> Optional[str]:
-        """Find the JSONL file for this session."""
-        if not self.session_id:
-            return None
-        fname = f"{self.session_id}.jsonl"
-        projects_dir = os.path.expanduser("~/.claude/projects")
-        # Try exact cwd match first
-        cwd = self._cwd()
-        project_key = cwd.replace("/", "-").lstrip("-")
-        exact = os.path.join(projects_dir, project_key, fname)
-        if os.path.exists(exact):
-            return exact
-        # Search all project directories
-        if os.path.isdir(projects_dir):
-            for d in os.listdir(projects_dir):
-                candidate = os.path.join(projects_dir, d, fname)
-                if os.path.exists(candidate):
-                    return candidate
-        return None
+        """Delegate to StateManager."""
+        return self._state.find_jsonl_path()
 
     def interrupt(self, break_channel: bool = True) -> None:
         """Interrupt current query.
@@ -980,35 +827,7 @@ class Session(SessionQueryMixin, SessionPermissionsMixin):
                     view.set_read_only(False)
                     view.run_command("claude_replace", {"start": erase_from, "end": view.size(), "text": ""})
                     view.set_read_only(True)
-        self._show_overlay_phantom("\u23f8 Session paused \u2014 press Enter to wake", color="var(--yellowish)")
-
-    def _get_overlay_phantom_set(self):
-        if not hasattr(self, '_overlay_phantom_set') or self._overlay_phantom_set is None:
-            if self.output and self.output.view:
-                self._overlay_phantom_set = sublime.PhantomSet(self.output.view, "claude_overlay")
-        return self._overlay_phantom_set
-
-    def _show_overlay_phantom(self, html_body: str, color: str = "color(var(--foreground) alpha(0.5))") -> None:
-        ps = self._get_overlay_phantom_set()
-        if not ps or not self.output or not self.output.view:
-            return
-        view = self.output.view
-        content = view.substr(sublime.Region(0, view.size()))
-        last_nl = content.rfind("\n")
-        pt = last_nl if last_nl >= 0 else 0
-        html = f'<body style="margin: 8px 0; color: {color};">{html_body}</body>'
-        ps.update([sublime.Phantom(sublime.Region(pt, pt), html, sublime.LAYOUT_BLOCK)])
-        view.sel().clear()
-        view.sel().add(sublime.Region(view.size(), view.size()))
-        view.show(view.size())
-
-    def _clear_overlay_phantom(self) -> None:
-        ps = self._get_overlay_phantom_set()
-        if ps:
-            ps.update([])
-
-    def _show_connecting_phantom(self) -> None:
-        self._show_overlay_phantom("◎ Connecting...")
+        self._ui.show_overlay("\u23f8 Session paused \u2014 press Enter to wake", color="var(--yellowish)")
 
     def restart(self) -> None:
         """Restart session — sleep then immediately wake."""
@@ -1024,7 +843,7 @@ class Session(SessionQueryMixin, SessionPermissionsMixin):
             return
         if not self.session_id:
             return
-        self._clear_overlay_phantom()
+        self._ui.clear_overlay()
         if self.output and self.output.view:
             view = self.output.view
             view.settings().erase("claude_sleeping")
@@ -1044,65 +863,12 @@ class Session(SessionQueryMixin, SessionPermissionsMixin):
     # ─── Heartbeat & Auto-Restart ─────────────────────────────────────────
 
     def _start_heartbeat(self) -> None:
-        """Start periodic heartbeat to detect dead bridges early."""
-        self._stop_heartbeat()
-        self._heartbeat_timer = sublime.set_timeout(self._do_heartbeat, 15000)
+        """Delegate to HeartbeatMonitor."""
+        self._heartbeat.start()
 
     def _stop_heartbeat(self) -> None:
-        """Stop the heartbeat timer."""
-        if self._heartbeat_timer:
-            sublime.cancel_timeout(self._heartbeat_timer)
-            self._heartbeat_timer = None
-
-    def _do_heartbeat(self) -> None:
-        """Periodic check: if bridge died silently, show warning."""
-        self._heartbeat_timer = None
-        if not self.client or not self.initialized:
-            return
-        if not self.client.is_alive():
-            # Bridge died silently — auto-restart. If we were mid-query, the
-            # in-flight response is lost; surface it to the user so they can resubmit.
-            if self.working:
-                print("[Claude] Heartbeat: bridge died mid-query, auto-restarting (in-flight query lost)...")
-                try:
-                    self.output.text("\n\n*Bridge process died mid-query. Auto-restarting — please resubmit your last prompt.*\n")
-                except Exception:
-                    pass
-            else:
-                print("[Claude] Heartbeat: bridge died silently, auto-restarting...")
-            self._auto_restart_bridge()
-        elif self._is_stalled():
-            stalled_for = time.time() - self.last_activity
-            print(f"[Claude] Heartbeat: bridge stalled ({stalled_for:.0f}s no events), auto-restarting...")
-            try:
-                self.output.text("\n\n*No response for ~2 min — likely stalled. Auto-restarting; please resubmit your last prompt.*\n")
-            except Exception:
-                pass
-            self._auto_restart_bridge()
-        else:
-            if self.working and not self._stall_warning_shown:
-                silent_for = time.time() - self.last_activity
-                if silent_for > 60 and not (
-                    self.output.pending_permission
-                    or self.output.pending_plan
-                    or self.output.pending_question
-                ):
-                    self._stall_warning_shown = True
-                    self._status("waiting for response...")
-                    print(f"[Claude] Heartbeat: {silent_for:.0f}s of silence — will auto-restart at 120s if no events arrive")
-            # Schedule next beat
-            self._start_heartbeat()
-
-    def _is_stalled(self) -> bool:
-        """Bridge is alive but produced no events for too long while working."""
-        if not self.working:
-            return False
-        if (time.time() - self.last_activity) <= 120:
-            return False
-        # User is reviewing a permission/plan/question — not a stall.
-        if self.output.pending_permission or self.output.pending_plan or self.output.pending_question:
-            return False
-        return True
+        """Delegate to HeartbeatMonitor."""
+        self._heartbeat.stop()
 
     def _ensure_bridge_alive(self, silent: bool = False) -> bool:
         """Check bridge health; auto-restart if dead. Returns True if alive."""
@@ -1147,16 +913,8 @@ class Session(SessionQueryMixin, SessionPermissionsMixin):
 
     def _persist_state(self, state: str) -> None:
         """Save session with explicit state override."""
-        if not self.session_id:
-            return
-        sessions = load_saved_sessions()
-        for i, s in enumerate(sessions):
-            if s.get("session_id") == self.session_id:
-                sessions[i]["state"] = state
-                save_sessions(sessions)
-                return
-        # Entry doesn't exist yet — create it
-        self._save_session()
+        self._state.persist_state(state)
+
 
     def _release_persona(self) -> None:
         """Release acquired persona."""
@@ -1181,7 +939,7 @@ class Session(SessionQueryMixin, SessionPermissionsMixin):
     def _on_notification(self, method: str, params: dict) -> None:
         # Track stream activity for stall detection (any event from the bridge counts).
         self.last_activity = time.time()
-        self._stall_warning_shown = False
+        self._heartbeat.reset_stall_warning()
 
         if method == "permission_request":
             self._handle_permission_request(params)
@@ -1212,12 +970,7 @@ class Session(SessionQueryMixin, SessionPermissionsMixin):
             return
 
         if method == "terminal_output":
-            text = params.get("text", "")
-            if text and self.terminal_view:
-                try:
-                    self.terminal_view.append(text)
-                except Exception as e:
-                    print(f"[Claude] terminal output error: {e}")
+            self._terminal.handle_output(params.get("text", ""))
             return
 
         if method == "notification_wake":
@@ -1441,17 +1194,14 @@ class Session(SessionQueryMixin, SessionPermissionsMixin):
                         else:
                             self.query(wake_prompt, display_prompt=f"⚙ {summary}", silent=True)
 
+    @property
+    def terminal_view(self):
+        """Backward-compat property for external access to terminal view."""
+        return self._terminal.terminal_view
+
     def toggle_terminal(self) -> None:
         """Toggle the integrated terminal panel."""
-        if not self.terminal_view:
-            from .terminal_view import TerminalView
-            self.terminal_view = TerminalView(self.window)
-        if self.terminal_view.is_visible():
-            self.terminal_view.hide()
-        else:
-            self.terminal_view.show(focus=False)
-            if self.client and self.initialized:
-                self.client.send("terminal_start", {})
+        self._terminal.toggle()
 
     def _set_name(self, name: str) -> None:
         """Set session name and update UI."""
@@ -1462,46 +1212,8 @@ class Session(SessionQueryMixin, SessionPermissionsMixin):
 
     def _save_session(self) -> None:
         """Save session info to disk for later resume."""
-        if not self.session_id:
-            return
-        sessions = load_saved_sessions()
-        # Update or add this session — always move to front (most recently active)
-        entry = None
-        for i, s in enumerate(sessions):
-            if s.get("session_id") == self.session_id:
-                entry = sessions.pop(i)
-                break
-        if not entry:
-            entry = {"session_id": self.session_id}
-        entry["name"] = self.name
-        entry["project"] = self._cwd()
-        entry["total_cost"] = self.total_cost
-        entry["query_count"] = self.query_count
-        entry["backend"] = self.backend
-        entry["last_activity"] = self.last_activity
-        if self.tags:
-            entry["tags"] = self.tags.copy()
-        else:
-            entry.pop("tags", None)
-        if self._usage_history:
-            entry["usage_history"] = self._usage_history[-50:]  # Keep last 50 queries
-        else:
-            entry.pop("usage_history", None)
-        # Derive state from current session state
-        if self.client is not None and self.initialized:
-            entry["state"] = "open"
-        elif self.session_id and self.client is None and not self.initialized:
-            entry["state"] = "sleeping"
-        else:
-            entry.setdefault("state", "closed")
-        if self._pending_resume_at:
-            entry["resume_session_at"] = self._pending_resume_at
-        else:
-            entry.pop("resume_session_at", None)
-        sessions.insert(0, entry)
-        # Keep last 200 sessions
-        sessions = sessions[:MAX_SESSIONS]
-        save_sessions(sessions)
+        self._state.save()
+
 
     def _status(self, text: str) -> None:
         """Update status on output view only."""
