@@ -633,32 +633,8 @@ class Session(SessionQueryMixin, SessionPermissionsMixin):
         self._apply_sleep_ui()
 
     def _apply_sleep_ui(self) -> None:
-        """Apply sleeping state to view UI."""
-        if not self.output or not self.output.view:
-            return
-        if not self.session_id:
-            return
-        view = self.output.view
-        view.settings().set("claude_sleeping", True)
-        self.output.set_name(self.display_name)
-        self._status("sleeping")
-        if self.output.is_input_mode():
-            self.draft_prompt = self.output.get_input_text().strip()
-            self.output.exit_input_mode(keep_text=False)
-            self._input_mode_entered = False
-        else:
-            # Clean stale input marker from view content (e.g. after restart)
-            # Only remove if the last non-empty line is exactly the marker
-            content = view.substr(sublime.Region(0, view.size()))
-            lines = content.rstrip("\n").split("\n")
-            if lines and lines[-1].strip() == "\u25ce":
-                # Find the start of this last marker line
-                erase_from = content.rstrip("\n").rfind("\n" + lines[-1])
-                if erase_from >= 0:
-                    view.set_read_only(False)
-                    view.run_command("claude_replace", {"start": erase_from, "end": view.size(), "text": ""})
-                    view.set_read_only(True)
-        self._ui.show_overlay("\u23f8 Session paused \u2014 press Enter to wake", color="var(--yellowish)")
+        """Delegate to SessionUIHelper."""
+        self._ui.apply_sleep()
 
     def restart(self) -> None:
         """Restart session — sleep then immediately wake."""

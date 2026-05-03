@@ -41,3 +41,30 @@ class SessionUIHelper:
     def show_connecting(self) -> None:
         """Show the 'Connecting...' overlay."""
         self.show_overlay("◎ Connecting...")
+
+    def apply_sleep(self) -> None:
+        """Apply sleeping state to view UI."""
+        s = self._s
+        if not s.output or not s.output.view:
+            return
+        if not s.session_id:
+            return
+        view = s.output.view
+        view.settings().set("claude_sleeping", True)
+        s.output.set_name(s.display_name)
+        s._status_mgr.status("sleeping")
+        if s.output.is_input_mode():
+            s.draft_prompt = s.output.get_input_text().strip()
+            s.output.exit_input_mode(keep_text=False)
+            s._input_mode_entered = False
+        else:
+            # Clean stale input marker from view content
+            content = view.substr(sublime.Region(0, view.size()))
+            lines = content.rstrip("\n").split("\n")
+            if lines and lines[-1].strip() == "\u25ce":
+                erase_from = content.rstrip("\n").rfind("\n" + lines[-1])
+                if erase_from >= 0:
+                    view.set_read_only(False)
+                    view.run_command("claude_replace", {"start": erase_from, "end": view.size(), "text": ""})
+                    view.set_read_only(True)
+        self.show_overlay("\u23f8 Session paused \u2014 press Enter to wake", color="var(--yellowish)")
