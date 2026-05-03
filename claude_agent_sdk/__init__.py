@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import tempfile
 import uuid
 from dataclasses import dataclass, field
 from typing import Any, AsyncIterator, Callable, List, Optional, Union
@@ -249,9 +250,9 @@ class ClaudeSDKClient:
                 else:
                     cmd.extend([arg_name, str(val)])
 
-        # MCP servers
+        # MCP servers — use a per-session temp file to avoid races
         if self.options.mcp_servers:
-            mcp_path = "/tmp/claude_mcp_servers.json"
+            mcp_path = f"/tmp/claude_mcp_servers_{self._session_id}.json"
             with open(mcp_path, "w") as f:
                 json.dump({"mcpServers": self.options.mcp_servers}, f)
             cmd.extend(["--mcp-config", mcp_path])
@@ -267,10 +268,10 @@ class ClaudeSDKClient:
                 cmd.extend(["--plugin-dir", plugin_dir])
 
         self._log(f"cmd={cmd}")
-        # Redirect stderr to a log file instead of a pipe.  With --verbose the
-        # CLI can write more than the OS pipe buffer (~64 KB); if nobody drains
-        # stderr the subprocess deadlocks and stdout stops forever.
-        self._stderr_file = open("/tmp/claude_cli_stderr.log", "wb")
+        # Redirect stderr to a per-session log file instead of a pipe.
+        # With --verbose the CLI can write more than the OS pipe buffer (~64 KB);
+        # if nobody drains stderr the subprocess deadlocks and stdout stops forever.
+        self._stderr_file = open(f"/tmp/claude_cli_stderr_{self._session_id}.log", "wb")
         self._proc = await asyncio.create_subprocess_exec(
             *cmd,
             stdin=asyncio.subprocess.PIPE,

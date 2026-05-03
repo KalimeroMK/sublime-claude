@@ -952,23 +952,6 @@ You are subsession **{subsession_id}**. Call signal_complete(session_id={view_id
         self._got_first_delta = False
         self.query_id = id  # Store for inject_message to know query is active
 
-        async def _drain_stale():
-            """Drain stale buffered messages from previous query's background work (e.g. auto-compaction).
-            Call after client.query() but before receive_response().
-            At this point, anything already in the buffer predates our query."""
-            stale_iter = self.client.receive_messages().__aiter__()
-            count = 0
-            while True:
-                try:
-                    # Very short timeout — only catches already-buffered messages
-                    msg = await asyncio.wait_for(stale_iter.__anext__(), timeout=0.05)
-                    count += 1
-                    _bridge_log(f"pre-drain stale: {type(msg).__name__}\n")
-                    # Don't emit stale messages — they'd confuse the current conversation
-                except (asyncio.TimeoutError, StopAsyncIteration):
-                    break
-            if count:
-                _bridge_log(f"pre-drain: consumed {count} stale messages\n")
         async def run_query():
             if images:
                 # Build multimodal content
@@ -983,8 +966,6 @@ You are subsession **{subsession_id}**. Call signal_complete(session_id={view_id
                 await self.client.query(message_stream())
             else:
                 await self.client.query(prompt)
-            # Drain stale messages before reading response
-            await _drain_stale()
             turn_done = False
             async for message in self.client.receive_messages():
                 # Track background tasks
@@ -1316,11 +1297,11 @@ You are subsession **{subsession_id}**. Call signal_complete(session_id={view_id
         sys.stderr.write("=== BRIDGE STARTING WITH 1GB BUFFER ===\n")
         sys.stderr.flush()
 
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         # Increase buffer limit to 1GB to handle large tool results (e.g., images)
         buffer_limit = 1024 * 1024 * 1024
-        reader = asyncio.StreamReader(limit=buffer_limit, loop=loop)
-        protocol = asyncio.StreamReaderProtocol(reader, loop=loop)
+        reader = asyncio.StreamReader(limit=buffer_limit)
+        protocol = asyncio.StreamReaderProtocol(reader)
         await loop.connect_read_pipe(lambda: protocol, sys.stdin)
 
         # Log to verify this code is running
