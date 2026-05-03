@@ -18,6 +18,7 @@ from .session_ui import SessionUIHelper
 from .session_status import StatusManager
 from .session_notifications import NotificationHandler
 from .session_services import ServiceAdapter
+from .session_context import ContextManager
 from .constants import CONVERSATION_REGION_KEY, MAX_RELATED_FILES
 from .session_env import (
     _find_python_310_plus,
@@ -100,6 +101,8 @@ class Session(SessionQueryMixin, SessionPermissionsMixin):
         self._notifications = NotificationHandler(self)
         # External service adapter
         self._services = ServiceAdapter(self)
+        # Context manager for pending files/selections/images
+        self._context = ContextManager(self)
 
         # Extract subsession_id and parent_view_id if provided
         if initial_context:
@@ -468,208 +471,28 @@ class Session(SessionQueryMixin, SessionPermissionsMixin):
             print(f"[Claude] preload_docs error: {e}")
 
     def add_context_file(self, path: str, content: str) -> None:
-        """Add a file to pending context, plus auto-detect related files."""
-        name = os.path.basename(path)
-        self.pending_context.append(ContextItem("file", name, f"File: {path}\n```\n{content}\n```"))
-        self._add_related_files(path, content)
-        self._update_context_display()
-
-    def _add_related_files(self, path: str, content: str) -> None:
-        """Auto-detect and add related files (tests, imports, siblings) to context.
-
-        Limits to 5 related files to avoid context bloat.
-        Only adds files that exist and aren't already in pending context.
-        """
-        import re
-
-        dirname = os.path.dirname(path)
-        basename = os.path.basename(path)
-        name_no_ext = os.path.splitext(basename)[0]
-        ext = os.path.splitext(basename)[1]
-
-        # Collect candidate paths
-        candidates = set()
-
-        # --- Naming convention siblings ---
-        suffix_variants = ["_test", "_spec", "Test", "Spec", ".test", ".spec"]
-        prefix_variants = ["test_", "spec_"]
-        for suffix in suffix_variants:
-            candidates.add(os.path.join(dirname, name_no_ext + suffix + ext))
-        for prefix in prefix_variants:
-            candidates.add(os.path.join(dirname, prefix + name_no_ext + ext))
-
-        # Also check for same-named files in parent/child folders (e.g. controllers)
-        if dirname:
-            parent = os.path.dirname(dirname)
-            if parent:
-                # e.g. User.php -> ../controllers/UserController.php
-                candidates.add(os.path.join(parent, "controllers", name_no_ext + "Controller" + ext))
-                candidates.add(os.path.join(parent, "models", name_no_ext + ext))
-                candidates.add(os.path.join(parent, "views", name_no_ext + ext))
-
-        # --- Parse imports from first 30 lines ---
-        lines = content.split("\n")[:30]
-        for line in lines:
-            line = line.strip()
-            if not line or line.startswith("#") or line.startswith("//"):
-                continue
-
-            # Python: from x.y import z  or  import x.y
-            if line.startswith("from ") and " import " in line:
-                mod = line.split()[1].replace(".", "/")
-                candidates.add(os.path.join(dirname, mod + ".py"))
-                for folder in self.window.folders():
-                    candidates.add(os.path.join(folder, mod + ".py"))
-                    candidates.add(os.path.join(folder, mod, "__init__.py"))
-            elif line.startswith("import "):
-                mod = line.split()[1].split(".")[0]
-                candidates.add(os.path.join(dirname, mod + ".py"))
-                for folder in self.window.folders():
-                    candidates.add(os.path.join(folder, mod + ".py"))
-
-            # JS/TS: import ... from './relative' or require('./relative')
-            elif ("from '" in line or 'from "' in line) or "require(" in line:
-                m = re.search(r"[from\srequire]\s*['\"]([^'\"]+)['\"]", line)
-                if m:
-                    rel = m.group(1)
-                    if rel.startswith("."):
-                        resolved = os.path.normpath(os.path.join(dirname, rel))
-                        candidates.add(resolved)
-                        # Also try with .js, .ts, .jsx, .tsx extensions
-                        for e in (".js", ".ts", ".jsx", ".tsx", ".vue"):
-                            candidates.add(resolved + e)
-                            if not resolved.endswith(ext):
-                                candidates.add(os.path.join(resolved, "index" + e))
-
-            # PHP: use Namespace\Class;  or  require/include 'path'
-            elif line.startswith("use ") and "\\" in line:
-                ns = line[4:].rstrip(";").strip()
-                parts = ns.split("\\")
-                # Try mapping last segment to file
-                for folder in self.window.folders():
-                    candidates.add(os.path.join(folder, *parts) + ".php")
-                    candidates.add(os.path.join(folder, "src", *parts) + ".php")
-            elif line.startswith("require") or line.startswith("include"):
-                m = re.search(r"['\"]([^'\"]+)['\"]", line)
-                if m:
-                    rel = m.group(1)
-                    if not rel.startswith("http"):
-                        candidates.add(os.path.normpath(os.path.join(dirname, rel)))
-
-            # Go: import "package/path"
-            elif line.startswith('import "') or line.startswith("import '"):
-                m = re.search(r'["\']([^"\']+)["\']', line)
-                if m:
-                    pkg = m.group(1).split("/")[-1]
-                    candidates.add(os.path.join(dirname, pkg + ".go"))
-                    for folder in self.window.folders():
-                        candidates.add(os.path.join(folder, pkg + ".go"))
-
-        # Filter: must exist, be a file, not self, not already in pending context
-        already = set()
-        for item in self.pending_context:
-            if item.content.startswith("File: ") or item.content.startswith("Related file: "):
-                first_line = item.content.split("\n")[0]
-                if first_line.startswith("File: "):
-                    already.add(os.path.abspath(first_line[6:]))
-                elif first_line.startswith("Related file: "):
-                    already.add(os.path.abspath(first_line[14:]))
-
-        added = 0
-        for cand in candidates:
-            if added >= MAX_RELATED_FILES:
-                break
-            if not cand or cand == path:
-                continue
-            if not os.path.isfile(cand):
-                continue
-            abs_cand = os.path.abspath(cand)
-            if abs_cand in already:
-                continue
-            # Skip common build/vendor folders
-            if "/node_modules/" in abs_cand or "/vendor/" in abs_cand or "/__pycache__/" in abs_cand:
-                continue
-            try:
-                with open(cand, "r", encoding="utf-8", errors="ignore") as f:
-                    related_content = f.read()
-                rel_name = os.path.basename(cand)
-                self.pending_context.append(ContextItem(
-                    "file",
-                    rel_name,
-                    f"Related file: {cand}\n```\n{related_content}\n```"
-                ))
-                already.add(abs_cand)
-                added += 1
-            except Exception:
-                continue
-
-        if added:
-            print(f"[Claude] Smart Context: added {added} related file(s) for {basename}")
+        """Delegate to ContextManager."""
+        self._context.add_file(path, content)
 
     def add_context_selection(self, path: str, content: str) -> None:
-        """Add a selection to pending context."""
-        name = os.path.basename(path) if path else "selection"
-        self.pending_context.append(ContextItem("selection", name, f"Selection from {path}:\n```\n{content}\n```"))
-        self._update_context_display()
+        """Delegate to ContextManager."""
+        self._context.add_selection(path, content)
 
     def add_context_folder(self, path: str) -> None:
-        """Add a folder path to pending context."""
-        name = os.path.basename(path) + "/"
-        self.pending_context.append(ContextItem("folder", name, f"Folder: {path}"))
-        self._update_context_display()
+        """Delegate to ContextManager."""
+        self._context.add_folder(path)
 
     def add_context_image(self, image_data: bytes, mime_type: str) -> None:
-        """Add an image to pending context."""
-        import base64
-        import tempfile
-
-        # Save to temp file for reference
-        ext = ".png" if "png" in mime_type else ".jpg" if "jpeg" in mime_type or "jpg" in mime_type else ".img"
-        with tempfile.NamedTemporaryFile(suffix=ext, delete=False) as f:
-            f.write(image_data)
-            temp_path = f.name
-
-        # Store base64 encoded image
-        encoded = base64.b64encode(image_data).decode('utf-8')
-        # Use special format that query() will detect
-        name = f"image{ext}"
-        self.pending_context.append(ContextItem(
-            "image",
-            name,
-            f"__IMAGE__:{mime_type}:{encoded}"  # Special marker for image data
-        ))
-        print(f"[Claude] Added image to context: {name} ({len(image_data)} bytes, saved to {temp_path})")
-        self._update_context_display()
+        """Delegate to ContextManager."""
+        self._context.add_image(image_data, mime_type)
 
     def clear_context(self) -> None:
-        """Clear pending context."""
-        self.pending_context = []
-        self._update_context_display()
-
-    def _update_context_display(self) -> None:
-        """Update output view with pending context."""
-        self.output.set_pending_context(self.pending_context)
+        """Delegate to ContextManager."""
+        self._context.clear()
 
     def _build_prompt_with_context(self, prompt: str) -> tuple:
-        """Build full prompt with pending context.
-
-        Returns:
-            (full_prompt, images) where images is list of {"mime_type": str, "data": str}
-        """
-        if not self.pending_context:
-            return prompt, []
-
-        parts = []
-        images = []
-        for item in self.pending_context:
-            if item.content.startswith("__IMAGE__:"):
-                # Extract image data: __IMAGE__:mime_type:base64data
-                _, mime_type, data = item.content.split(":", 2)
-                images.append({"mime_type": mime_type, "data": data})
-            else:
-                parts.append(item.content)
-        parts.append(prompt)
-        return "\n\n".join(parts), images
+        """Delegate to ContextManager."""
+        return self._context.build_prompt(prompt)
 
     def undo_message(self) -> None:
         """Undo last conversation turn by rewinding the CLI session."""
