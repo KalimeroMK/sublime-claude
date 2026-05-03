@@ -1068,9 +1068,28 @@ class Session(SessionQueryMixin, SessionPermissionsMixin):
             else:
                 print("[Claude] Heartbeat: bridge died silently, auto-restarting...")
             self._auto_restart_bridge()
+        elif self._is_stalled():
+            stalled_for = time.time() - self.last_activity
+            print(f"[Claude] Heartbeat: bridge stalled ({stalled_for:.0f}s no events), auto-restarting...")
+            try:
+                self.output.text("\n\n*No response for 2+ minutes — likely stalled after screen sleep. Auto-restarting; please resubmit your last prompt.*\n")
+            except Exception:
+                pass
+            self._auto_restart_bridge()
         else:
             # Schedule next beat
             self._start_heartbeat()
+
+    def _is_stalled(self) -> bool:
+        """Bridge is alive but produced no events for too long while working."""
+        if not self.working:
+            return False
+        if (time.time() - self.last_activity) <= 120:
+            return False
+        # User is reviewing a permission/plan/question — not a stall.
+        if self.output.pending_permission or self.output.pending_plan or self.output.pending_question:
+            return False
+        return True
 
     def _ensure_bridge_alive(self, silent: bool = False) -> bool:
         """Check bridge health; auto-restart if dead. Returns True if alive."""
@@ -1147,6 +1166,9 @@ class Session(SessionQueryMixin, SessionPermissionsMixin):
     # - vibekanban MCP server: watch_kanban for ticket state changes
 
     def _on_notification(self, method: str, params: dict) -> None:
+        # Track stream activity for stall detection (any event from the bridge counts).
+        self.last_activity = time.time()
+
         if method == "permission_request":
             self._handle_permission_request(params)
             return
