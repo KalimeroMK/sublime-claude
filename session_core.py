@@ -17,6 +17,7 @@ from .session_state import StateManager
 from .session_ui import SessionUIHelper
 from .session_status import StatusManager
 from .session_notifications import NotificationHandler
+from .session_services import ServiceAdapter
 from .constants import CONVERSATION_REGION_KEY, MAX_RELATED_FILES
 from .session_env import (
     _find_python_310_plus,
@@ -97,6 +98,8 @@ class Session(SessionQueryMixin, SessionPermissionsMixin):
         self._status_mgr = StatusManager(self)
         # Bridge notification dispatcher
         self._notifications = NotificationHandler(self)
+        # External service adapter
+        self._services = ServiceAdapter(self)
 
         # Extract subsession_id and parent_view_id if provided
         if initial_context:
@@ -982,111 +985,16 @@ class Session(SessionQueryMixin, SessionPermissionsMixin):
         """Delegate to StatusManager."""
         self._status_mgr.animate()
 
-    def subscribe_to_service(
-        self,
-        notification_type: str,
-        params: dict,
-        wake_prompt: str
-    ) -> dict:
-        """Subscribe to a service - handles HTTP endpoints for channel services.
+    def subscribe_to_service(self, notification_type: str, params: dict, wake_prompt: str) -> dict:
+        """Delegate to ServiceAdapter."""
+        return self._services.subscribe_to_service(notification_type, params, wake_prompt)
 
-        This is synchronous and returns a result dict.
-        """
-        import urllib.request
-        import json as json_mod
-        import socket as sock_mod
+    def register_notification(self, notification_type: str, params: dict, wake_prompt: str,
+                               notification_id: Optional[str] = None, callback: Optional[callable] = None) -> None:
+        """Delegate to ServiceAdapter."""
+        self._services.register_notification(notification_type, params, wake_prompt, notification_id, callback)
 
-        # First, get services list synchronously from notalone
-        try:
-            sock = sock_mod.socket(sock_mod.AF_UNIX, sock_mod.SOCK_STREAM)
-            sock.settimeout(5)
-            sock.connect(os.path.expanduser("~/.notalone/notalone.sock"))
-            sock.sendall((json_mod.dumps({"method": "services"}) + "\n").encode())
-            response = sock.recv(65536).decode().strip()
-            sock.close()
-            services_data = json_mod.loads(response)
-            services = services_data.get("services", [])
-        except Exception as e:
-            print(f"[Claude] Failed to get services: {e}")
-            services = []
-
-        # Check if this is a channel service with an endpoint
-        endpoint = None
-        for svc in services:
-            if svc.get("type") == notification_type and svc.get("endpoint"):
-                endpoint = svc.get("endpoint")
-                break
-
-        # If it has an endpoint, POST to it first
-        if endpoint:
-            view_id = self.output.view.id() if self.output and self.output.view else 0
-            session_id = params.get("session_id", f"sublime.{view_id}")
-            try:
-                req = urllib.request.Request(
-                    endpoint,
-                    data=json_mod.dumps({"session_id": session_id}).encode(),
-                    headers={"Content-Type": "application/json"},
-                    method="POST"
-                )
-                with urllib.request.urlopen(req, timeout=5) as resp:
-                    result = resp.read().decode()
-                    print(f"[Claude] Subscribed to {notification_type}: {result}")
-            except Exception as e:
-                print(f"[Claude] Failed to subscribe to {notification_type}: {e}")
-                return {"error": str(e)}
-
-        # Now register with notalone daemon (simple version, no callback)
-        if self.client:
-            self.client.send("register_notification", {
-                "notification_type": notification_type,
-                "params": params,
-                "wake_prompt": wake_prompt
-            })
-        view_id = self.output.view.id() if self.output and self.output.view else 0
-        return {"ok": True, "notification_type": notification_type, "session_id": params.get("session_id", f"sublime.{view_id}")}
-
-    def register_notification(
-        self,
-        notification_type: str,
-        params: dict,
-        wake_prompt: str,
-        notification_id: Optional[str] = None,
-        callback: Optional[callable] = None
-    ) -> None:
-        """Register a notification via notalone2 daemon.
-
-        Args:
-            notification_type: 'timer', 'subsession_complete', 'ticket_update', 'channel'
-            params: Type-specific parameters
-            wake_prompt: Prompt to inject when notification fires
-            notification_id: Optional custom notification ID
-            callback: Optional callback for result
-        """
-        if not self.client:
-            return
-
-        self.client.send("register_notification", {
-            "notification_type": notification_type,
-            "params": params,
-            "wake_prompt": wake_prompt,
-            "notification_id": notification_id
-        }, callback)
-
-    def signal_subsession_complete(
-        self,
-        result_summary: Optional[str] = None,
-        callback: Optional[callable] = None
-    ) -> None:
-        """Signal that this subsession has completed.
-
-        Args:
-            result_summary: Optional summary of what was accomplished
-            callback: Optional callback for result
-        """
-        if not self.client:
-            return
-
-        self.client.send("signal_subsession_complete", {
-            "result_summary": result_summary
-        }, callback)
+    def signal_subsession_complete(self, result_summary: Optional[str] = None, callback: Optional[callable] = None) -> None:
+        """Delegate to ServiceAdapter."""
+        self._services.signal_subsession_complete(result_summary, callback)
 
