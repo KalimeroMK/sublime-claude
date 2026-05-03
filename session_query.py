@@ -26,6 +26,7 @@ class SessionQueryMixin:
 
         self.working = True
         self.last_activity = time.time()  # Reset stall watchdog for the new query
+        self._stall_warning_shown = False  # Reset 30s "still waiting" hint
         self.query_count += 1
         self.draft_prompt = ""  # Clear draft — query submitted
         self._pending_resume_at = None  # New query advances past any rewind point
