@@ -1044,7 +1044,7 @@ class Session(SessionQueryMixin, SessionPermissionsMixin):
     def _start_heartbeat(self) -> None:
         """Start periodic heartbeat to detect dead bridges early."""
         self._stop_heartbeat()
-        self._heartbeat_timer = sublime.set_timeout(self._do_heartbeat, 10000)
+        self._heartbeat_timer = sublime.set_timeout(self._do_heartbeat, 15000)
 
     def _stop_heartbeat(self) -> None:
         """Stop the heartbeat timer."""
@@ -1073,21 +1073,21 @@ class Session(SessionQueryMixin, SessionPermissionsMixin):
             stalled_for = time.time() - self.last_activity
             print(f"[Claude] Heartbeat: bridge stalled ({stalled_for:.0f}s no events), auto-restarting...")
             try:
-                self.output.text("\n\n*No response for ~1 min — likely stalled. Auto-restarting; please resubmit your last prompt.*\n")
+                self.output.text("\n\n*No response for ~2 min — likely stalled. Auto-restarting; please resubmit your last prompt.*\n")
             except Exception:
                 pass
             self._auto_restart_bridge()
         else:
             if self.working and not self._stall_warning_shown:
                 silent_for = time.time() - self.last_activity
-                if silent_for > 20 and not (
+                if silent_for > 60 and not (
                     self.output.pending_permission
                     or self.output.pending_plan
                     or self.output.pending_question
                 ):
                     self._stall_warning_shown = True
                     self._status("waiting for response...")
-                    print(f"[Claude] Heartbeat: {silent_for:.0f}s of silence — will auto-restart at 45s if no events arrive")
+                    print(f"[Claude] Heartbeat: {silent_for:.0f}s of silence — will auto-restart at 120s if no events arrive")
             # Schedule next beat
             self._start_heartbeat()
 
@@ -1095,7 +1095,7 @@ class Session(SessionQueryMixin, SessionPermissionsMixin):
         """Bridge is alive but produced no events for too long while working."""
         if not self.working:
             return False
-        if (time.time() - self.last_activity) <= 45:
+        if (time.time() - self.last_activity) <= 120:
             return False
         # User is reviewing a permission/plan/question — not a stall.
         if self.output.pending_permission or self.output.pending_plan or self.output.pending_question:
@@ -1178,11 +1178,8 @@ class Session(SessionQueryMixin, SessionPermissionsMixin):
 
     def _on_notification(self, method: str, params: dict) -> None:
         # Track stream activity for stall detection (any event from the bridge counts).
-        was_silent = self.working and (time.time() - self.last_activity) > 5
         self.last_activity = time.time()
         self._stall_warning_shown = False
-        if was_silent:
-            print(f"[Claude] first event after silence: method={method}, type={params.get('type', '?')}")
 
         if method == "permission_request":
             self._handle_permission_request(params)
