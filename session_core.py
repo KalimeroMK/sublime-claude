@@ -19,6 +19,7 @@ from .session_status import StatusManager
 from .session_notifications import NotificationHandler
 from .session_services import ServiceAdapter
 from .session_context import ContextManager
+from .session_bridge import BridgeManager
 from .constants import CONVERSATION_REGION_KEY, MAX_RELATED_FILES
 from .session_env import (
     _find_python_310_plus,
@@ -103,6 +104,8 @@ class Session(SessionQueryMixin, SessionPermissionsMixin):
         self._services = ServiceAdapter(self)
         # Context manager for pending files/selections/images
         self._context = ContextManager(self)
+        # Bridge lifecycle manager
+        self._bridge = BridgeManager(self)
 
         # Extract subsession_id and parent_view_id if provided
         if initial_context:
