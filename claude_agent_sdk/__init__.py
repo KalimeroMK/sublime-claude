@@ -126,6 +126,7 @@ class ClaudeSDKClient:
         self._message_queue: asyncio.Queue[Any] = asyncio.Queue()
         self._reader_task: Optional[asyncio.Task] = None
         self._proc: Optional[asyncio.subprocess.Process] = None
+        self._stderr_file: Optional[Any] = None
         self._interrupted = False
         self._model: Optional[str] = options.model
         self._log_path = "/tmp/claude_bridge.log"
@@ -266,11 +267,15 @@ class ClaudeSDKClient:
                 cmd.extend(["--plugin-dir", plugin_dir])
 
         self._log(f"cmd={cmd}")
+        # Redirect stderr to a log file instead of a pipe.  With --verbose the
+        # CLI can write more than the OS pipe buffer (~64 KB); if nobody drains
+        # stderr the subprocess deadlocks and stdout stops forever.
+        self._stderr_file = open("/tmp/claude_cli_stderr.log", "wb")
         self._proc = await asyncio.create_subprocess_exec(
             *cmd,
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
+            stderr=self._stderr_file,
             cwd=cwd,
         )
 
@@ -329,6 +334,12 @@ class ClaudeSDKClient:
                 except ProcessLookupError:
                     pass
                 self._proc = None
+            if self._stderr_file:
+                try:
+                    self._stderr_file.close()
+                except Exception:
+                    pass
+                self._stderr_file = None
 
     def _convert_event(self, data: dict) -> Any:
         etype = data.get("type")
@@ -404,6 +415,12 @@ class ClaudeSDKClient:
                 await self._reader_task
             except asyncio.CancelledError:
                 pass
+        if self._stderr_file:
+            try:
+                self._stderr_file.close()
+            except Exception:
+                pass
+            self._stderr_file = None
 
     async def disconnect(self) -> None:
         """Clean up resources."""
