@@ -963,6 +963,13 @@ You are subsession **{subsession_id}**. Call signal_complete(session_id={view_id
             except (asyncio.CancelledError, Exception):
                 pass
 
+        # Kill lingering CLI process so the next one can acquire the session lock
+        if self.client:
+            try:
+                await self.client.interrupt()
+            except Exception:
+                pass
+
         self.interrupted = False  # Reset at start of query
         self._got_first_delta = False
         self.query_id = id  # Store for inject_message to know query is active

@@ -188,6 +188,13 @@ class ClaudeSDKClient:
     async def _start_query(self, prompt: Union[str, list]) -> None:
         """Launch claude subprocess and feed it the prompt."""
         self._interrupted = False
+        # Drain any stale messages (e.g. None sentinel from previous interrupt)
+        # so the new receive_messages() loop doesn't break immediately.
+        while not self._message_queue.empty():
+            try:
+                self._message_queue.get_nowait()
+            except asyncio.QueueEmpty:
+                break
         cmd = [
             self.options.cli_path,
             "-p",
