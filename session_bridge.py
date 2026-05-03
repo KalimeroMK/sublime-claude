@@ -1,5 +1,17 @@
 """Bridge lifecycle management — start, stop, interrupt, sleep, wake, restart."""
+import os
+import shlex
+
 import sublime
+
+from .rpc import JsonRpcClient
+from .session_env import _find_python_310_plus, _resolve_model_id, load_saved_sessions
+
+
+BRIDGE_SCRIPT = os.path.join(os.path.dirname(__file__), "bridge", "main.py")
+CODEX_BRIDGE_SCRIPT = os.path.join(os.path.dirname(__file__), "bridge", "codex_main.py")
+COPILOT_BRIDGE_SCRIPT = os.path.join(os.path.dirname(__file__), "bridge", "copilot_main.py")
+OPENAI_BRIDGE_SCRIPT = os.path.join(os.path.dirname(__file__), "bridge", "openai_main.py")
 
 
 class BridgeManager:
@@ -8,78 +20,307 @@ class BridgeManager:
     def __init__(self, session):
         self._s = session
 
+    def start(self, resume_session_at: str = None) -> None:
+        """Start the bridge process and send initialize."""
+        s = self._s
+        s._ui.show_connecting()
+
+        settings = sublime.load_settings("ClaudeCode.sublime-settings")
+        python_path = settings.get("python_path", "python3")
+        if python_path == "python3":
+            detected = _find_python_310_plus()
+            if detected != python_path:
+                print(f"[Claude] Auto-detected Python 3.10+: {detected}")
+                python_path = detected
+
+        # Build profile docs list early (before init) so we can add to system prompt
+        self._build_profile_docs_list()
+
+        # Load environment variables from settings and profile
+        env = self._load_env(settings)
+
+        # Resolve virtual model ID (e.g. @400k suffix) → real model + context limit
+        default_models = settings.get("default_models", {})
+        _backend_fallback_models = {"deepseek": "deepseek-v4-pro", "codex": "gpt-5.5"}
+        default_model = default_models.get(s.backend) or _backend_fallback_models.get(s.backend) or settings.get("default_model")
+        model_for_env = (s.profile.get("model") if s.profile else None) or default_model
+        if model_for_env:
+            _, ctx = _resolve_model_id(model_for_env)
+            if ctx:
+                env["CLAUDE_CODE_MAX_CONTEXT_TOKENS"] = str(ctx)
+
+        # Sync sublime project retain content to file for hook
+        self._sync_project_retain()
+
+        # Claude/Kimi API settings from Sublime config → passed as env vars to claude CLI
+        if s.backend in ("claude", "kimi", "default", ""):
+            api_key = settings.get("anthropic_api_key")
+            if api_key:
+                env["ANTHROPIC_API_KEY"] = api_key
+            base_url = settings.get("anthropic_base_url")
+            if base_url:
+                env["ANTHROPIC_BASE_URL"] = base_url
+            model = settings.get("anthropic_model")
+            if model:
+                env["ANTHROPIC_MODEL"] = model
+
+        # DeepSeek uses the Claude bridge with Anthropic-compatible endpoint
+        if s.backend == "deepseek":
+            ds_key = settings.get("deepseek_api_key") or os.environ.get("DEEPSEEK_API_KEY", "")
+            env["ANTHROPIC_BASE_URL"] = "https://api.deepseek.com/anthropic"
+            if ds_key:
+                env["ANTHROPIC_AUTH_TOKEN"] = ds_key
+            env.setdefault("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "1")
+            env.setdefault("CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK", "1")
+
+        if s.backend == "openai":
+            oai_url = settings.get("openai_base_url") or os.environ.get("OPENAI_BASE_URL", "")
+            oai_key = settings.get("openai_api_key") or os.environ.get("OPENAI_API_KEY", "")
+            oai_model = settings.get("openai_model") or os.environ.get("OPENAI_MODEL", "")
+            if oai_url:
+                env["OPENAI_BASE_URL"] = oai_url
+            if oai_key:
+                env["OPENAI_API_KEY"] = oai_key
+            if oai_model:
+                env["OPENAI_MODEL"] = oai_model
+
+        if s.backend == "codex":
+            bridge_script = CODEX_BRIDGE_SCRIPT
+        elif s.backend == "copilot":
+            bridge_script = COPILOT_BRIDGE_SCRIPT
+        elif s.backend == "openai":
+            bridge_script = OPENAI_BRIDGE_SCRIPT
+        else:
+            bridge_script = BRIDGE_SCRIPT
+        s.client = JsonRpcClient(s._on_notification)
+        s.client.start([python_path, bridge_script], env=env)
+        s._status_mgr.status("connecting...")
+
+        permission_mode = settings.get("permission_mode", "acceptEdits")
+        if permission_mode == "default":
+            allowed_tools = []
+        else:
+            allowed_tools = settings.get("allowed_tools", [])
+
+        print(f"[Claude] initialize: permission_mode={permission_mode}, allowed_tools={allowed_tools}, resume={s.resume_id}, fork={s.fork}, profile={s.profile}, default_model={default_model}, subsession_id={getattr(s, 'subsession_id', None)}")
+        additional_dirs = s.window.folders()[1:] if len(s.window.folders()) > 1 else []
+        project_data = s.window.project_data() or {}
+        project_settings = project_data.get("settings", {})
+        extra_dirs = project_settings.get("claude_additional_dirs", [])
+        if extra_dirs:
+            expanded = [os.path.expanduser(d) for d in extra_dirs]
+            additional_dirs = additional_dirs + expanded
+            print(f"[Claude] extra additional_dirs from project: {expanded}")
+        init_params = {
+            "cwd": s._cwd(),
+            "additional_dirs": additional_dirs,
+            "allowed_tools": allowed_tools,
+            "permission_mode": permission_mode,
+            "view_id": str(s.output.view.id()) if s.output and s.output.view else None,
+        }
+        if s.resume_id:
+            init_params["resume"] = s.resume_id
+            if s.fork:
+                init_params["fork_session"] = True
+            for saved in load_saved_sessions():
+                if saved.get("session_id") == s.resume_id:
+                    saved_project = saved.get("project", "")
+                    if saved_project and saved_project != init_params["cwd"]:
+                        print(f"[Claude] resume: using saved project {saved_project}")
+                        init_params["cwd"] = saved_project
+                    break
+            if resume_session_at:
+                init_params["resume_session_at"] = resume_session_at
+        if hasattr(s, 'subsession_id') and s.subsession_id:
+            init_params["subsession_id"] = s.subsession_id
+        if not s.resume_id:
+            effort = settings.get("effort", "high")
+            if s.profile and s.profile.get("effort"):
+                effort = s.profile["effort"]
+            init_params["effort"] = effort
+        elif s.profile and s.profile.get("effort"):
+            init_params["effort"] = s.profile["effort"]
+
+        if s.profile:
+            if s.profile.get("model"):
+                real_model, _ = _resolve_model_id(s.profile["model"])
+                init_params["model"] = real_model
+            if s.profile.get("betas"):
+                init_params["betas"] = s.profile["betas"]
+            if s.profile.get("pre_compact_prompt"):
+                init_params["pre_compact_prompt"] = s.profile["pre_compact_prompt"]
+            system_prompt = s.profile.get("system_prompt", "")
+            if s.profile_docs:
+                docs_info = f"\n\nProfile Documentation: {len(s.profile_docs)} files available. Use list_profile_docs to see them and read_profile_doc(path) to read their contents."
+                system_prompt = system_prompt + docs_info if system_prompt else docs_info.strip()
+            if system_prompt:
+                init_params["system_prompt"] = system_prompt
+        else:
+            if default_model:
+                real_model, _ = _resolve_model_id(default_model)
+                init_params["model"] = real_model
+
+        extra_args_str = settings.get("claude_extra_args", "")
+        if extra_args_str:
+            try:
+                parsed = shlex.split(extra_args_str)
+                extra_dict = {}
+                it = iter(parsed)
+                for arg in it:
+                    key = arg.lstrip("-").replace("-", "_")
+                    val = next(it, "")
+                    extra_dict[key] = val
+                if extra_dict:
+                    init_params["extra_args"] = extra_dict
+            except Exception as e:
+                print(f"[Claude] Failed to parse claude_extra_args: {e}")
+
+        s.client.send("initialize", init_params, s._on_init)
+
+    def _load_env(self, settings) -> dict:
+        """Load environment variables from settings and project profile."""
+        s = self._s
+        env = {}
+        settings_env = settings.get("env", {})
+        if isinstance(settings_env, dict):
+            env.update(settings_env)
+        project_data = s.window.project_data() or {}
+        project_settings = project_data.get("settings", {})
+        project_env = project_settings.get("claude_env", {})
+        if isinstance(project_env, dict):
+            env.update(project_env)
+        cwd = s._cwd()
+        if cwd:
+            project_settings_path = os.path.join(cwd, ".claude", "settings.json")
+            if os.path.exists(project_settings_path):
+                try:
+                    with open(project_settings_path, "r") as f:
+                        import json
+                        proj_settings = json.load(f)
+                    claude_env = proj_settings.get("env", {})
+                    if isinstance(claude_env, dict):
+                        env.update(claude_env)
+                except Exception as e:
+                    print(f"[Claude] Failed to load project env: {e}")
+        if s.profile:
+            profile_env = s.profile.get("env", {})
+            if isinstance(profile_env, dict):
+                env.update(profile_env)
+        if env:
+            print(f"[Claude] Custom env vars: {env}")
+        return env
+
+    def _sync_project_retain(self):
+        """Sync sublime project retain content to file for hook."""
+        s = self._s
+        project_data = s.window.project_data() or {}
+        project_settings = project_data.get("settings", {})
+        retain_content = project_settings.get("claude_retain", "")
+        s._state.sync_project_retain(retain_content)
+
+    def _build_profile_docs_list(self) -> None:
+        """Build list of available docs from profile preload_docs patterns (no reading yet)."""
+        s = self._s
+        if not s.profile or not s.profile.get("preload_docs"):
+            return
+
+        import glob as glob_module
+
+        patterns = s.profile["preload_docs"]
+        if isinstance(patterns, str):
+            patterns = [patterns]
+
+        cwd = s._cwd()
+
+        try:
+            for pattern in patterns:
+                full_pattern = os.path.join(cwd, pattern)
+                for filepath in glob_module.glob(full_pattern, recursive=True):
+                    if os.path.isfile(filepath):
+                        rel_path = os.path.relpath(filepath, cwd)
+                        s.profile_docs.append(rel_path)
+
+            if s.profile_docs:
+                print(f"[Claude] Profile docs available: {len(s.profile_docs)} files")
+        except Exception as e:
+            print(f"[Claude] preload_docs error: {e}")
+
     def interrupt(self, break_channel: bool = True) -> None:
         """Interrupt current query."""
-        if self._s.client:
-            sent = self._s.client.send("interrupt", {})
-            self._s._status_mgr.status("interrupting...")
-            self._s._queued_prompts.clear()
+        s = self._s
+        if s.client:
+            sent = s.client.send("interrupt", {})
+            s._status_mgr.status("interrupting...")
+            s._queued_prompts.clear()
             if not sent:
-                self._s.working = False
-                self._s._status_mgr.status("error: bridge died")
-                self._s.output.text("\n\n*Bridge process died. Please restart the session.*\n")
-                self._s._enter_input_with_draft()
+                s.working = False
+                s._status_mgr.status("error: bridge died")
+                s.output.text("\n\n*Bridge process died. Please restart the session.*\n")
+                s._enter_input_with_draft()
 
-        if break_channel and self._s.output.view:
+        if break_channel and s.output.view:
             from . import notalone
-            notalone.interrupt_channel(self._s.output.view.id())
+            notalone.interrupt_channel(s.output.view.id())
 
     def stop(self) -> None:
         """Stop session and clean up."""
-        self._s._persist_state("closed")
-        self._s._stop_heartbeat()
-        if self._s.persona_session_id and self._s.persona_url:
-            self._s._release_persona()
+        s = self._s
+        s._persist_state("closed")
+        s._stop_heartbeat()
+        if s.persona_session_id and s.persona_url:
+            s._release_persona()
 
-        if self._s.client:
-            client = self._s.client
+        if s.client:
+            client = s.client
             client.send("shutdown", {}, lambda _: client.stop())
-        self._s._status_mgr.clear()
+        s._status_mgr.clear()
 
-        if self._s.output:
-            self._s.output.conversations.clear()
-        self._s.pending_context.clear()
-        self._s._queued_prompts.clear()
+        if s.output:
+            s.output.conversations.clear()
+        s.pending_context.clear()
+        s._queued_prompts.clear()
 
     def sleep(self) -> None:
         """Put session to sleep — kill bridge, keep view."""
-        if not self._s.session_id:
+        s = self._s
+        if not s.session_id:
             return
-        if self._s.working:
+        if s.working:
             self.interrupt()
             sublime.set_timeout(self.sleep, 500)
             return
-        self._s._stop_heartbeat()
-        if self._s.client:
-            client = self._s.client
-            self._s.client = None
+        s._stop_heartbeat()
+        if s.client:
+            client = s.client
+            s.client = None
             client.send("shutdown", {}, lambda _: client.stop())
-        self._s.initialized = False
-        self._s._persist_state("sleeping")
-        self._s._apply_sleep_ui()
+        s.initialized = False
+        s._persist_state("sleeping")
+        s._apply_sleep_ui()
 
     def wake(self) -> None:
         """Wake a sleeping session — re-spawn bridge with resume."""
-        if self._s.client or self._s.initialized:
+        s = self._s
+        if s.client or s.initialized:
             return
-        if not self._s.session_id:
+        if not s.session_id:
             return
-        self._s._ui.clear_overlay()
-        if self._s.output and self._s.output.view:
-            view = self._s.output.view
+        s._ui.clear_overlay()
+        if s.output and s.output.view:
+            view = s.output.view
             view.settings().erase("claude_sleeping")
             end = view.size()
             view.sel().clear()
             view.sel().add(end)
             view.show(end)
-        self._s.resume_id = self._s.session_id
-        self._s.fork = False
-        resume_at = self._s._pending_resume_at
-        self._s.current_tool = "waking..."
-        self._s.start(resume_session_at=resume_at)
-        self._s._persist_state("open")
-        if self._s.output and self._s.output.view:
-            self._s.output.set_name(self._s.display_name)
+        s.resume_id = s.session_id
+        s.fork = False
+        resume_at = s._pending_resume_at
+        s.current_tool = "waking..."
+        self.start(resume_session_at=resume_at)
+        s._persist_state("open")
+        if s.output and s.output.view:
+            s.output.set_name(s.display_name)
 
     def restart(self) -> None:
         """Restart session — sleep then immediately wake."""
@@ -91,39 +332,41 @@ class BridgeManager:
 
     def ensure_alive(self, silent: bool = False) -> bool:
         """Check bridge health; auto-restart if dead."""
-        if self._s.client and self._s.client.is_alive() and self._s.initialized:
+        s = self._s
+        if s.client and s.client.is_alive() and s.initialized:
             return True
         if not silent:
-            self._s.output.text("\n*Bridge process died. Auto-restarting...*\n")
+            s.output.text("\n*Bridge process died. Auto-restarting...*\n")
         return self.auto_restart()
 
     def auto_restart(self) -> bool:
         """Kill dead bridge and restart with resume."""
-        if self._s.client:
+        s = self._s
+        if s.client:
             try:
-                self._s.client.stop()
+                s.client.stop()
             except Exception:
                 pass
-            self._s.client = None
-        self._s.initialized = False
-        self._s.working = False
-        self._s._clear_deferred_state()
+            s.client = None
+        s.initialized = False
+        s.working = False
+        s._clear_deferred_state()
 
-        if not self._s.session_id:
+        if not s.session_id:
             return False
 
-        self._s.resume_id = self._s.session_id
-        self._s.fork = False
-        resume_at = self._s._pending_resume_at
-        self._s.current_tool = "reconnecting..."
-        self._s._status_mgr.status("reconnecting...")
+        s.resume_id = s.session_id
+        s.fork = False
+        resume_at = s._pending_resume_at
+        s.current_tool = "reconnecting..."
+        s._status_mgr.status("reconnecting...")
         try:
-            self._s.start(resume_session_at=resume_at)
-            self._s._persist_state("open")
+            self.start(resume_session_at=resume_at)
+            s._persist_state("open")
             return True
         except Exception as e:
             print(f"[Claude] Auto-restart failed: {e}")
-            self._s._status_mgr.status("error: restart failed")
+            s._status_mgr.status("error: restart failed")
             return False
 
     def release_persona(self) -> None:
@@ -131,8 +374,9 @@ class BridgeManager:
         import threading
         from . import persona_client
 
-        session_id = self._s.persona_session_id
-        persona_url = self._s.persona_url
+        s = self._s
+        session_id = s.persona_session_id
+        persona_url = s.persona_url
 
         def release():
             result = persona_client.release_persona(session_id, base_url=persona_url)

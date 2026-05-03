@@ -136,169 +136,8 @@ class Session(SessionQueryMixin, SessionPermissionsMixin):
         self._pending_retain: Optional[str] = None
 
     def start(self, resume_session_at: str = None) -> None:
-        self._ui.show_connecting()
-
-        settings = sublime.load_settings("ClaudeCode.sublime-settings")
-        python_path = settings.get("python_path", "python3")
-        if python_path == "python3":
-            detected = _find_python_310_plus()
-            if detected != python_path:
-                print(f"[Claude] Auto-detected Python 3.10+: {detected}")
-                python_path = detected
-
-        # Build profile docs list early (before init) so we can add to system prompt
-        self._build_profile_docs_list()
-
-        # Load environment variables from settings and profile
-        env = self._load_env(settings)
-
-        # Resolve virtual model ID (e.g. @400k suffix) → real model + context limit
-        default_models = settings.get("default_models", {})
-        _backend_fallback_models = {"deepseek": "deepseek-v4-pro", "codex": "gpt-5.5"}
-        default_model = default_models.get(self.backend) or _backend_fallback_models.get(self.backend) or settings.get("default_model")
-        model_for_env = (self.profile.get("model") if self.profile else None) or default_model
-        if model_for_env:
-            _, ctx = _resolve_model_id(model_for_env)
-            if ctx:
-                env["CLAUDE_CODE_MAX_CONTEXT_TOKENS"] = str(ctx)
-
-        # Sync sublime project retain content to file for hook
-        self._sync_project_retain()
-
-        # Claude/Kimi API settings from Sublime config → passed as env vars to claude CLI
-        if self.backend in ("claude", "kimi", "default", ""):
-            api_key = settings.get("anthropic_api_key")
-            if api_key:
-                env["ANTHROPIC_API_KEY"] = api_key
-            base_url = settings.get("anthropic_base_url")
-            if base_url:
-                env["ANTHROPIC_BASE_URL"] = base_url
-            model = settings.get("anthropic_model")
-            if model:
-                env["ANTHROPIC_MODEL"] = model
-
-        # DeepSeek uses the Claude bridge with Anthropic-compatible endpoint
-        if self.backend == "deepseek":
-            ds_key = settings.get("deepseek_api_key") or os.environ.get("DEEPSEEK_API_KEY", "")
-            env["ANTHROPIC_BASE_URL"] = "https://api.deepseek.com/anthropic"
-            if ds_key:
-                env["ANTHROPIC_AUTH_TOKEN"] = ds_key
-            env.setdefault("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "1")
-            env.setdefault("CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK", "1")
-
-        if self.backend == "openai":
-            oai_url = settings.get("openai_base_url") or os.environ.get("OPENAI_BASE_URL", "")
-            oai_key = settings.get("openai_api_key") or os.environ.get("OPENAI_API_KEY", "")
-            oai_model = settings.get("openai_model") or os.environ.get("OPENAI_MODEL", "")
-            if oai_url:
-                env["OPENAI_BASE_URL"] = oai_url
-            if oai_key:
-                env["OPENAI_API_KEY"] = oai_key
-            if oai_model:
-                env["OPENAI_MODEL"] = oai_model
-
-        if self.backend == "codex":
-            bridge_script = CODEX_BRIDGE_SCRIPT
-        elif self.backend == "copilot":
-            bridge_script = COPILOT_BRIDGE_SCRIPT
-        elif self.backend == "openai":
-            bridge_script = OPENAI_BRIDGE_SCRIPT
-        else:
-            bridge_script = BRIDGE_SCRIPT
-        self.client = JsonRpcClient(self._on_notification)
-        self.client.start([python_path, bridge_script], env=env)
-        self._status("connecting...")
-
-        permission_mode = settings.get("permission_mode", "acceptEdits")
-        # In default mode, don't auto-allow any tools - prompt for all
-        if permission_mode == "default":
-            allowed_tools = []
-        else:
-            allowed_tools = settings.get("allowed_tools", [])
-
-        print(f"[Claude] initialize: permission_mode={permission_mode}, allowed_tools={allowed_tools}, resume={self.resume_id}, fork={self.fork}, profile={self.profile}, default_model={default_model}, subsession_id={getattr(self, 'subsession_id', None)}")
-        # Get additional working directories from project folders + project settings
-        additional_dirs = self.window.folders()[1:] if len(self.window.folders()) > 1 else []
-        project_data = self.window.project_data() or {}
-        project_settings = project_data.get("settings", {})
-        extra_dirs = project_settings.get("claude_additional_dirs", [])
-        if extra_dirs:
-            expanded = [os.path.expanduser(d) for d in extra_dirs]
-            additional_dirs = additional_dirs + expanded
-            print(f"[Claude] extra additional_dirs from project: {expanded}")
-        init_params = {
-            "cwd": self._cwd(),
-            "additional_dirs": additional_dirs,
-            "allowed_tools": allowed_tools,
-            "permission_mode": permission_mode,
-            "view_id": str(self.output.view.id()) if self.output and self.output.view else None,
-        }
-        if self.resume_id:
-            init_params["resume"] = self.resume_id
-            if self.fork:
-                init_params["fork_session"] = True
-            # Use saved session's project dir as cwd (session may belong to different project)
-            for saved in load_saved_sessions():
-                if saved.get("session_id") == self.resume_id:
-                    saved_project = saved.get("project", "")
-                    if saved_project and saved_project != init_params["cwd"]:
-                        print(f"[Claude] resume: using saved project {saved_project}")
-                        init_params["cwd"] = saved_project
-                    break
-            if resume_session_at:
-                init_params["resume_session_at"] = resume_session_at
-        # Pass subsession_id if this is a subsession
-        if hasattr(self, 'subsession_id') and self.subsession_id:
-            init_params["subsession_id"] = self.subsession_id
-        # Effort setting — only apply on fresh session (resume keeps CLI's saved value)
-        if not self.resume_id:
-            effort = settings.get("effort", "high")
-            if self.profile and self.profile.get("effort"):
-                effort = self.profile["effort"]
-            init_params["effort"] = effort
-        elif self.profile and self.profile.get("effort"):
-            # Profile explicitly sets effort — honor it even on resume
-            init_params["effort"] = self.profile["effort"]
-
-        # Apply profile config or default model
-        if self.profile:
-            if self.profile.get("model"):
-                real_model, _ = _resolve_model_id(self.profile["model"])
-                init_params["model"] = real_model
-            if self.profile.get("betas"):
-                init_params["betas"] = self.profile["betas"]
-            if self.profile.get("pre_compact_prompt"):
-                init_params["pre_compact_prompt"] = self.profile["pre_compact_prompt"]
-            # Build system prompt with profile docs info
-            system_prompt = self.profile.get("system_prompt", "")
-            if self.profile_docs:
-                docs_info = f"\n\nProfile Documentation: {len(self.profile_docs)} files available. Use list_profile_docs to see them and read_profile_doc(path) to read their contents."
-                system_prompt = system_prompt + docs_info if system_prompt else docs_info.strip()
-            if system_prompt:
-                init_params["system_prompt"] = system_prompt
-        else:
-            # No profile - use default_model setting if available
-            if default_model:
-                real_model, _ = _resolve_model_id(default_model)
-                init_params["model"] = real_model
-
-        # Parse extra CLI args from settings (e.g. "--max-budget-usd 5 --effort high")
-        extra_args_str = settings.get("claude_extra_args", "")
-        if extra_args_str:
-            try:
-                parsed = shlex.split(extra_args_str)
-                extra_dict = {}
-                it = iter(parsed)
-                for arg in it:
-                    key = arg.lstrip("-").replace("-", "_")
-                    val = next(it, "")
-                    extra_dict[key] = val
-                if extra_dict:
-                    init_params["extra_args"] = extra_dict
-            except Exception as e:
-                print(f"[Claude] Failed to parse claude_extra_args: {e}")
-
-        self.client.send("initialize", init_params, self._on_init)
+        """Delegate to BridgeManager."""
+        self._bridge.start(resume_session_at)
 
     def _cwd(self) -> str:
         if self.window.folders():
@@ -361,50 +200,6 @@ class Session(SessionQueryMixin, SessionPermissionsMixin):
         # Auto-enter input mode when ready
         self._enter_input_with_draft()
 
-    def _load_env(self, settings) -> dict:
-        """Load environment variables from settings and project profile."""
-        import os
-        env = {}
-        # From user settings (ClaudeCode.sublime-settings)
-        settings_env = settings.get("env", {})
-        if isinstance(settings_env, dict):
-            env.update(settings_env)
-        # From sublime project settings (.sublime-project -> settings -> claude_env)
-        project_data = self.window.project_data() or {}
-        project_settings = project_data.get("settings", {})
-        project_env = project_settings.get("claude_env", {})
-        if isinstance(project_env, dict):
-            env.update(project_env)
-        # From project .claude/settings.json
-        cwd = self._cwd()
-        if cwd:
-            project_settings_path = os.path.join(cwd, ".claude", "settings.json")
-            if os.path.exists(project_settings_path):
-                try:
-                    with open(project_settings_path, "r") as f:
-                        import json
-                        project_settings = json.load(f)
-                    claude_env = project_settings.get("env", {})
-                    if isinstance(claude_env, dict):
-                        env.update(claude_env)
-                except Exception as e:
-                    print(f"[Claude] Failed to load project env: {e}")
-        # From profile (highest priority)
-        if self.profile:
-            profile_env = self.profile.get("env", {})
-            if isinstance(profile_env, dict):
-                env.update(profile_env)
-        if env:
-            print(f"[Claude] Custom env vars: {env}")
-        return env
-
-    def _sync_project_retain(self):
-        """Delegate to StateManager."""
-        project_data = self.window.project_data() or {}
-        project_settings = project_data.get("settings", {})
-        retain_content = project_settings.get("claude_retain", "")
-        self._state.sync_project_retain(retain_content)
-
     def _get_retain_path(self) -> Optional[str]:
         """Get path to session's dynamic retain file."""
         return self._state.get_retain_path()
@@ -445,33 +240,6 @@ class Session(SessionQueryMixin, SessionPermissionsMixin):
         """Inject retain content by interrupting and restarting with retain prompt."""
         self._state.inject_retain_midquery()
 
-
-    def _build_profile_docs_list(self) -> None:
-        """Build list of available docs from profile preload_docs patterns (no reading yet)."""
-        if not self.profile or not self.profile.get("preload_docs"):
-            return
-
-        import glob as glob_module
-
-        patterns = self.profile["preload_docs"]
-        if isinstance(patterns, str):
-            patterns = [patterns]
-
-        cwd = self._cwd()
-
-        try:
-            for pattern in patterns:
-                # Make pattern relative to cwd
-                full_pattern = os.path.join(cwd, pattern)
-                for filepath in glob_module.glob(full_pattern, recursive=True):
-                    if os.path.isfile(filepath):
-                        rel_path = os.path.relpath(filepath, cwd)
-                        self.profile_docs.append(rel_path)
-
-            if self.profile_docs:
-                print(f"[Claude] Profile docs available: {len(self.profile_docs)} files")
-        except Exception as e:
-            print(f"[Claude] preload_docs error: {e}")
 
     def add_context_file(self, path: str, content: str) -> None:
         """Delegate to ContextManager."""
@@ -562,49 +330,12 @@ class Session(SessionQueryMixin, SessionPermissionsMixin):
         return self._state.find_jsonl_path()
 
     def interrupt(self, break_channel: bool = True) -> None:
-        """Interrupt current query.
-
-        Args:
-            break_channel: If True, also breaks any active channel connection.
-                          Set to False when interrupt is from channel message.
-        """
-        if self.client:
-            sent = self.client.send("interrupt", {})
-            self._status("interrupting...")
-            # Don't set working=False here — wait for _on_done to confirm
-            # the bridge actually stopped. This prevents input mode race.
-            self._queued_prompts.clear()
-            # If bridge is dead, _on_done won't fire — force cleanup
-            if not sent:
-                self.working = False
-                self._status("error: bridge died")
-                self.output.text("\n\n*Bridge process died. Please restart the session.*\n")
-                self._enter_input_with_draft()
-
-        # Break any active channel connection (only for user-initiated interrupts)
-        if break_channel and self.output.view:
-            from . import notalone
-            notalone.interrupt_channel(self.output.view.id())
+        """Delegate to BridgeManager."""
+        self._bridge.interrupt(break_channel)
 
     def stop(self) -> None:
-        # Persist closed state before cleanup
-        self._persist_state("closed")
-        # Stop heartbeat
-        self._stop_heartbeat()
-        # Release persona if acquired
-        if self.persona_session_id and self.persona_url:
-            self._release_persona()
-
-        if self.client:
-            client = self.client
-            client.send("shutdown", {}, lambda _: client.stop())
-        self._clear_status()
-
-        # Release accumulated state
-        if self.output:
-            self.output.conversations.clear()
-        self.pending_context.clear()
-        self._queued_prompts.clear()
+        """Delegate to BridgeManager."""
+        self._bridge.stop()
 
     @property
     def is_sleeping(self) -> bool:
@@ -619,56 +350,20 @@ class Session(SessionQueryMixin, SessionPermissionsMixin):
         return base
 
     def sleep(self) -> None:
-        """Put session to sleep — kill bridge, keep view."""
-        if not self.session_id:
-            return
-        if self.working:
-            self.interrupt()
-            sublime.set_timeout(self.sleep, 500)
-            return
-        self._stop_heartbeat()
-        if self.client:
-            client = self.client
-            self.client = None
-            client.send("shutdown", {}, lambda _: client.stop())
-        self.initialized = False
-        self._persist_state("sleeping")
-        self._apply_sleep_ui()
+        """Delegate to BridgeManager."""
+        self._bridge.sleep()
 
     def _apply_sleep_ui(self) -> None:
         """Delegate to SessionUIHelper."""
         self._ui.apply_sleep()
 
     def restart(self) -> None:
-        """Restart session — sleep then immediately wake."""
-        def do_wake():
-            if self.output and self.output.view and self.output.view.settings().get("claude_sleeping"):
-                self.wake()
-        self.sleep()
-        sublime.set_timeout(do_wake, 600)
+        """Delegate to BridgeManager."""
+        self._bridge.restart()
 
     def wake(self) -> None:
-        """Wake a sleeping session — re-spawn bridge with resume."""
-        if self.client or self.initialized:
-            return
-        if not self.session_id:
-            return
-        self._ui.clear_overlay()
-        if self.output and self.output.view:
-            view = self.output.view
-            view.settings().erase("claude_sleeping")
-            end = view.size()
-            view.sel().clear()
-            view.sel().add(end)
-            view.show(end)
-        self.resume_id = self.session_id
-        self.fork = False
-        resume_at = self._pending_resume_at
-        self.current_tool = "waking..."
-        self.start(resume_session_at=resume_at)
-        self._persist_state("open")
-        if self.output and self.output.view:
-            self.output.set_name(self.display_name)
+        """Delegate to BridgeManager."""
+        self._bridge.wake()
 
     # ─── Heartbeat & Auto-Restart ─────────────────────────────────────────
 
@@ -681,45 +376,12 @@ class Session(SessionQueryMixin, SessionPermissionsMixin):
         self._heartbeat.stop()
 
     def _ensure_bridge_alive(self, silent: bool = False) -> bool:
-        """Check bridge health; auto-restart if dead. Returns True if alive."""
-        if self.client and self.client.is_alive() and self.initialized:
-            return True
-        # Bridge is dead or not initialized — try auto-restart
-        if not silent:
-            self.output.text("\n*Bridge process died. Auto-restarting...*\n")
-        return self._auto_restart_bridge()
+        """Delegate to BridgeManager."""
+        return self._bridge.ensure_alive(silent)
 
     def _auto_restart_bridge(self) -> bool:
-        """Kill dead bridge and restart with resume. Returns True on success."""
-        # Clean up dead bridge
-        if self.client:
-            try:
-                self.client.stop()
-            except Exception:
-                pass
-            self.client = None
-        self.initialized = False
-        self.working = False
-        self._clear_deferred_state()
-
-        if not self.session_id:
-            # No session to resume — can't auto-restart
-            return False
-
-        # Restart with resume
-        self.resume_id = self.session_id
-        self.fork = False
-        resume_at = self._pending_resume_at
-        self.current_tool = "reconnecting..."
-        self._status("reconnecting...")
-        try:
-            self.start(resume_session_at=resume_at)
-            self._persist_state("open")
-            return True
-        except Exception as e:
-            print(f"[Claude] Auto-restart failed: {e}")
-            self._status("error: restart failed")
-            return False
+        """Delegate to BridgeManager."""
+        return self._bridge.auto_restart()
 
     def _persist_state(self, state: str) -> None:
         """Save session with explicit state override."""
@@ -727,19 +389,8 @@ class Session(SessionQueryMixin, SessionPermissionsMixin):
 
 
     def _release_persona(self) -> None:
-        """Release acquired persona."""
-        import threading
-        from . import persona_client
-
-        session_id = self.persona_session_id
-        persona_url = self.persona_url
-
-        def release():
-            result = persona_client.release_persona(session_id, base_url=persona_url)
-            if "error" not in result:
-                print(f"[Claude] Released persona for session {session_id}")
-
-        threading.Thread(target=release, daemon=True).start()
+        """Delegate to BridgeManager."""
+        self._bridge.release_persona()
 
     # ─── Notification Tools ───────────────────────────────────────────────
     # Notification tools are provided by dedicated MCP servers:
