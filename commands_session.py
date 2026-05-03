@@ -387,9 +387,10 @@ class ClaudeCodeSwitchCommand(sublime_plugin.WindowCommand):
         from .core import create_session
 
         backend_prefix = f"[{backend}] " if backend != "claude" else ""
-        has_codex = bool(shutil.which("codex"))
-        has_copilot = os.path.exists(os.path.join(os.path.dirname(__file__), "bridge", "copilot_main.py"))
-        has_deepseek = bool(sublime.load_settings("ClaudeCode.sublime-settings").get("deepseek_api_key") or os.environ.get("DEEPSEEK_API_KEY"))
+        from . import backends
+        has_codex = backends.is_available("codex")
+        has_copilot = backends.is_available("copilot")
+        has_deepseek = backends.is_available("deepseek")
 
         project_path = self.window.folders()[0] if self.window.folders() else None
         starred = load_bookmarks(project_path)

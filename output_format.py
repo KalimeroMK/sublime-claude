@@ -253,101 +253,185 @@ def _format_diff_block(lines: list, max_lines: int = 30) -> str:
     return "\n" + "\n".join(result)
 
 
+# Registry — one place to add a tool formatter.
+# Each formatter receives a tool object and returns the detail string.
+# The generic MCP fallback and (background) suffix are handled by format_tool_detail.
+
+
+def _fmt_skill(tool) -> str:
+    return f": {tool.tool_input.get('skill', '')}"
+
+
+def _fmt_bash(tool) -> str:
+    out = f": {tool.tool_input.get('command', '')}"
+    if tool.result and tool.status in (DONE, ERROR):
+        out += format_bash_result(tool.result)
+    return out
+
+
+def _fmt_read(tool) -> str:
+    fp = _shorten_path(tool.tool_input.get('file_path', ''))
+    icon = _file_icon(tool.tool_input.get('file_path', ''))
+    out = f" {icon} {fp}"
+    if tool.result and tool.status == DONE:
+        out += format_read_result(tool.result)
+    return out
+
+
+def _fmt_edit(tool) -> str:
+    file_path = tool.tool_input.get('file_path', '')
+    fp = _shorten_path(file_path)
+    icon = _file_icon(file_path)
+    if getattr(tool, "diff", None):
+        diff_str = format_unified_diff(tool.diff)
+        line_num = extract_diff_line_num(tool.diff)
+        out = f" {icon} {fp}:{line_num}" if line_num else f" {icon} {fp}"
+        if diff_str:
+            out += diff_str
+    else:
+        old = tool.tool_input.get("old_string", "")
+        new = tool.tool_input.get("new_string", "")
+        unified = tool.tool_input.get("unified_diff", "")
+        if unified:
+            diff_str = format_unified_diff(unified)
+            line_num = extract_diff_line_num(unified)
+            out = f" {icon} {fp}:{line_num}" if line_num else f" {icon} {fp}"
+        else:
+            line_num = find_line_number(file_path, old, new)
+            diff_str = format_edit_diff(old, new)
+            out = f" {icon} {fp}:{line_num}" if line_num else f" {icon} {fp}"
+        if diff_str:
+            out += diff_str
+    if getattr(tool, "snapshot", None) is not None and tool.status == DONE:
+        out += "  [Undo]"
+    return out
+
+
+def _fmt_write(tool) -> str:
+    file_path = tool.tool_input.get('file_path', '')
+    fp = _shorten_path(file_path)
+    icon = _file_icon(file_path)
+    out = f" {icon} {fp}"
+    if getattr(tool, "diff", None):
+        diff_str = format_unified_diff(tool.diff)
+        if diff_str:
+            out += diff_str
+    if getattr(tool, "snapshot", None) is not None and tool.status == DONE:
+        out += "  [Undo]"
+    return out
+
+
+def _fmt_glob(tool) -> str:
+    out = f": {tool.tool_input.get('pattern', '')}"
+    if tool.result and tool.status == DONE:
+        out += format_glob_result(tool.result)
+    return out
+
+
+def _fmt_grep(tool) -> str:
+    out = f": {tool.tool_input.get('pattern', '')}"
+    if tool.result and tool.status == DONE:
+        out += format_grep_result(tool.result)
+    return out
+
+
+def _fmt_websearch(tool) -> str:
+    return f": {tool.tool_input.get('query', '')}"
+
+
+def _fmt_webfetch(tool) -> str:
+    return f": {tool.tool_input.get('url', '')}"
+
+
+def _fmt_task(tool) -> str:
+    sub = tool.tool_input.get("subagent_type", "")
+    desc = tool.tool_input.get("description", "")
+    return f": {sub}" + (f" - {desc}" if desc else "")
+
+
+def _fmt_notebook_edit(tool) -> str:
+    return f": {tool.tool_input.get('notebook_path', '')}"
+
+
+def _fmt_todo_write(tool) -> str:
+    todos = tool.tool_input.get("todos", [])
+    count = len(todos) if isinstance(todos, list) else "?"
+    return f": {count} task{'s' if count != 1 else ''}"
+
+
+def _fmt_ask_user(tool) -> str:
+    question = tool.tool_input.get("question", "")
+    out = f": {question}"
+    if tool.result and tool.status == DONE:
+        out += format_ask_user_result(tool.result, question)
+    return out
+
+
+def _fmt_enter_plan(tool) -> str:
+    return ": entering plan mode..."
+
+
+def _fmt_exit_plan(tool) -> str:
+    allowed = tool.tool_input.get("allowedPrompts", [])
+    if allowed:
+        return f": {len(allowed)} requested permissions"
+    return ": awaiting approval..."
+
+
+def _fmt_terminal_run(tool) -> str:
+    cmd = tool.tool_input.get("command", "").strip()
+    idx = tool.tool_input.get("index")
+    target = f" #{idx}" if idx is not None else ""
+    detail = f"{target}: {cmd[:60]}{'…' if len(cmd) > 60 else ''}"
+    if tool.status == DONE and tool.result and "[timed out]" in tool.result:
+        detail += " (timed out)"
+    return detail
+
+
+def _fmt_terminal_read(tool) -> str:
+    idx = tool.tool_input.get("index")
+    return f" #{idx}" if idx is not None else ""
+
+
+def _fmt_terminal_list(tool) -> str:
+    return ""
+
+
+TOOL_FORMATTERS = {
+    "Bash": _fmt_bash,
+    "Read": _fmt_read,
+    "Edit": _fmt_edit,
+    "Write": _fmt_write,
+    "Glob": _fmt_glob,
+    "Grep": _fmt_grep,
+    "WebSearch": _fmt_websearch,
+    "WebFetch": _fmt_webfetch,
+    "Task": _fmt_task,
+    "NotebookEdit": _fmt_notebook_edit,
+    "TodoWrite": _fmt_todo_write,
+    "ask_user": _fmt_ask_user,
+    "mcp__sublime__ask_user": _fmt_ask_user,
+    "mcp__sublime__terminal_run": _fmt_terminal_run,
+    "mcp__sublime__terminal_read": _fmt_terminal_read,
+    "mcp__sublime__terminal_list": _fmt_terminal_list,
+    "mcp__sublime__terminal_send": _fmt_terminal_read,
+    "Skill": _fmt_skill,
+    "EnterPlanMode": _fmt_enter_plan,
+    "ExitPlanMode": _fmt_exit_plan,
+}
+
+
 def format_tool_detail(tool) -> str:
     """Format tool detail string for display.
 
     Args:
         tool: A ToolCall-like object with name, tool_input, result, status attributes.
     """
-    detail = ""
-    tool_input = tool.tool_input or {}
+    fmt = TOOL_FORMATTERS.get(tool.name)
+    detail = fmt(tool) if fmt is not None else ""
 
-    if tool.name == "EnterPlanMode":
-        return ": entering plan mode..."
-    elif tool.name == "ExitPlanMode":
-        allowed = tool_input.get("allowedPrompts", [])
-        if allowed:
-            return f": {len(allowed)} requested permissions"
-        return ": awaiting approval..."
-
-    if tool.name == "Skill" and "skill" in tool_input:
-        detail = f": {tool_input['skill']}"
-    elif tool.name == "Bash" and "command" in tool_input:
-        detail = f": {tool_input['command']}"
-        if tool.result and tool.status in (DONE, ERROR):
-            detail += format_bash_result(tool.result)
-    elif tool.name == "Read" and "file_path" in tool_input:
-        fp = _shorten_path(tool_input['file_path'])
-        icon = _file_icon(tool_input['file_path'])
-        detail = f" {icon} {fp}"
-        if tool.result and tool.status == DONE:
-            detail += format_read_result(tool.result)
-    elif tool.name == "Edit" and "file_path" in tool_input:
-        file_path = tool_input['file_path']
-        fp = _shorten_path(file_path)
-        icon = _file_icon(file_path)
-        # Prefer pre-computed diff from snapshot (actual file changes)
-        if getattr(tool, "diff", None):
-            diff_str = format_unified_diff(tool.diff)
-            line_num = extract_diff_line_num(tool.diff)
-            detail = f" {icon} {fp}:{line_num}" if line_num else f" {icon} {fp}"
-            if diff_str:
-                detail += diff_str
-        else:
-            old = tool_input.get("old_string", "")
-            new = tool_input.get("new_string", "")
-            unified = tool_input.get("unified_diff", "")
-            if unified:
-                diff_str = format_unified_diff(unified)
-                line_num = extract_diff_line_num(unified)
-                detail = f" {icon} {fp}:{line_num}" if line_num else f" {icon} {fp}"
-            else:
-                line_num = find_line_number(file_path, old, new)
-                diff_str = format_edit_diff(old, new)
-                detail = f" {icon} {fp}:{line_num}" if line_num else f" {icon} {fp}"
-            if diff_str:
-                detail += diff_str
-        if getattr(tool, "snapshot", None) is not None and tool.status == DONE:
-            detail += "  [Undo]"
-    elif tool.name == "Write" and "file_path" in tool_input:
-        file_path = tool_input['file_path']
-        fp = _shorten_path(file_path)
-        icon = _file_icon(file_path)
-        detail = f" {icon} {fp}"
-        if getattr(tool, "diff", None):
-            diff_str = format_unified_diff(tool.diff)
-            if diff_str:
-                detail += diff_str
-        if getattr(tool, "snapshot", None) is not None and tool.status == DONE:
-            detail += "  [Undo]"
-    elif tool.name == "Glob" and "pattern" in tool_input:
-        detail = f": {tool_input['pattern']}"
-        if tool.result and tool.status == DONE:
-            detail += format_glob_result(tool.result)
-    elif tool.name == "Grep" and "pattern" in tool_input:
-        detail = f": {tool_input['pattern']}"
-        if tool.result and tool.status == DONE:
-            detail += format_grep_result(tool.result)
-    elif tool.name == "WebSearch" and "query" in tool_input:
-        detail = f": {tool_input['query']}"
-    elif tool.name == "WebFetch" and "url" in tool_input:
-        detail = f": {tool_input['url']}"
-    elif tool.name == "Task" and "subagent_type" in tool_input:
-        subagent = tool_input["subagent_type"]
-        desc = tool_input.get("description", "")
-        detail = f": {subagent}" + (f" - {desc}" if desc else "")
-    elif tool.name == "NotebookEdit" and "notebook_path" in tool_input:
-        detail = f": {tool_input['notebook_path']}"
-    elif tool.name == "TodoWrite" and "todos" in tool_input:
-        todos = tool_input["todos"]
-        count = len(todos) if isinstance(todos, list) else "?"
-        detail = f": {count} task{'s' if count != 1 else ''}"
-    elif tool.name in ("ask_user", "mcp__sublime__ask_user") and "question" in tool_input:
-        question = tool_input["question"]
-        detail = f": {question}"
-        if tool.result and tool.status == DONE:
-            detail += format_ask_user_result(tool.result, question)
-    elif tool.name.startswith("mcp__sublime__") and tool.result and tool.status == DONE:
+    # Generic MCP fallback: any unregistered mcp__sublime__* tool with a done result
+    if not fmt and tool.name.startswith("mcp__sublime__") and tool.result and tool.status == DONE:
         detail += format_mcp_result(tool.result)
 
     if tool.status == BACKGROUND:

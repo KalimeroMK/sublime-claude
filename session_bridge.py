@@ -6,12 +6,7 @@ import sublime
 
 from .rpc import JsonRpcClient
 from .session_env import _find_python_310_plus, _resolve_model_id, load_saved_sessions
-
-
-BRIDGE_SCRIPT = os.path.join(os.path.dirname(__file__), "bridge", "main.py")
-CODEX_BRIDGE_SCRIPT = os.path.join(os.path.dirname(__file__), "bridge", "codex_main.py")
-COPILOT_BRIDGE_SCRIPT = os.path.join(os.path.dirname(__file__), "bridge", "copilot_main.py")
-OPENAI_BRIDGE_SCRIPT = os.path.join(os.path.dirname(__file__), "bridge", "openai_main.py")
+from . import backends
 
 
 class BridgeManager:
@@ -39,15 +34,25 @@ class BridgeManager:
         # Load environment variables from settings and profile
         env = self._load_env(settings)
 
+        # Resolve backend spec — single source of truth for bridge script,
+        # fallback model, env overrides, etc.
+        spec = backends.get(s.backend)
+
         # Resolve virtual model ID (e.g. @400k suffix) → real model + context limit
         default_models = settings.get("default_models", {})
-        _backend_fallback_models = {"deepseek": "deepseek-v4-pro", "codex": "gpt-5.5"}
-        default_model = default_models.get(s.backend) or _backend_fallback_models.get(s.backend) or settings.get("default_model")
+        default_model = default_models.get(s.backend) or spec.fallback_model or settings.get("default_model")
         model_for_env = (s.profile.get("model") if s.profile else None) or default_model
         if model_for_env:
             _, ctx = _resolve_model_id(model_for_env)
             if ctx:
                 env["CLAUDE_CODE_MAX_CONTEXT_TOKENS"] = str(ctx)
+
+        # Diagnostic: log resolved spawn config
+        _is_subsession = bool(getattr(s, "subsession_id", None))
+        print(f"[Claude session] backend={s.backend} bridge={spec.bridge_script} "
+              f"subsession={'yes' if _is_subsession else 'no'} "
+              f"resume={s.resume_id!r} fork={s.fork} "
+              f"default_model={default_model!r} model_for_env={model_for_env!r}")
 
         # Sync sublime project retain content to file for hook
         self._sync_project_retain()
@@ -64,22 +69,23 @@ class BridgeManager:
             if model:
                 env["ANTHROPIC_MODEL"] = model
 
-        # DeepSeek uses the Claude bridge with Anthropic-compatible endpoint
-        if s.backend == "deepseek":
-            ds_key = settings.get("deepseek_api_key") or os.environ.get("DEEPSEEK_API_KEY", "")
-            env["ANTHROPIC_BASE_URL"] = "https://api.deepseek.com/anthropic"
-            # Forcibly clear ANTHROPIC_API_KEY — if it leaked from parent process
-            # (e.g. set in shell rc), the SDK would prefer it over ANTHROPIC_AUTH_TOKEN
-            # and send Anthropic creds to api.deepseek.com, causing 401 errors.
-            env["ANTHROPIC_API_KEY"] = ""
-            if ds_key:
-                env["ANTHROPIC_AUTH_TOKEN"] = ds_key
-            else:
-                print("[Claude] WARNING: deepseek backend has no API key set "
-                      "(settings.deepseek_api_key or DEEPSEEK_API_KEY env var). "
-                      "Requests will likely fail with 401.")
-            env.setdefault("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "1")
-            env.setdefault("CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK", "1")
+        # Apply backend-specific env. static_env is always defaults; dynamic_env
+        # returns (overwrite, defaults) — overwrite always wins, defaults use setdefault.
+        for k, v in spec.static_env.items():
+            env.setdefault(k, v)
+        if spec.dynamic_env is not None:
+            settings_dict = {"deepseek_api_key": settings.get("deepseek_api_key")}
+            overwrite, defaults = spec.dynamic_env(settings_dict)
+            env.update(overwrite)
+            for k, v in defaults.items():
+                env.setdefault(k, v)
+            # Diagnostic: which env vars the bridge will receive (mask secrets)
+            def _mask(k, v):
+                if any(s in k.upper() for s in ("KEY", "TOKEN", "SECRET", "PASSWORD")):
+                    return f"<set:{len(str(v))}b>" if v else "<empty>"
+                return v
+            shown = {k: _mask(k, v) for k, v in env.items() if k.startswith(("ANTHROPIC_", "CLAUDE_CODE_", "DEEPSEEK_", "OPENAI_"))}
+            print(f"[Claude session] env (masked) for {s.backend}: {shown}")
 
         if s.backend == "openai":
             oai_url = settings.get("openai_base_url") or os.environ.get("OPENAI_BASE_URL", "")
@@ -92,14 +98,7 @@ class BridgeManager:
             if oai_model:
                 env["OPENAI_MODEL"] = oai_model
 
-        if s.backend == "codex":
-            bridge_script = CODEX_BRIDGE_SCRIPT
-        elif s.backend == "copilot":
-            bridge_script = COPILOT_BRIDGE_SCRIPT
-        elif s.backend == "openai":
-            bridge_script = OPENAI_BRIDGE_SCRIPT
-        else:
-            bridge_script = BRIDGE_SCRIPT
+        bridge_script = os.path.join(os.path.dirname(__file__), "bridge", spec.bridge_script)
         s.client = JsonRpcClient(s._on_notification)
         s.client.start([python_path, bridge_script], env=env)
         s._status_mgr.status("connecting...")

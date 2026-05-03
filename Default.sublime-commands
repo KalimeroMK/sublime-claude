@@ -216,6 +216,10 @@
         "command": "claude_skills_disable_all"
     },
     {
+        "caption": "Claude: Open Terminal",
+        "command": "claude_terminal_open"
+    },
+    {
         "caption": "Claude: Toggle Terminal",
         "command": "claude_toggle_terminal"
     },

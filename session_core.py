@@ -30,12 +30,6 @@ from .session_env import (
 )
 
 
-BRIDGE_SCRIPT = os.path.join(os.path.dirname(__file__), "bridge", "main.py")
-CODEX_BRIDGE_SCRIPT = os.path.join(os.path.dirname(__file__), "bridge", "codex_main.py")
-COPILOT_BRIDGE_SCRIPT = os.path.join(os.path.dirname(__file__), "bridge", "copilot_main.py")
-OPENAI_BRIDGE_SCRIPT = os.path.join(os.path.dirname(__file__), "bridge", "openai_main.py")
-
-
 class ContextItem:
     """A pending context item to attach to next query."""
     def __init__(self, kind: str, name: str, content: str):

@@ -17,7 +17,8 @@ class StatusManager:
         output = self._s.output
         if not output.view or not output.view.is_valid():
             return
-        label = self._s.backend.title() if self._s.backend != "claude" else "Claude"
+        from . import backends
+        label = backends.get(self._s.backend).label
         prefix = "[PLAN] " if self._s.plan_mode else ""
         parts = [f"{prefix}{text}"]
         if self._s.backend == "claude":

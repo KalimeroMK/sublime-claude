@@ -10,47 +10,10 @@ from .session import Session, load_saved_sessions
 from .prompt_builder import PromptBuilder
 from .command_parser import CommandParser
 
-# Fallback model lists per backend (used when no cache/settings available)
-DEFAULT_MODELS = {
-    "claude": [
-        ["opus", "Opus 4.7"],
-        ["opus@400k", "Opus 4.7 (400K context)"],
-        ["claude-opus-4-6[1m]", "Opus 4.6 (1M context)"],
-        ["claude-opus-4-6[1m]@400k", "Opus 4.6 (400K context)"],
-        ["claude-opus-4-6", "Opus 4.6"],
-        ["sonnet", "Sonnet 4.6"],
-        ["haiku", "Haiku 4.5"],
-        ["claude-opus-4-5", "Opus 4.5"],
-        ["claude-sonnet-4-5", "Sonnet 4.5"],
-    ],
-    "copilot": [
-        ["claude-sonnet-4-6", "Sonnet 4.6"],
-        ["claude-opus-4-6", "Opus 4.6"],
-        ["gpt-5.3-codex", "GPT-5.3 Codex"],
-        ["gpt-5-mini", "GPT-5 Mini (free)"],
-    ],
-    "codex": [
-        ["gpt-5.5", "GPT-5.5"],
-        ["gpt-5.4", "GPT-5.4"],
-        ["gpt-5.4-mini", "GPT-5.4 Mini"],
-        ["gpt-5.3-codex", "GPT-5.3 Codex"],
-        ["o3", "O3"],
-    ],
-    "deepseek": [
-        ["deepseek-v4-pro", "DeepSeek V4 Pro"],
-        ["deepseek-v4-flash", "DeepSeek V4 Flash"],
-    ],
-    "openai": [
-        ["gpt-4o", "GPT-4o"],
-        ["gpt-4o-mini", "GPT-4o Mini"],
-        ["gpt-4-turbo", "GPT-4 Turbo"],
-        ["o3-mini", "O3 Mini"],
-        ["llama3.1", "Ollama: Llama 3.1"],
-        ["qwen2.5", "Ollama: Qwen 2.5"],
-        ["mistral", "Ollama: Mistral"],
-        ["phi4", "Ollama: Phi-4"],
-    ],
-}
+# Fallback model lists per backend (used when no cache/settings available).
+# Sourced from backends.BACKENDS registry — one place to add a backend.
+from . import backends
+DEFAULT_MODELS = backends.default_models_dict()
 
 
 class ClaudeCodeStartCommand(sublime_plugin.WindowCommand):
