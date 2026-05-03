@@ -594,6 +594,7 @@ class SessionQueryMixin:
             return
 
         self._input_mode_entered = True
+        self.last_idle_at = time.time()
 
         if self.draft_prompt and self.output.view:
             self.output.view.run_command("append", {"characters": self.draft_prompt})

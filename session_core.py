@@ -127,6 +127,7 @@ class Session(SessionQueryMixin, SessionPermissionsMixin):
 
         # Activity tracking for auto-sleep
         self.last_activity: float = time.time()
+        self.last_idle_at: float = 0  # set when session enters input mode (truly idle)
 
         # Plan mode state
         self.plan_mode: bool = False
@@ -269,57 +270,52 @@ class Session(SessionQueryMixin, SessionPermissionsMixin):
         """Undo last conversation turn by rewinding the CLI session."""
         if not self.session_id:
             return
-        # Allow undo even while "working" (bridge reconnecting from previous undo)
         if self.working and self.current_tool != "rewinding...":
             return
         rewind_id, undone_prompt = self._find_rewind_point()
         if not rewind_id:
             print(f"[Claude] undo_message: no rewind point found")
             return
+        self._apply_undo(rewind_id, undone_prompt)
+
+    def _apply_undo(self, rewind_id: str, undone_prompt: str) -> None:
+        """Execute the rewind to rewind_id, restoring undone_prompt as draft."""
         saved_id = self.session_id
-        print(f"[Claude] undo_message: rewinding {saved_id} to {rewind_id}")
-        # Exit input mode
+        print(f"[Claude] undo: rewinding {saved_id} to {rewind_id}")
         if self.output._input_mode:
             self.output.exit_input_mode(keep_text=False)
-        # Erase last prompt turn from view (prompt = "◎ ... ▶", not input marker "◎ ")
         view = self.output.view
         content = view.substr(sublime.Region(0, view.size()))
-        # Find last prompt line (contains " ▶")
         import re as _re
         last_prompt = None
         for m in _re.finditer(r'\n◎ .+? ▶', content):
             last_prompt = m
         if not last_prompt and content.startswith("◎ ") and " ▶" in content.split("\n")[0]:
-            print(f"[Claude] undo: erasing entire view (first turn)")
             self.output._replace(0, view.size(), "")
         elif last_prompt:
-            erase_from = last_prompt.start()
-            print(f"[Claude] undo: erasing from {erase_from} to {view.size()}, matched={last_prompt.group()[:40]!r}")
-            self.output._replace(erase_from, view.size(), "")
-        else:
-            print(f"[Claude] undo: no prompt found to erase")
-        # Update conversation state
+            self.output._replace(last_prompt.start(), view.size(), "")
         if self.output.current:
             self.output.current = None
         view.erase_regions(CONVERSATION_REGION_KEY)
-        # Kill bridge synchronously (may already be dead from previous undo)
         if self.client:
             self.client.stop()
             self.client = None
         self.initialized = False
-        # Restart bridge with rewind
         self.session_id = saved_id
         self.resume_id = saved_id
         self.fork = False
         self.draft_prompt = undone_prompt
-        self._input_mode_entered = True  # Block auto input mode until bridge ready
+        self._input_mode_entered = True
         self._pending_resume_at = rewind_id
-        self._save_session()  # Persist rewind point for restart survival
+        self._save_session()
         self.working = True
         self.current_tool = "rewinding..."
         self._animate()
         self.start(resume_session_at=rewind_id)
-        # _on_init will reset _input_mode_entered and call _enter_input_with_draft
+
+    def get_turns_for_undo(self) -> list:
+        """Delegate to StateManager."""
+        return self._state.get_turns_for_undo()
 
     def _find_rewind_point(self) -> tuple:
         """Delegate to StateManager."""

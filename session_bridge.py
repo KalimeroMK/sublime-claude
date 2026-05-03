@@ -68,8 +68,16 @@ class BridgeManager:
         if s.backend == "deepseek":
             ds_key = settings.get("deepseek_api_key") or os.environ.get("DEEPSEEK_API_KEY", "")
             env["ANTHROPIC_BASE_URL"] = "https://api.deepseek.com/anthropic"
+            # Forcibly clear ANTHROPIC_API_KEY — if it leaked from parent process
+            # (e.g. set in shell rc), the SDK would prefer it over ANTHROPIC_AUTH_TOKEN
+            # and send Anthropic creds to api.deepseek.com, causing 401 errors.
+            env["ANTHROPIC_API_KEY"] = ""
             if ds_key:
                 env["ANTHROPIC_AUTH_TOKEN"] = ds_key
+            else:
+                print("[Claude] WARNING: deepseek backend has no API key set "
+                      "(settings.deepseek_api_key or DEEPSEEK_API_KEY env var). "
+                      "Requests will likely fail with 401.")
             env.setdefault("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "1")
             env.setdefault("CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK", "1")
 
@@ -265,6 +273,8 @@ class BridgeManager:
     def stop(self) -> None:
         """Stop session and clean up."""
         s = self._s
+        self._abort_background_tools("session stopped")
+        s._task_tool_map.clear()
         s._persist_state("closed")
         s._stop_heartbeat()
         if s.persona_session_id and s.persona_url:
@@ -280,16 +290,35 @@ class BridgeManager:
         s.pending_context.clear()
         s._queued_prompts.clear()
 
-    def sleep(self) -> None:
-        """Put session to sleep — kill bridge, keep view."""
+    def sleep(self, force: bool = False) -> bool:
+        """Put session to sleep — kill bridge, keep view.
+
+        Returns True if the session was put to sleep, False if refused.
+        Refuses (returns False) when background tools are running unless
+        force=True. Caller can re-invoke with force=True to abort + sleep.
+        """
         s = self._s
         if not s.session_id:
-            return
+            return False
         if s.working:
             self.interrupt()
-            sublime.set_timeout(self.sleep, 500)
-            return
+            sublime.set_timeout(lambda: self.sleep(force=force), 500)
+            return False
+        # Refuse to sleep if background processes are alive — they'd be killed
+        # silently with the bridge subprocess. force=True overrides.
+        if not force and s.output:
+            bg = s.output.active_background_tools()
+            if bg:
+                names = ", ".join(t.name for t in bg[:3])
+                more = f" (+{len(bg) - 3} more)" if len(bg) > 3 else ""
+                msg = f"refusing to sleep: {len(bg)} background tool(s) running: {names}{more}"
+                print(f"[Claude] {msg}")
+                sublime.status_message(f"Claude: {msg}")
+                return False
         s._stop_heartbeat()
+        # If we got here with force=True and bg tools, abort their UI state.
+        self._abort_background_tools("session slept")
+        s._task_tool_map.clear()
         if s.client:
             client = s.client
             s.client = None
@@ -297,6 +326,7 @@ class BridgeManager:
         s.initialized = False
         s._persist_state("sleeping")
         s._apply_sleep_ui()
+        return True
 
     def wake(self) -> None:
         """Wake a sleeping session — re-spawn bridge with resume."""
@@ -323,12 +353,34 @@ class BridgeManager:
             s.output.set_name(s.display_name)
 
     def restart(self) -> None:
-        """Restart session — sleep then immediately wake."""
+        """Restart session — sleep then immediately wake.
+
+        Restart is an explicit user action (typically used to fix a stuck
+        session), so background tools are aborted via force=True.
+        """
         def do_wake():
             if self._s.output and self._s.output.view and self._s.output.view.settings().get("claude_sleeping"):
                 self.wake()
-        self.sleep()
-        sublime.set_timeout(do_wake, 600)
+        if self.sleep(force=True):
+            sublime.set_timeout(do_wake, 600)
+
+    def _abort_background_tools(self, reason: str) -> None:
+        """Mark all in-flight background tools as errored (their subprocess is gone)."""
+        s = self._s
+        if not s.output:
+            return
+        try:
+            from .output_models import ERROR
+            bg = s.output.active_background_tools()
+            for tool in bg:
+                old_status = tool.status
+                tool.status = ERROR
+                tool.result = f"(aborted: {reason})"
+                s.output._patch_tool_symbol(tool, old_status)
+            if bg:
+                print(f"[Claude] aborted {len(bg)} background tool(s): {reason}")
+        except Exception as e:
+            print(f"[Claude] _abort_background_tools error: {e}")
 
     def ensure_alive(self, silent: bool = False) -> bool:
         """Check bridge health; auto-restart if dead."""

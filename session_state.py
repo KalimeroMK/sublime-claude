@@ -1,9 +1,50 @@
 """State persistence manager for sessions (sessions.json, retain files, JSONL)."""
 import json
 import os
-from typing import Optional
+from typing import Optional, List, Dict
 
 from .session_env import load_saved_sessions, save_sessions
+
+
+def _bookmarks_path(project_path: str = None) -> str:
+    if project_path:
+        return os.path.join(project_path, ".claude", "bookmarks.json")
+    return os.path.expanduser("~/.claude/bookmarks.json")
+
+
+def load_bookmarks(project_path: str = None) -> set:
+    """Load starred session IDs for a project."""
+    path = _bookmarks_path(project_path)
+    if os.path.exists(path):
+        try:
+            with open(path) as f:
+                return set(json.load(f).get("starred", []))
+        except Exception:
+            pass
+    return set()
+
+
+def save_bookmarks(starred: set, project_path: str = None) -> None:
+    path = _bookmarks_path(project_path)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    try:
+        with open(path, "w") as f:
+            json.dump({"starred": list(starred)}, f, indent=2)
+    except Exception as e:
+        print(f"[Claude] Failed to save bookmarks: {e}")
+
+
+def toggle_bookmark(session_id: str, project_path: str = None) -> bool:
+    """Toggle star for a session. Returns True if now starred."""
+    starred = load_bookmarks(project_path)
+    if session_id in starred:
+        starred.discard(session_id)
+        now_starred = False
+    else:
+        starred.add(session_id)
+        now_starred = True
+    save_bookmarks(starred, project_path)
+    return now_starred
 
 
 class StateManager:
@@ -200,13 +241,12 @@ class StateManager:
                     return candidate
         return None
 
-    def find_rewind_point(self) -> tuple:
-        """Find the assistant entry uuid to rewind to.
-        Returns (uuid, undone_prompt) or (None, "")."""
+    def _read_turns(self) -> list:
+        """Read JSONL and return [(prompt, prev_assistant_uuid)] for each user turn."""
         jsonl_path = self.find_jsonl_path()
         if not jsonl_path:
-            return None, ""
-        turns = []  # [(prompt, prev_assistant_uuid)]
+            return []
+        turns = []
         last_assistant_uuid = None
         try:
             with open(jsonl_path, "r") as f:
@@ -240,9 +280,28 @@ class StateManager:
                                     prompt += block.get("text", "")
                         turns.append((prompt, last_assistant_uuid))
         except Exception as e:
-            print(f"[Claude] _find_rewind_point error: {e}")
-            return None, ""
+            print(f"[Claude] _read_turns error: {e}")
+        return turns
 
+    def get_turns_for_undo(self) -> list:
+        """Return [(label, rewind_id, draft_prompt)] for all undoable turns, newest first."""
+        turns = self._read_turns()
+        result = []
+        for i, (prompt, prev_asst_uuid) in enumerate(turns):
+            if not prev_asst_uuid:
+                continue  # first turn with no prior assistant — can't rewind here
+            first_line = prompt.split("\n")[0][:72]
+            label = f"{i + 1} — {first_line}" if first_line else f"{i + 1} — (empty)"
+            result.append((label, prev_asst_uuid, prompt))
+        result.reverse()
+        return result
+
+    def find_rewind_point(self) -> tuple:
+        """Find the assistant entry uuid to rewind to.
+        Returns (uuid, undone_prompt) or (None, "")."""
+        turns = self._read_turns()
+        if not turns:
+            return None, ""
         s = self._s
         if s._pending_resume_at:
             for i, (prompt, asst_uuid) in enumerate(turns):
@@ -255,7 +314,6 @@ class StateManager:
                         return None, ""
                     return rewind_to, undone_prompt
             return None, ""
-
         if len(turns) < 2:
             return None, ""
         undone_prompt = turns[-1][0]

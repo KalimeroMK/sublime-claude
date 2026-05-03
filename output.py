@@ -51,7 +51,7 @@ class OutputView(PlanUIRendererMixin, PermissionUIRendererMixin, QuestionUIRende
         self._batch_allow_edits_only: bool = True  # Only batch Write/Edit, or all tools
         self.pending_plan: Optional[PlanApproval] = None
         self.pending_question: Optional[QuestionRequest] = None
-        self.auto_allow_tools: set = set()  # Tools auto-allowed for this session
+        self.auto_allow_tools: set = self._load_persisted_auto_allow()  # Tools auto-allowed for this session
         self._last_allowed_tool: Optional[str] = None  # Track last tool we allowed
         self._last_allowed_time: float = 0  # Timestamp of last allow
         self._pending_context_region: tuple = (0, 0)  # Region for context display
@@ -103,12 +103,10 @@ class OutputView(PlanUIRendererMixin, PermissionUIRendererMixin, QuestionUIRende
         self.view.settings().set("claude_output", True)
         self.view.settings().set("auto_indent", False)
         self.view.settings().set("drag_text", True)
-        output_settings = sublime.load_settings("ClaudeOutput.sublime-settings")
-        for key in ("font_size", "line_numbers", "gutter", "word_wrap", "margin",
-                     "draw_indent_guides", "highlight_line", "fold_buttons"):
-            val = output_settings.get(key)
-            if val is not None:
-                self.view.settings().set(key, val)
+        self._apply_output_settings()
+        sublime.load_settings("ClaudeOutput.sublime-settings").add_on_change(
+            f"claude_output_{self.view.id()}", self._apply_output_settings
+        )
         try:
             self.view.assign_syntax("Packages/ClaudeCode/ClaudeOutput.sublime-syntax")
             self.view.settings().set("color_scheme", "Packages/ClaudeCode/ClaudeOutput.hidden-tmTheme")
@@ -1089,6 +1087,17 @@ class OutputView(PlanUIRendererMixin, PermissionUIRendererMixin, QuestionUIRende
         else:
             self._last_rendered_last_event_len = 0
 
+
+
+    def _apply_output_settings(self) -> None:
+        if not self.view:
+            return
+        s = sublime.load_settings("ClaudeOutput.sublime-settings")
+        for key in ("font_size", "line_numbers", "gutter", "word_wrap", "margin",
+                    "draw_indent_guides", "highlight_line", "fold_buttons", "fade_fold_buttons"):
+            val = s.get(key)
+            if val is not None:
+                self.view.settings().set(key, val)
 
 
 # --- Helper commands for text manipulation ---

@@ -343,6 +343,17 @@ class PermissionUIRendererMixin:
         # Process next queued permission if any
         self._process_permission_queue()
 
+    def _load_persisted_auto_allow(self) -> set:
+        """Load autoAllowedMcpTools from project settings at session start."""
+        try:
+            from .settings import load_project_settings
+            folders = self.window.folders()
+            project_dir = folders[0] if folders else None
+            settings = load_project_settings(project_dir)
+            return set(settings.get("autoAllowedMcpTools", []))
+        except Exception:
+            return set()
+
     def _save_auto_allowed_tool(self, tool: str) -> None:
         """Save a tool to the auto-allowed list in project settings."""
         import os

@@ -82,6 +82,10 @@ def plugin_loaded() -> None:
                         session._usage_history = saved.get("usage_history", [])
                         break
                 session.output.view = view
+                session.output._apply_output_settings()
+                sublime.load_settings("ClaudeOutput.sublime-settings").add_on_change(
+                    f"claude_output_{view.id()}", session.output._apply_output_settings
+                )
                 session.draft_prompt = ""
                 sublime._claude_sessions[view.id()] = session
                 session._apply_sleep_ui()
@@ -184,8 +188,8 @@ def _check_auto_sleep():
         if (session.initialized
                 and not session.working
                 and not session.is_sleeping
-                and session.last_activity > 0
-                and session.last_activity < threshold):
+                and session.last_idle_at > 0
+                and session.last_idle_at < threshold):
             print(f"[Claude] auto-sleep: {session.name} idle for >{timeout_min}m")
             session.sleep()
 

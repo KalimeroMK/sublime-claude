@@ -22,6 +22,8 @@ sys.modules['ClaudeCode.core'] = core_mod
 session_mod = types.ModuleType('ClaudeCode.session')
 session_mod.Session = MagicMock()
 session_mod.load_saved_sessions = MagicMock(return_value=[])
+session_mod.load_bookmarks = MagicMock(return_value=set())
+session_mod.toggle_bookmark = MagicMock(return_value=True)
 sys.modules['ClaudeCode.session'] = session_mod
 
 ctx_mod = types.ModuleType('ClaudeCode.context_parser')
