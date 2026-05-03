@@ -2,7 +2,7 @@
 import re
 import sublime
 import sublime_plugin
-from typing import List, Optional, Dict, Callable, Any
+from typing import List, Optional
 
 from .constants import (
     SPINNER_FRAMES,
@@ -22,7 +22,6 @@ from .output_permissions import PermissionUIRendererMixin
 from .output_question import QuestionUIRendererMixin
 from .output_models import (
     PENDING, DONE, ERROR, BACKGROUND,
-    PLAN_APPROVE, PLAN_REJECT, PLAN_VIEW,
     PlanApproval, PermissionRequest, QuestionRequest,
     ToolCall, TodoItem, Conversation,
 )

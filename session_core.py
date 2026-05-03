@@ -15,12 +15,11 @@ from .session_heartbeat import HeartbeatMonitor
 from .session_terminal import TerminalAdapter
 from .session_state import StateManager
 from .session_ui import SessionUIHelper
-from .constants import CONVERSATION_REGION_KEY, MAX_RELATED_FILES, MAX_SESSIONS
+from .constants import CONVERSATION_REGION_KEY, MAX_RELATED_FILES
 from .session_env import (
     _find_python_310_plus,
     _resolve_model_id,
     load_saved_sessions,
-    save_sessions,
     _CONTEXT_LIMITS,
     _MODEL_CONTEXT_LIMITS,
 )
