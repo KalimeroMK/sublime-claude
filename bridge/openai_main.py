@@ -352,10 +352,21 @@ def _make_ctx():
     return ctx
 
 
-def _http_post(url: str, payload: dict, headers: dict) -> dict:
+async def _http_post(url: str, payload: dict, headers: dict) -> dict:
     import urllib.request
+    import asyncio
     data = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(url, data=data, headers=headers, method="POST")
+    # Run blocking HTTP in executor to avoid blocking the async event loop
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(
+        None,
+        lambda: _http_post_sync(req)
+    )
+
+
+def _http_post_sync(req) -> dict:
+    import urllib.request
     with urllib.request.urlopen(req, context=_make_ctx(), timeout=300) as resp:
         return json.loads(resp.read().decode("utf-8"))
 
@@ -509,7 +520,7 @@ class Bridge(BaseBridge):
                 payload["tools"] = tools
 
             headers = {"Content-Type": "application/json"}
-            body = _http_post(url, payload, headers)
+            body = await _http_post(url, payload, headers)
 
             message = body.get("message", {})
             content = message.get("content", "")
@@ -565,7 +576,9 @@ class Bridge(BaseBridge):
 
                 executor = TOOL_DISPATCH.get(name)
                 if executor:
-                    result_text = executor(args, self._cwd)
+                    import asyncio
+                    loop = asyncio.get_running_loop()
+                    result_text = await loop.run_in_executor(None, executor, args, self._cwd)
                 else:
                     result_text = f"Unknown tool: {name}"
 
@@ -621,7 +634,7 @@ class Bridge(BaseBridge):
             if self.api_key:
                 headers["Authorization"] = f"Bearer {self.api_key}"
 
-            body = _http_post(url, payload, headers)
+            body = await _http_post(url, payload, headers)
 
             choice = body["choices"][0]
             message = choice["message"]

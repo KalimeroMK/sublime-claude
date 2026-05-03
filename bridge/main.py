@@ -18,6 +18,7 @@ from settings import load_project_settings
 from logger import get_bridge_logger, ContextLogger
 
 from terminal import TerminalManager, strip_ansi
+from permissions import parse_permission_pattern, extract_bash_commands, match_permission_pattern
 
 
 # Import notalone2 client for daemon-based notifications
@@ -38,13 +39,16 @@ def _bridge_log(message: str) -> None:
         if os.path.exists(_BRIDGE_LOG_PATH):
             size = os.path.getsize(_BRIDGE_LOG_PATH)
             if size > _BRIDGE_LOG_MAX_BYTES:
-                # Rotate: keep last 10% of log
+                # Rotate: keep last 10% of log without loading entire file into memory
+                keep_bytes = _BRIDGE_LOG_MAX_BYTES // 10
                 with open(_BRIDGE_LOG_PATH, "r") as f:
-                    content = f.read()
-                keep_from = len(content) // 10
+                    f.seek(max(0, size - keep_bytes))
+                    # Skip to next newline to avoid partial line
+                    f.readline()
+                    tail = f.read()
                 with open(_BRIDGE_LOG_PATH, "w") as f:
                     f.write("[log rotated]\n")
-                    f.write(content[keep_from:])
+                    f.write(tail)
         with open(_BRIDGE_LOG_PATH, "a") as f:
             f.write(message + "\n")
     except Exception:
@@ -455,186 +459,6 @@ You are subsession **{subsession_id}**. Call signal_complete(session_id={view_id
         """
         return []
 
-    def _parse_permission_pattern(self, pattern: str) -> Tuple[str, Optional[str]]:
-        """Parse permission pattern into (tool_name, specifier).
-
-        Formats:
-            "Bash" -> ("Bash", None)
-            "Bash(git:*)" -> ("Bash", "git:*")
-            "Read(/src/**)" -> ("Read", "/src/**")
-        """
-        if '(' in pattern and pattern.endswith(')'):
-            paren_idx = pattern.index('(')
-            tool_name = pattern[:paren_idx]
-            specifier = pattern[paren_idx + 1:-1]
-            return tool_name, specifier
-        return pattern, None
-
-    def _extract_bash_commands(self, command: str) -> List[str]:
-        """Extract individual command names from a bash command string.
-
-        Handles:
-        - Command chains: cmd1 && cmd2, cmd1 || cmd2, cmd1 ; cmd2
-        - Pipes: cmd1 | cmd2
-        - Environment variables: FOO=bar cmd
-        - Subshells: $(cmd), `cmd`
-
-        Returns list of command names (e.g., ["cd", "git", "npm"])
-        """
-        import re
-        import shlex
-
-        commands = []
-
-        # Split on command separators: &&, ||, ;, |, but not inside quotes
-        # Simple approach: split on these patterns
-        parts = re.split(r'\s*(?:&&|\|\||;|\|)\s*', command)
-
-        for part in parts:
-            part = part.strip()
-            if not part:
-                continue
-
-            # Skip subshell wrappers
-            part = re.sub(r'^\$\(|\)$|^`|`$', '', part).strip()
-
-            # Skip leading environment variable assignments (VAR=value)
-            while part and re.match(r'^[A-Za-z_][A-Za-z0-9_]*=\S*\s+', part):
-                part = re.sub(r'^[A-Za-z_][A-Za-z0-9_]*=\S*\s+', '', part)
-
-            if not part:
-                continue
-
-            # Extract first word as command name
-            try:
-                tokens = shlex.split(part)
-                if tokens:
-                    cmd = tokens[0]
-                    # Handle path prefixes like /usr/bin/git -> git
-                    if '/' in cmd:
-                        cmd = cmd.split('/')[-1]
-                    commands.append(cmd)
-            except ValueError:
-                # shlex parsing failed, try simple split
-                words = part.split()
-                if words:
-                    cmd = words[0]
-                    if '/' in cmd:
-                        cmd = cmd.split('/')[-1]
-                    commands.append(cmd)
-
-        return commands
-
-    def _match_permission_pattern(self, tool_name: str, tool_input: dict, pattern: str) -> bool:
-        """Check if tool use matches a permission pattern.
-
-        Supports:
-            - Simple tool match: "Bash" matches any Bash command
-            - Prefix match: "Bash(git:*)" matches commands starting with "git"
-            - Exact match: "Bash(git status)" matches exactly "git status"
-            - Glob match: "Read(/src/**/*.py)" matches files under /src/ ending in .py
-        """
-        import fnmatch
-
-        parsed_tool, specifier = self._parse_permission_pattern(pattern)
-
-        # Tool name must match (supports wildcards like mcp__*__)
-        if not fnmatch.fnmatch(tool_name, parsed_tool):
-            return False
-
-        # No specifier = match all uses of this tool
-        if specifier is None:
-            return True
-
-        # Special handling for Bash - extract and match individual commands
-        if tool_name == "Bash":
-            full_command = tool_input.get("command", "")
-            if not full_command:
-                return False
-
-            # Extract individual command names from the bash string
-            cmd_names = self._extract_bash_commands(full_command)
-
-            # Handle prefix match with :* suffix
-            if specifier.endswith(":*"):
-                prefix = specifier[:-2]
-                # Match if ANY command starts with prefix OR full command starts with prefix
-                if full_command.startswith(prefix):
-                    return True
-                return any(cmd.startswith(prefix) for cmd in cmd_names)
-
-            # Handle glob/fnmatch patterns
-            if any(c in specifier for c in ['*', '?', '[']):
-                # Match against full command OR any individual command
-                if fnmatch.fnmatch(full_command, specifier):
-                    return True
-                return any(fnmatch.fnmatch(cmd, specifier) for cmd in cmd_names)
-
-            # Exact match - check full command OR any individual command name
-            if full_command == specifier:
-                return True
-            return specifier in cmd_names
-
-        # Special handling for Read/Write/Edit - directory-based permissions
-        # Like Claude CLI: permission granted for a file extends to its directory
-        if tool_name in ("Read", "Write", "Edit"):
-            file_path = tool_input.get("file_path", "")
-            if not file_path:
-                return False
-
-            # Handle glob patterns (e.g., /src/**/*.py)
-            if any(c in specifier for c in ['*', '?', '[']):
-                return fnmatch.fnmatch(file_path, specifier)
-
-            # Handle prefix match with :* suffix
-            if specifier.endswith(":*"):
-                prefix = specifier[:-2]
-                return file_path.startswith(prefix)
-
-            # Directory-based permission: if specifier is a file path,
-            # allow access to any file in the same directory
-            # e.g., pattern "/src/foo.py" allows "/src/bar.py"
-            specifier_dir = os.path.dirname(specifier.rstrip('/'))
-            file_dir = os.path.dirname(file_path)
-
-            # If specifier looks like a directory (ends with /), match files within
-            if specifier.endswith('/'):
-                return file_path.startswith(specifier)
-
-            # Same directory = allowed
-            if specifier_dir and file_dir == specifier_dir:
-                return True
-
-            # Exact match still works
-            return file_path == specifier
-
-        # Get the value to match against based on tool type
-        match_value = None
-        if tool_name in ("Glob", "Grep"):
-            match_value = tool_input.get("pattern", "")
-        elif tool_name == "WebFetch":
-            match_value = tool_input.get("url", "")
-        elif tool_name == "Skill":
-            match_value = tool_input.get("skill", "")
-        else:
-            # For other tools, try common field names
-            match_value = tool_input.get("command") or tool_input.get("path") or tool_input.get("query", "")
-
-        if not match_value:
-            return False
-
-        # Handle prefix match with :* suffix (like Claude Code)
-        if specifier.endswith(":*"):
-            prefix = specifier[:-2]
-            return match_value.startswith(prefix)
-
-        # Handle glob/fnmatch patterns
-        if any(c in specifier for c in ['*', '?', '[']):
-            return fnmatch.fnmatch(match_value, specifier)
-
-        # Exact match
-        return match_value == specifier
-
     def _load_guardrails(self) -> dict:
         """Load guardrails configuration from project settings."""
         settings = load_project_settings(self.cwd)
@@ -688,12 +512,13 @@ You are subsession **{subsession_id}**. Call signal_complete(session_id={view_id
 
         return True, ""
 
-    def _run_pre_flight_checks(self, command: str) -> Tuple[bool, str]:
+    async def _run_pre_flight_checks(self, command: str) -> Tuple[bool, str]:
         """Run pre-flight checks before allowing certain commands.
 
         Returns: (passed, message)
         """
         import subprocess
+        import asyncio
 
         guardrails = self._load_guardrails()
         checks_config = guardrails.get("pre_flight_checks", {})
@@ -711,9 +536,14 @@ You are subsession **{subsession_id}**. Call signal_complete(session_id={view_id
         results = []
         for check in checks_to_run:
             try:
-                result = subprocess.run(
-                    check, shell=True, capture_output=True, text=True,
-                    cwd=self.cwd, timeout=120
+                # Run subprocess in executor to avoid blocking the async event loop
+                loop = asyncio.get_running_loop()
+                result = await loop.run_in_executor(
+                    None,
+                    lambda: subprocess.run(
+                        check, shell=True, capture_output=True, text=True,
+                        cwd=self.cwd, timeout=120
+                    )
                 )
                 if result.returncode != 0:
                     results.append(f"❌ {check} FAILED:\n{result.stdout}\n{result.stderr}")
@@ -756,7 +586,7 @@ You are subsession **{subsession_id}**. Call signal_complete(session_id={view_id
                 return PermissionResultDeny(message=f"Blocked dangerous command: {warning}")
 
             # Run pre-flight checks for commands that require them
-            passed, message = self._run_pre_flight_checks(tool_input["command"])
+            passed, message = await self._run_pre_flight_checks(tool_input["command"])
             if not passed:
                 _bridge_log(f"PRE-FLIGHT CHECKS FAILED: {message}\n")
                 return PermissionResultDeny(message=f"Pre-flight checks failed:\n{message}")
@@ -778,7 +608,7 @@ You are subsession **{subsession_id}**. Call signal_complete(session_id={view_id
 
                 # Check if tool matches any auto-allow pattern (supports fine-grained patterns)
                 for pattern in auto_allowed:
-                    if self._match_permission_pattern(tool_name, tool_input, pattern):
+                    if match_permission_pattern(tool_name, tool_input, pattern):
                         _bridge_log(f"can_use_tool: auto-allowed {tool_name} (matched pattern: {pattern})\n")
                         return PermissionResultAllow(updated_input=tool_input)
 
@@ -791,7 +621,7 @@ You are subsession **{subsession_id}**. Call signal_complete(session_id={view_id
 
             # Check if tool matches any auto-allow pattern (supports fine-grained patterns)
             for pattern in auto_allowed:
-                if self._match_permission_pattern(tool_name, tool_input, pattern):
+                if match_permission_pattern(tool_name, tool_input, pattern):
                     _bridge_log(f"can_use_tool: auto-allowed {tool_name} (matched pattern: {pattern})\n")
                     return PermissionResultAllow(updated_input=tool_input)
 

@@ -7,6 +7,8 @@ import shutil
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from constants import MAX_DIFF_LENGTH
+
 
 class GitDiffCaptureTest(unittest.TestCase):
     """Test git diff capture logic."""
@@ -90,8 +92,8 @@ class GitDiffCaptureTest(unittest.TestCase):
             capture_output=True, text=True, timeout=10
         )
         diff = result.stdout.strip()
-        if len(diff) > 20000:
-            diff = diff[:20000] + "\n\n... [truncated]\n"
+        if len(diff) > MAX_DIFF_LENGTH:
+            diff = diff[:MAX_DIFF_LENGTH] + "\n\n... [truncated]\n"
         self.assertIn("[truncated]", diff)
 
 

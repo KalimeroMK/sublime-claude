@@ -62,3 +62,10 @@ TOOL_STATUS_PENDING = "pending"
 TOOL_STATUS_DONE = "done"
 TOOL_STATUS_ERROR = "error"
 TOOL_STATUS_BACKGROUND = "background"
+
+# ─── Limits & Thresholds ──────────────────────────────────────────────────────
+MAX_SESSIONS = 200                      # Max sessions to keep in registry
+MAX_RELATED_FILES = 5                   # Max related files to auto-add
+MAX_FILE_SIZE_AUTO_ADD = 100000         # Skip files larger than this (bytes)
+MAX_DIFF_LENGTH = 20000                 # Truncate diffs longer than this
+MAX_SESSION_NAME_LENGTH = 23            # Truncate session names in UI

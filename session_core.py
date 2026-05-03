@@ -11,7 +11,7 @@ from .rpc import JsonRpcClient
 from .output import OutputView
 from .session_query import SessionQueryMixin
 from .session_permissions import SessionPermissionsMixin
-from .constants import CONVERSATION_REGION_KEY
+from .constants import CONVERSATION_REGION_KEY, MAX_RELATED_FILES, MAX_SESSIONS
 from .session_env import (
     _find_python_310_plus,
     _resolve_model_id,
@@ -639,9 +639,8 @@ class Session(SessionQueryMixin, SessionPermissionsMixin):
                     already.add(os.path.abspath(first_line[14:]))
 
         added = 0
-        MAX_RELATED = 5
         for cand in candidates:
-            if added >= MAX_RELATED:
+            if added >= MAX_RELATED_FILES:
                 break
             if not cand or cand == path:
                 continue
@@ -1501,7 +1500,7 @@ class Session(SessionQueryMixin, SessionPermissionsMixin):
             entry.pop("resume_session_at", None)
         sessions.insert(0, entry)
         # Keep last 200 sessions
-        sessions = sessions[:200]
+        sessions = sessions[:MAX_SESSIONS]
         save_sessions(sessions)
 
     def _status(self, text: str) -> None:

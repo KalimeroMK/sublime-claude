@@ -89,6 +89,17 @@ def plugin_loaded() -> None:
 
     sublime.set_timeout(register_orphans, 500)
 
+    # Background index open projects to avoid blocking UI on first @codebase query
+    def _start_codebase_indexing():
+        try:
+            from .session_query import _start_background_index
+            for window in sublime.windows():
+                for folder in window.folders():
+                    _start_background_index(folder)
+        except Exception as e:
+            print(f"[Claude] Background codebase index error: {e}")
+
+    sublime.set_timeout(_start_codebase_indexing, 3000)  # Delay 3s to avoid slowing startup
 
 
 def plugin_unloaded() -> None:

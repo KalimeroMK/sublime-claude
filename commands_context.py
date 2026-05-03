@@ -6,6 +6,7 @@ import sublime_plugin
 import platform
 
 from .core import get_active_session, get_session_for_view, create_session
+from .constants import MAX_DIFF_LENGTH
 from .session import Session, load_saved_sessions
 from .prompt_builder import PromptBuilder
 from .command_parser import CommandParser
@@ -249,8 +250,8 @@ class ClaudeCodeGitCommitMessageCommand(sublime_plugin.WindowCommand):
             return
 
         # Truncate if too large
-        if len(diff) > 20000:
-            diff = diff[:20000] + "\n\n... [truncated]\n"
+        if len(diff) > MAX_DIFF_LENGTH:
+            diff = diff[:MAX_DIFF_LENGTH] + "\n\n... [truncated]\n"
 
         prompt = (
             "Write a concise, conventional commit message for the following changes.\n"

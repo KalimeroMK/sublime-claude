@@ -1,13 +1,48 @@
 """Session query orchestration mixin."""
 import os
+import threading
 import time
 from typing import Callable
 
 import sublime
 
 from .smart_context import build_smart_context
-from .constants import OUTPUT_VIEW_SETTING
+from .constants import OUTPUT_VIEW_SETTING, MAX_FILE_SIZE_AUTO_ADD, MAX_DIFF_LENGTH
 from .memory import get_relevant_memories, format_memory_prompt, extract_memories_from_response
+
+# Module-level cache for CodebaseSearch instances and background index threads
+_codebase_instances: dict = {}
+_codebase_index_threads: dict = {}
+
+
+def _get_codebase_search(project_root: str):
+    """Get cached CodebaseSearch instance for a project."""
+    if project_root not in _codebase_instances:
+        from .codebase_search import CodebaseSearch
+        _codebase_instances[project_root] = CodebaseSearch(project_root)
+    return _codebase_instances[project_root]
+
+
+def _start_background_index(project_root: str) -> None:
+    """Start background indexing for a project if the index is stale."""
+    search = _get_codebase_search(project_root)
+    if not search.needs_reindex(max_age_hours=24.0):
+        return
+    if project_root in _codebase_index_threads:
+        return  # Already indexing
+
+    def worker():
+        try:
+            count = search.index_project()
+            print(f"[Claude] Background indexed {count} files for {project_root}")
+        except Exception as e:
+            print(f"[Claude] Background index error for {project_root}: {e}")
+        finally:
+            _codebase_index_threads.pop(project_root, None)
+
+    t = threading.Thread(target=worker, daemon=True)
+    _codebase_index_threads[project_root] = t
+    t.start()
 
 
 class SessionQueryMixin:
@@ -140,7 +175,7 @@ class SessionQueryMixin:
                 return
             # Skip very large files (>100KB)
             size = active_view.size()
-            if size > 100000:
+            if size > MAX_FILE_SIZE_AUTO_ADD:
                 return
             content = active_view.substr(sublime.Region(0, size))
             if not content.strip():
@@ -229,13 +264,23 @@ class SessionQueryMixin:
                 return ""
 
             try:
-                from .codebase_search import CodebaseSearch
-                search = CodebaseSearch(project_root)
-                # Index on first use if needed
+                search = _get_codebase_search(project_root)
+                # Index on first use if needed — run in thread to avoid blocking UI
                 if search.needs_reindex(max_age_hours=24.0):
                     print(f"[Claude] Indexing codebase for @codebase...")
-                    count = search.index_project()
-                    print(f"[Claude] Indexed {count} files")
+                    sublime.status_message("Claude: Indexing codebase...")
+                    indexed_count = [0]
+
+                    def _index_worker():
+                        indexed_count[0] = search.index_project()
+
+                    t = threading.Thread(target=_index_worker, daemon=True)
+                    t.start()
+                    # Poll with short timeouts; actual work is off-main-thread
+                    while t.is_alive():
+                        t.join(timeout=0.05)
+                    print(f"[Claude] Indexed {indexed_count[0]} files")
+                    sublime.status_message(f"Claude: Indexed {indexed_count[0]} files")
 
                 results = search.search(query_text, top_k=5)
                 if results:
@@ -351,8 +396,8 @@ class SessionQueryMixin:
                     )
                     if result.returncode == 0 and result.stdout.strip():
                         diff = result.stdout.strip()
-                        if len(diff) > 20000:
-                            diff = diff[:20000] + "\n\n... [truncated]\n"
+                        if len(diff) > MAX_DIFF_LENGTH:
+                            diff = diff[:MAX_DIFF_LENGTH] + "\n\n... [truncated]\n"
                         self.pending_context.append(ContextItem(
                             kind="note",
                             name="git:staged",

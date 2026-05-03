@@ -1,8 +1,13 @@
 """Shared settings loading utilities."""
 import json
 import os
+import time
 from pathlib import Path
 from typing import Dict, Tuple
+
+# Simple TTL cache for project settings to avoid repeated disk I/O
+_SETTINGS_CACHE: dict = {}
+_SETTINGS_CACHE_TTL_SECONDS = 5.0
 
 # Use absolute imports for bridge compatibility
 try:
@@ -33,11 +38,19 @@ def load_project_settings(cwd: str = None) -> dict:
 
     User settings from ~/.claude.json are loaded first,
     then project settings (.claude/settings.json) override them.
+    Results are cached for 5 seconds to avoid repeated disk I/O.
     """
+    cache_key = cwd or "__no_cwd__"
+    now = time.monotonic()
+    cached = _SETTINGS_CACHE.get(cache_key)
+    if cached and (now - cached["time"]) < _SETTINGS_CACHE_TTL_SECONDS:
+        return cached["data"]
+
     # Start with user-level settings
     user_settings = safe_json_load(str(USER_SETTINGS_FILE), default={})
 
     if not cwd:
+        _SETTINGS_CACHE[cache_key] = {"time": now, "data": user_settings}
         return user_settings
 
     # Load project settings
@@ -68,6 +81,7 @@ def load_project_settings(cwd: str = None) -> dict:
                 auto_allowed.append(pattern)
         result["autoAllowedMcpTools"] = auto_allowed
 
+    _SETTINGS_CACHE[cache_key] = {"time": now, "data": result}
     return result
 
 

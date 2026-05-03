@@ -3,6 +3,7 @@
 These tests import bridge/main.py directly and validate the real guardrail
 methods on the Bridge class. Requires Python 3.10+.
 """
+import asyncio
 import json
 import os
 import shutil
@@ -101,7 +102,7 @@ class GuardrailsTest(unittest.TestCase):
                 "git push": ["echo 'tests passed'"]
             }
         })
-        passed, message = self.bridge._run_pre_flight_checks("git push origin main")
+        passed, message = asyncio.run(self.bridge._run_pre_flight_checks("git push origin main"))
         self.assertTrue(passed)
         self.assertIn("passed", message)
 
@@ -112,13 +113,13 @@ class GuardrailsTest(unittest.TestCase):
                 "git push": ["exit 1"]
             }
         })
-        passed, message = self.bridge._run_pre_flight_checks("git push origin main")
+        passed, message = asyncio.run(self.bridge._run_pre_flight_checks("git push origin main"))
         self.assertFalse(passed)
         self.assertIn("FAILED", message)
 
     def test_pre_flight_no_match(self):
         """Commands without pre-flight config skip checks."""
-        passed, message = self.bridge._run_pre_flight_checks("ls -la")
+        passed, message = asyncio.run(self.bridge._run_pre_flight_checks("ls -la"))
         self.assertTrue(passed)
         self.assertEqual(message, "")
 
@@ -129,7 +130,7 @@ class GuardrailsTest(unittest.TestCase):
                 "git push": ["echo 'test 1'", "echo 'test 2'"]
             }
         })
-        passed, message = self.bridge._run_pre_flight_checks("git push")
+        passed, message = asyncio.run(self.bridge._run_pre_flight_checks("git push"))
         self.assertTrue(passed)
         self.assertIn("test 1", message)
         self.assertIn("test 2", message)
@@ -146,7 +147,7 @@ class GuardrailsTest(unittest.TestCase):
                 "git push": [script]
             }
         })
-        passed, message = self.bridge._run_pre_flight_checks("git push origin main")
+        passed, message = asyncio.run(self.bridge._run_pre_flight_checks("git push origin main"))
         self.assertTrue(passed)
         self.assertIn("passed", message)
 

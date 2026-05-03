@@ -15,6 +15,7 @@ from .constants import (
     DIFF_HIGHLIGHT_REGION_KEY,
 )
 from .output_format import format_tool_detail
+from .permissions import extract_bash_commands, make_auto_allow_pattern, match_permission_pattern
 from .output_models import (
     PENDING, DONE, ERROR, BACKGROUND,
     PERM_ALLOW, PERM_DENY, PERM_ALLOW_ALL, PERM_ALLOW_SESSION, PERM_BATCH,
@@ -65,6 +66,7 @@ class OutputView:
         self._input_area_start: int = 0  # Start of entire input area (context + marker)
         self._input_marker: str = "◎ "  # Marker for input line
         self._spinner_frame: int = 0  # Current spinner animation frame
+        self._spinner_region_key: str = "claude_spinner"  # For in-place spinner updates
         # Undo button tracking: list of (region_start, region_end, file_path, snapshot)
         self._undo_buttons: List[tuple] = []
 
@@ -159,7 +161,8 @@ class OutputView:
             name = f"[{backend}] {name}"
         # Truncate to keep tab bar usable
         if len(name) > 24:
-            name = name[:23] + "…"
+            from .constants import MAX_SESSION_NAME_LENGTH
+            name = name[:MAX_SESSION_NAME_LENGTH] + "…"
         self.view.set_name(f"{prefix}{name}")
 
     @staticmethod
@@ -964,7 +967,7 @@ class OutputView:
 
         # Check if tool is auto-allowed for session (match against saved patterns)
         for pattern in self.auto_allow_tools:
-            if self._match_auto_allow_pattern(tool, tool_input, pattern):
+            if match_permission_pattern(tool, tool_input, pattern):
                 callback(PERM_ALLOW)
                 return
 
@@ -1099,8 +1102,8 @@ class OutputView:
         # Create descriptive "Always" button based on what pattern will be saved
         always_hint = ""
         if tool == "Bash" and "command" in tool_input:
-            # Preview the pattern that _make_auto_allow_pattern would create
-            pattern = self._make_auto_allow_pattern(tool, tool_input)
+            # Preview the pattern that make_auto_allow_pattern would create
+            pattern = make_auto_allow_pattern(tool, tool_input)
             if pattern != tool and "(" in pattern:
                 # Extract the specifier part: "Bash(git:*)" → "git:*"
                 always_hint = f" `{pattern[pattern.index('(')+1:-1]}`"
@@ -1209,148 +1212,6 @@ class OutputView:
         # Don't clear pending_permission - keep it to detect rapid same-tool requests
         # It will be overwritten when a different tool request comes in
 
-    @staticmethod
-    def _extract_bash_subcommands(command: str) -> list:
-        """Extract subcommands from a compound bash command.
-
-        Splits on &&, ||, ;, |, |&, &, and newlines.
-        Strips process wrappers (timeout, time, nice, nohup, stdbuf).
-        Strips bare xargs. Skips env var assignments.
-        Returns list of (executable_name, full_subcommand) tuples.
-        """
-        import re
-        parts = re.split(r'\s*(?:&&|\|\||\|&|[;&|\n])\s*', command)
-        wrappers = {"timeout", "time", "nice", "nohup", "stdbuf"}
-        result = []
-        for part in parts:
-            part = part.strip()
-            if not part:
-                continue
-            words = part.split()
-            idx = 0
-            # Skip env var assignments
-            while idx < len(words) and '=' in words[idx] and not words[idx].startswith('-'):
-                idx += 1
-            if idx >= len(words):
-                continue
-            # Strip process wrappers
-            while idx < len(words) and words[idx] in wrappers:
-                idx += 1
-                # Skip wrapper's numeric/flag args
-                while idx < len(words) and (words[idx].startswith('-') or words[idx].replace('.', '').isdigit()):
-                    idx += 1
-            if idx >= len(words):
-                continue
-            # Strip bare xargs (no flags)
-            if words[idx] == "xargs" and (idx + 1 >= len(words) or not words[idx + 1].startswith('-')):
-                idx += 1
-            if idx >= len(words):
-                continue
-            word = words[idx]
-            if '/' in word:
-                word = word.split('/')[-1]
-            result.append((word, part))
-        return result
-
-    def _make_auto_allow_pattern(self, tool: str, tool_input: dict) -> str:
-        """Create a fine-grained auto-allow pattern from tool and input.
-
-        For Bash: extracts command prefix (first word) -> "Bash(git:*)"
-        For Read/Write/Edit: uses directory path -> "Read(/src/)"
-        For MCP tools: uses full tool name
-        """
-        import os
-
-        if not tool_input:
-            return tool
-
-        if tool == "Bash":
-            command = tool_input.get("command", "")
-            if command:
-                trivial = {"cd", "pushd", "popd", "export", "set", "unset", "source", ".", "true", "false"}
-                subcmds = self._extract_bash_subcommands(command)
-                best = None
-                for word, _ in subcmds:
-                    if word not in trivial:
-                        best = word
-                        break
-                if not best and subcmds:
-                    best = subcmds[0][0]
-                if best:
-                    return f"Bash({best}:*)"
-        elif tool in ("Read", "Write", "Edit"):
-            file_path = tool_input.get("file_path", "")
-            if file_path:
-                # Use directory as pattern (like Claude CLI)
-                dir_path = os.path.dirname(file_path)
-                if dir_path:
-                    return f"{tool}({dir_path}/)"
-        elif tool == "Skill":
-            skill_name = tool_input.get("skill", "")
-            if skill_name:
-                return f"Skill({skill_name})"
-        # For other tools, just use the tool name
-        return tool
-
-    def _match_auto_allow_pattern(self, tool: str, tool_input: dict, pattern: str) -> bool:
-        """Check if tool use matches an auto-allow pattern.
-
-        Supports:
-            - Simple tool match: "Bash" matches any Bash command
-            - Prefix match: "Bash(git:*)" matches commands starting with "git"
-            - Directory match: "Read(/src/)" matches files under /src/
-        """
-        import fnmatch
-        import os
-
-        # Parse pattern: "Tool(specifier)" or just "Tool"
-        if '(' in pattern and pattern.endswith(')'):
-            paren_idx = pattern.index('(')
-            parsed_tool = pattern[:paren_idx]
-            specifier = pattern[paren_idx + 1:-1]
-        else:
-            parsed_tool = pattern
-            specifier = None
-
-        # Tool name must match
-        if not fnmatch.fnmatch(tool, parsed_tool):
-            return False
-
-        # No specifier = match all uses of this tool
-        if specifier is None:
-            return True
-
-        # Bash command matching — each subcommand must match independently
-        if tool == "Bash":
-            command = tool_input.get("command", "")
-            if not command:
-                return False
-            if specifier.endswith(":*"):
-                prefix = specifier[:-2]
-                subcmds = self._extract_bash_subcommands(command)
-                return any(word.startswith(prefix) for word, _ in subcmds)
-            # Exact match
-            return command == specifier
-
-        # Read/Write/Edit directory matching
-        if tool in ("Read", "Write", "Edit"):
-            file_path = tool_input.get("file_path", "")
-            if not file_path:
-                return False
-            # Directory match (pattern ends with /)
-            if specifier.endswith('/'):
-                return file_path.startswith(specifier) or os.path.dirname(file_path) + '/' == specifier
-            # Glob match
-            if any(c in specifier for c in ['*', '?', '[']):
-                return fnmatch.fnmatch(file_path, specifier)
-            return file_path == specifier
-
-        # Skill matching
-        if tool == "Skill":
-            skill_name = tool_input.get("skill", "")
-            return skill_name == specifier
-
-        return False
 
     def _respond_permission_with_callback(self, response: str, callback, tool: str, tool_input: dict = None) -> None:
         """Respond to a permission request with given callback."""
@@ -1358,7 +1219,7 @@ class OutputView:
 
         # Handle "allow all" - save to project settings and remember for this session
         if response == PERM_ALLOW_ALL:
-            pattern = self._make_auto_allow_pattern(tool, tool_input)
+            pattern = make_auto_allow_pattern(tool, tool_input)
             self.auto_allow_tools.add(pattern)
             self._save_auto_allowed_tool(pattern)
             response = PERM_ALLOW
@@ -1447,7 +1308,7 @@ class OutputView:
             # Check if auto-allowed now (user may have clicked "Always" or "30s")
             auto_allowed = False
             for pattern in self.auto_allow_tools:
-                if self._match_auto_allow_pattern(perm.tool, perm.tool_input, pattern):
+                if match_permission_pattern(perm.tool, perm.tool_input, pattern):
                     perm.callback(PERM_ALLOW)
                     auto_allowed = True
                     break
@@ -1968,7 +1829,20 @@ class OutputView:
         if not self.current or not self.current.working or not self.view:
             return
         self._spinner_frame += 1
-        self._render_current(auto_scroll=False)
+        # Try in-place spinner update to avoid expensive full re-render
+        regions = self.view.get_regions(self._spinner_region_key)
+        if regions and regions[0].size() > 0:
+            symbol = SPINNER_FRAMES[self._spinner_frame % len(SPINNER_FRAMES)]
+            self._replace(regions[0].begin(), regions[0].end(), symbol)
+            # Update tracked region for next frame (region auto-adjusts, but be explicit)
+            self.view.add_regions(
+                self._spinner_region_key,
+                [sublime.Region(regions[0].begin(), regions[0].begin() + len(symbol))],
+                "", "", sublime.HIDDEN,
+            )
+        else:
+            # Fallback to full render if spinner region not tracked
+            self._render_current(auto_scroll=False)
         # Periodically clear undo history to prevent memory bloat
         if self._spinner_frame % 50 == 0:
             try:
@@ -2067,15 +1941,20 @@ class OutputView:
 
         # Collect undo button positions during render
         undo_buttons = []
+        # Compute prompt text length once, then track incrementally (avoids O(n²))
+        running_offset = len("".join(lines))
 
         if self.current.events:
             lines.append("\n")
+            running_offset += 1
             for idx, event in enumerate(self.current.events):
                 if isinstance(event, str):
                     # Text chunk
                     lines.append(event)
+                    running_offset += len(event)
                     if not event.endswith("\n"):
                         lines.append("\n")
+                        running_offset += 1
                 elif isinstance(event, ToolCall):
                     # Tool call
                     if idx == last_pending_idx:
@@ -2090,18 +1969,36 @@ class OutputView:
                     else:
                         tool_icon = self._tool_icon(event.name)
                         line = f"  {symbol} {tool_icon} {event.name}{detail}\n"
-                    # Track [Undo] button position
+                    # Track [Undo] button position using running offset (O(1) per tool)
                     if getattr(event, "snapshot", None) is not None and event.status == DONE:
                         undo_idx = line.find("[Undo]")
                         if undo_idx >= 0:
-                            # Position will be calculated after we know the absolute start
-                            undo_buttons.append((len("".join(lines)) + undo_idx, len("".join(lines)) + undo_idx + len("[Undo]"), event))
+                            undo_buttons.append((running_offset + undo_idx, running_offset + undo_idx + len("[Undo]"), event))
+                    # Track spinner position for in-place updates during animation
+                    if idx == last_pending_idx:
+                        spinner_start = start + running_offset + 2  # +2 for "  "
+                        spinner_end = spinner_start + len(symbol)
+                        self.view.add_regions(
+                            self._spinner_region_key,
+                            [sublime.Region(spinner_start, spinner_end)],
+                            "", "", sublime.HIDDEN,
+                        )
                     lines.append(line)
+                    running_offset += len(line)
 
         # Working indicator at bottom (animated) — only show when no pending tools
         if self.current.working and last_pending_idx is None:
             spinner = SPINNER_FRAMES[self._spinner_frame % len(SPINNER_FRAMES)]
-            lines.append(f"  {spinner}\n")
+            line = f"  {spinner}\n"
+            spinner_start = start + running_offset + 2  # +2 for "  "
+            spinner_end = spinner_start + len(spinner)
+            self.view.add_regions(
+                self._spinner_region_key,
+                [sublime.Region(spinner_start, spinner_end)],
+                "", "", sublime.HIDDEN,
+            )
+            lines.append(line)
+            running_offset += len(line)
 
         # Todo list (if any)
         if self.current.todos:
