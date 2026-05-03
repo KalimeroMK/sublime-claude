@@ -1044,7 +1044,7 @@ class Session(SessionQueryMixin, SessionPermissionsMixin):
     def _start_heartbeat(self) -> None:
         """Start periodic heartbeat to detect dead bridges early."""
         self._stop_heartbeat()
-        self._heartbeat_timer = sublime.set_timeout(self._do_heartbeat, 30000)
+        self._heartbeat_timer = sublime.set_timeout(self._do_heartbeat, 10000)
 
     def _stop_heartbeat(self) -> None:
         """Stop the heartbeat timer."""
@@ -1178,8 +1178,11 @@ class Session(SessionQueryMixin, SessionPermissionsMixin):
 
     def _on_notification(self, method: str, params: dict) -> None:
         # Track stream activity for stall detection (any event from the bridge counts).
+        was_silent = self.working and (time.time() - self.last_activity) > 5
         self.last_activity = time.time()
         self._stall_warning_shown = False
+        if was_silent:
+            print(f"[Claude] first event after silence: method={method}, type={params.get('type', '?')}")
 
         if method == "permission_request":
             self._handle_permission_request(params)

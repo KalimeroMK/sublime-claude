@@ -112,6 +112,9 @@ class SessionQueryMixin:
         if hasattr(self, '_pending_images') and self._pending_images:
             query_params["images"] = self._pending_images
             self._pending_images = []
+        prompt_preview = (full_prompt[:60] + "…") if len(full_prompt) > 60 else full_prompt
+        prompt_preview = prompt_preview.replace("\n", " ")
+        print(f"[Claude] query: {prompt_preview!r} (len={len(full_prompt)})")
         if not self.client.send("query", query_params, self._on_done):
             self._status("error: bridge died")
             self.working = False
