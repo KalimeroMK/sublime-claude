@@ -31,6 +31,7 @@ A Sublime Text plugin for [Kimi](https://kimi.ai/), [Claude Code](https://claude
   - [@-Commands](#-commands)
   - [Related Files (Manual)](#related-files-manual)
 - [Voice Input](#voice-input)
+- [Terminal Integration](#terminal-integration)
 - [Sessions](#sessions)
   - [Auto-Restart on Bridge Crash](#auto-restart-on-bridge-crash)
   - [Session Tags](#session-tags)
@@ -104,7 +105,8 @@ git clone https://github.com/KalimeroMK/sublime-claude ClaudeCode
 | **Persistent Memory** | — | AI remembers facts across sessions |
 | **Session Tags** | — | Label sessions for organization |
 | **Auto-Restart** | — | Heartbeat + auto-restart on bridge crash |
-| **Tests** | Minimal | 233 unit tests, mock Sublime API |
+| **Terminal** | — | PTY-based terminal panel with `@terminal` context |
+| **Tests** | Minimal | 256 unit tests, mock Sublime API |
 
 [↑ Back to Top](#table-of-contents)
 
@@ -130,7 +132,9 @@ This build extends the base project with additional features, bug fixes, and a f
 | **Smart Context** | Auto-adds current scope, git-modified files, relevant open files, and symbol definitions to queries — with caching and `.gitignore` filtering |
 | **Persistent Memory** | AI remembers facts, preferences, and decisions across sessions via `.claude/memory.json` |
 | **Scroll Respect** | Viewport-aware auto-scroll — doesn't jump to bottom when reading history |
-| **Comprehensive Test Suite** | 233 unit tests covering all core utilities, running in ~0.03s with a mock Sublime API |
+| **Terminal Integration** | PTY-based terminal panel — interactive shell with `@terminal` context mention |
+| **Persistent CLI** | One `claude` subprocess per session (not per-query) — eliminates session lock deadlocks |
+| **Comprehensive Test Suite** | 256 unit tests covering all core utilities, running in ~0.03s with a mock Sublime API |
 
 ### Bug Fixes
 
@@ -144,6 +148,11 @@ This build extends the base project with additional features, bug fixes, and a f
 | Reset input mode | Fixed command to properly re-enter input mode after cleanup instead of leaving view in an unusable state |
 | Duplicate event handlers | Removed duplicate `on_activated` and non-existent imports that caused runtime errors |
 | Dead code cleanup | Removed unused commands and modules that added unnecessary bloat |
+| **Stderr pipe deadlock** | `--verbose` filled stderr pipe (~64KB), blocked stdout. Fixed by redirecting stderr to per-session log file |
+| **Session lock deadlock** | Per-query CLI spawned new process with `--resume`, but old process held session lock. Fixed by persistent CLI process |
+| **Bridge race condition** | `_drain_stale()` 0.05s timeout could cancel `_start_query()` mid-flight, leaving zombie subprocess. Removed |
+| **Python 3.13 compat** | Removed deprecated `loop=` kwargs from `asyncio.StreamReader`/`StreamReaderProtocol` |
+| **MCP config race** | Per-session temp files for MCP config and stderr logs prevent collisions between parallel sessions |
 
 [↑ Back to Top](#table-of-contents)
 
@@ -293,6 +302,8 @@ All commands available via Command Palette (`Cmd+Shift+P`): type "Claude"
 | **Generate Commit Message** | — | Generate commit message from `git diff --staged` |
 | **Git Status** | — | Show `git status --short` in output view |
 | **Voice Input** | `Cmd+Shift+R` | Record audio, transcribe via Whisper API, insert text (macOS only) |
+| **Toggle Terminal** | ``Ctrl+` `` | Show/hide PTY-based terminal panel |
+| **Send to Terminal** | ``Ctrl+Shift+` `` | Send command to terminal panel |
 | **Skills Marketplace** | — | Browse and install 27 curated skills |
 | **List Active Skills** | — | Show currently active skills |
 | **Disable All Skills** | — | Disable all active skills |
@@ -303,7 +314,7 @@ The output view features an inline input area (marked with `◎`) where you type
 
 - **Enter** - Submit prompt
 - **Shift+Enter** - Insert newline (multiline prompts)
-- **@** - Open context menu (add files, @codebase, @git, @web, folder, or clear context)
+- **@** - Open context menu (add files, `@codebase`, `@git`, `@web`, `@terminal`, folder, or clear context)
 - **Alt+Escape** - Interrupt current query
 
 When a permission prompt appears:
@@ -485,6 +496,7 @@ Type `@` in the inline input area to trigger the context menu, or type commands 
 | `@git` | Add `git diff --staged` (or unstaged) to context |
 | `@file:<path>` | Inline reference to a specific file |
 | `@web <query>` | Search the web via DuckDuckGo (no API key) |
+| `@terminal` | Inject current terminal output into context |
 
 **`@codebase`** finds the most relevant files based on your query keywords and adds them to context automatically:
 
@@ -511,6 +523,19 @@ This will:
 3. Add top 5 results as context for your query
 
 **Privacy note:** Searches go directly to DuckDuckGo (not your AI backend). No tracking, no API key needed.
+
+**`@terminal`** injects the current terminal output into your query context:
+
+```
+◎ @terminal why is this test failing? ▶
+```
+
+This will:
+1. Capture the last ~2000 characters of terminal output
+2. Add them as a `note` context item for the AI to analyze
+3. Useful for debugging build errors, test failures, or server logs
+
+Requires an active terminal session (use **Toggle Terminal** first, or it auto-starts on first `@terminal` use).
 
 ### Related Files (Manual)
 
@@ -549,6 +574,36 @@ Disable by removing the `_add_related_files` call in `session.py` if you prefer 
 
 ---
 
+## Terminal Integration
+
+A persistent PTY-based terminal panel embedded inside Sublime Text. The AI can run interactive shell commands (`htop`, `git log`, `npm init`) and you can send commands manually.
+
+### Keybindings
+
+| Keybinding | Action |
+|-----------|--------|
+| ``Ctrl+` `` | Toggle terminal panel |
+| ``Ctrl+Shift+` `` | Send command to terminal |
+
+### Features
+
+- **Persistent shell session** — cwd, env vars, and shell history survive across queries
+- **Interactive commands** — `htop`, `vim`, `less`, `npm init` work correctly via PTY
+- **AI integration** — AI sees terminal output via `@terminal` context mention
+- **Real-time streaming** — Terminal output streams live via JSON-RPC notifications
+- **ANSI stripping** — Escape codes stripped for clean display in Sublime output panel
+
+### How It Works
+
+1. The bridge process spawns a real pseudo-terminal (`pty.openpty()`)
+2. A background thread reads output via `select.select` + `os.read`
+3. Output is streamed to Sublime via `terminal_output` JSON-RPC notifications
+4. The `TerminalView` class manages a dedicated output panel per session
+
+[↑ Back to Top](#table-of-contents)
+
+---
+
 ## Sessions
 
 Sessions are automatically saved and can be resumed later. Each session tracks:
@@ -568,9 +623,11 @@ After Sublime restarts, orphaned output views are registered as sleeping session
 
 If the bridge process dies (OOM, timeout, Broken pipe), the plugin **automatically restarts and resumes** the conversation:
 
-- **Heartbeat monitoring** — detects silently-dead bridges every 30s
+- **Heartbeat monitoring** — 15s interval checks bridge health via JSON-RPC ping
+- **Stall detection** — warns at 60s without activity, auto-restarts at 120s
 - **Pre-query health check** — auto-restarts before sending if bridge is dead
 - **Post-error recovery** — auto-restarts after a crash mid-query
+- **Persistent CLI** — the `claude` subprocess lives for the entire session; new prompts are sent as JSON lines on stdin instead of spawning new processes. This eliminates the session lock deadlock that occurred when the old process still held the lock.
 - Resume uses the same `session_id`, so Anthropic continues the conversation if still available
 
 You rarely need to manually restart — the agent just keeps working.
@@ -878,7 +935,7 @@ cd ~/PhpstormProjects/sublime-claude
 python3 -m unittest discover tests/ -v
 ```
 
-**233 tests** covering all core utilities:
+**256 tests** covering all core utilities:
 - Context window gauge, session tags, drag-drop, usage graph
 - Attach commands (image/file auto-detect, MIME mapping)
 - Swarm monitor (status icons, session tracking)
@@ -890,6 +947,7 @@ python3 -m unittest discover tests/ -v
 - Constants, error handling, logging, prompt building
 - Command parsing, context parsing, session state machine
 - JSON-RPC client, tool routing, settings merging
+- Terminal integration (PTY lifecycle, ANSI stripping, buffer read/write)
 
 All tests run in ~0.03s without requiring Sublime Text to be open (uses mock API).
 
@@ -903,7 +961,22 @@ All tests run in ~0.03s without requiring Sublime Text to be open (uses mock API
 ┌─────────────────┐     JSON-RPC/stdio     ┌─────────────────┐
 │  Sublime Text   │ ◄────────────────────► │  bridge/main.py │ (Kimi/Claude)
 │  (Python 3.8)   │                        │  (CLI wrapper)  │
+│                 │                        └────────┬────────┘
+│                 │                                 │
+│                 │        JSON-RPC/stdio           │  Persistent CLI
+│                 │ ◄────────────────────► ┌────────┴────────┐
+│                 │                        │  claude_agent_  │
+│                 │                        │  sdk/__init__.py│
+│                 │                        │  (persistent    │
+│                 │                        │   subprocess)   │
+│                 │                        └────────┬────────┘
+│                 │                                 │ stdin/stdout
+│                 │                        ┌────────┴────────┐
+│                 │                        │   claude CLI    │
+│                 │                        │  (one per       │
+│                 │                        │   session)      │
 │                 │                        └─────────────────┘
+│                 │
 │                 │     JSON-RPC/stdio     ┌─────────────────┐
 │                 │ ◄────────────────────► │  bridge/openai_ │ (Ollama/OpenAI)
 │                 │                        │  main.py        │
@@ -923,10 +996,31 @@ All tests run in ~0.03s without requiring Sublime Text to be open (uses mock API
 │  mcp_server.py  │ ◄──────────► │  mcp/server.py  │
 │  (socket server)│              │  (MCP server)   │
 └─────────────────┘              └─────────────────┘
+        │
+        │ PTY (via bridge)
+        ▼
+┌─────────────────┐
+│  TerminalManager│  bridge/terminal.py
+│  (pty.openpty)  │  Persistent shell session
+└─────────────────┘
 ```
 
 The plugin runs in Sublime's Python 3.8 environment and spawns a separate bridge process using Python 3.10+. Each bridge translates between Sublime's JSON-RPC protocol and the backend CLI:
-- **Kimi/Claude**: `bridge/main.py` — Wraps `claude` CLI v2.1+ with `--output-format=stream-json`
+
+### Persistent CLI Architecture (Claude/Kimi)
+
+Instead of spawning a new `claude` process for every query, the bridge maintains **one persistent subprocess per session**:
+
+1. **Launch** — `claude -p --output-format=stream-json --input-format=stream-json` starts once per session
+2. **Query** — Each prompt is sent as a JSON line on stdin: `{"type":"user","message":{...}}`
+3. **Read** — A background task reads JSON lines from stdout into an `asyncio.Queue`
+4. **Interrupt** — `SIGKILL` terminates the process; next query starts a fresh one
+5. **Stderr** — Redirected to `/tmp/claude_cli_stderr_{session_id}.log` to prevent pipe deadlock
+
+This eliminates the session lock deadlock that occurred when a new `claude --resume` process tried to acquire the lock while the old process still held it.
+
+### Backends
+- **Kimi/Claude**: `bridge/main.py` — Wraps `claude` CLI v2.1+ with persistent subprocess
 - **Ollama/OpenAI**: `bridge/openai_main.py` — Native Ollama `/api/chat` + OpenAI-compatible
 - **Codex**: `bridge/codex_main.py` — Codex app-server protocol
 - **Copilot**: `bridge/copilot_main.py` — GitHub Copilot SDK
@@ -971,6 +1065,7 @@ sublime-claude/
 │
 ├── Infrastructure:
 │   ├── rpc.py                  # JSON-RPC client (stdio)
+│   ├── terminal_view.py        # Terminal output panel (PTY output display)
 │   ├── listeners.py            # Event handlers (input, clicks, drag-drop)
 │   ├── settings.py             # Settings loading & merging
 │   ├── constants.py            # Config & magic strings
@@ -985,6 +1080,7 @@ sublime-claude/
 │   └── bridge/
 │       ├── base.py             # Base bridge class
 │       ├── main.py             # Claude/Kimi bridge (CLI wrapper)
+│       ├── terminal.py         # PTY-based terminal manager
 │       ├── openai_main.py      # Ollama/OpenAI bridge
 │       ├── codex_main.py       # Codex bridge (app-server)
 │       ├── copilot_main.py     # Copilot bridge (Copilot SDK)
@@ -1075,6 +1171,27 @@ Yes. Set up Ollama (free, local) or DeepSeek (cheaper than Claude):
 // DeepSeek
 { "deepseek_api_key": "sk-..." }
 ```
+
+### Terminal panel not showing
+
+1. Ensure your shell is executable: `echo $SHELL` (defaults to `/bin/bash` if not set)
+2. Check Console (`View > Show Console`) for `terminal_start` errors
+3. Terminal uses `pty.openpty()` — requires macOS/Linux (Windows PTY support is limited)
+4. If terminal output looks garbled, ANSI codes are stripped automatically; some complex TUI apps may not render well
+
+### "Session lock" or queries stalling for 120s
+
+This was fixed by the persistent CLI architecture. If you still see stalls:
+1. Check stderr logs: `tail -f /tmp/claude_cli_stderr_*.log`
+2. Check if the `claude` CLI process is alive: `ps aux | grep claude`
+3. The bridge heartbeat (15s) will auto-restart after 120s of no activity
+4. Manually restart: `Claude: Restart Session`
+
+### Debug logs
+
+- **Bridge debug log**: `~/.claude/bridge_debug.log` (auto-rotates at 2MB)
+- **CLI stderr** (per-session): `/tmp/claude_cli_stderr_{session_id}.log`
+- **MCP config** (per-session): `/tmp/claude_mcp_servers_{session_id}.json`
 
 ### How do I disable auto-context?
 
