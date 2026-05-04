@@ -94,22 +94,20 @@ git clone https://github.com/KalimeroMK/sublime-claude ClaudeCode
 
 | Feature | tommo/sublime-claude | This Extended Version |
 |---------|---------------------|----------------------|
-| **Backends** | Claude only | Claude, Kimi, Ollama, DeepSeek, OpenAI, Codex, Copilot |
-| **Context Tools** | Manual add only | Smart Context, @codebase TF-IDF search, @web DuckDuckGo, auto-related files |
+| **Backends** | Claude, Codex, Copilot, DeepSeek | + Kimi, Ollama, OpenAI |
+| **Context Tools** | Manual add only | Smart Context, `@codebase` TF-IDF search, `@web` DuckDuckGo, auto-related files |
 | **MCP Marketplace** | — | 21 curated MCP servers, one-click install |
 | **Skills Marketplace** | — | 27 curated skills (global / per-project) |
 | **Monitoring** | — | Swarm Monitor, Token Usage Graph, Context Gauge |
-| **Diff Preview** | — | Unified diff with colored lines + one-click undo |
+| **Undo Last Edit** | — | One-click undo of the most recent Write/Edit tool |
 | **Voice Input** | — | macOS voice-to-text via Whisper |
 | **Drag & Drop** | — | Drop files/images onto output view |
+| **Attach File / Image** | — | `Cmd+Shift+F` — attach any file or image to context |
 | **Persistent Memory** | — | AI remembers facts across sessions |
-| **Session Tags** | — | Label sessions for organization |
-| **Auto-Restart** | — | Heartbeat + auto-restart on bridge crash |
-| **Terminal** | — | Embedded PTY terminal with agent blocking, SSH/REPL support |
-| **Undo** | Immediate rewind | Selectable rewind target via quick panel |
-| **Navigation** | — | Cmd+R jumps between prompts (Symbols) |
-| **Session Bookmarks** | — | Star sessions to pin them to top of lists |
-| **Live Settings** | — | Output view settings apply without restart |
+| **Session Tags** | — | Label sessions for organization (e.g. `bugfix, refactor`) |
+| **Auto-Restart** | Manual restart on crash | Heartbeat + auto-restart on bridge crash |
+| **Generate Commit** | — | Generate commit message from `git diff --staged` |
+| **Git Status** | — | Show `git status --short` in output view |
 | **Tests** | Minimal | 284 unit tests, mock Sublime API |
 
 [↑ Back to Top](#table-of-contents)
@@ -126,22 +124,18 @@ This build extends the base project with additional features, bug fixes, and a f
 |---------|-------------|
 | **Context Window Gauge** | Visual 10-segment bar in the status bar showing context usage percentage with color coding (🟢🟡🔴) |
 | **Session Tags** | Label sessions with comma-separated tags (e.g. `bugfix, refactor`) — shown in status bar and persisted across restarts |
-| **Session Bookmarks** | Star/unstar sessions via Switch Session panel — starred sessions float to the top of resume/switch lists |
-| **Undo Quick Panel** | Cmd+Z shows a quick panel listing all undoable turns — select exactly how far to rewind |
-| **Symbols Navigation** | Cmd+R (Goto Symbol) jumps between prompt entries in the output view |
 | **Attach File / Image** | Single command (`Cmd+Shift+F`) for attaching any file or image to context — auto-detects file type and sends images as binary |
 | **Drag & Drop** | Drop files or images directly onto the output view — automatically added to context |
 | **Token Usage Graph** | `Claude: Show Usage Graph` — ASCII bar chart of token usage per query, 100-query history persisted |
 | **Agent Swarm Monitor** | `Claude: Swarm Monitor` — dashboard showing all active sessions, subsessions, statuses, and costs |
 | **MCP Marketplace** | `Claude: MCP Marketplace` — browse and install 21 curated MCP servers with one-click auto-install |
 | **Skills Marketplace** | `Claude: Skills Marketplace` — browse and install 27 curated skills (global or per-project). Skills inject into `~/.claude/CLAUDE.md` or `./CLAUDE.md` |
-| **Diff Preview & Undo** | Unified diff preview for Write/Edit tools — see changes before approving, with colored diff lines (green/red) and one-click undo |
+| **Undo Last Edit** | One-click undo of the most recent Write/Edit file change |
 | **Smart Context** | Auto-adds current scope, git-modified files, relevant open files, and symbol definitions to queries — with caching and `.gitignore` filtering |
 | **Persistent Memory** | AI remembers facts, preferences, and decisions across sessions via `.claude/memory.json` |
 | **Scroll Respect** | Viewport-aware auto-scroll — doesn't jump to bottom when reading history |
-| **Terminal Integration** | Embedded PTY terminal — agent can run interactive commands (`htop`, `vim`, SSH, REPLs) and block until completion |
-| **Live Output Settings** | Changes to `ClaudeOutput.sublime-settings` apply live to all open output views |
-| **Persistent CLI** | One `claude` subprocess per session (not per-query) — eliminates session lock deadlocks |
+| **Generate Commit Message** | Generate commit message from `git diff --staged` |
+| **Git Status** | Show `git status --short` in output view |
 | **Comprehensive Test Suite** | 284 unit tests covering all core utilities, running in ~0.03s with a mock Sublime API |
 
 ### Bug Fixes
@@ -310,10 +304,10 @@ All commands available via Command Palette (`Cmd+Shift+P`): type "Claude"
 | **Generate Commit Message** | — | Generate commit message from `git diff --staged` |
 | **Git Status** | — | Show `git status --short` in output view |
 | **Voice Input** | `Cmd+Shift+R` | Record audio, transcribe via Whisper API, insert text (macOS only) |
-| **Open Terminal** | — | Open a new embedded PTY terminal tab |
-| **Toggle Terminal** | ``Ctrl+` `` | Show/hide PTY-based terminal panel |
-| **Send to Terminal** | ``Ctrl+Shift+` `` | Send command to terminal panel |
-| **Output Settings** | — | Edit `ClaudeOutput.sublime-settings` |
+| Open Terminal | — | Open a new embedded PTY terminal tab |
+| Toggle Terminal | ``Ctrl+` `` | Show/hide PTY-based terminal panel |
+| Send to Terminal | ``Ctrl+Shift+` `` | Send command to terminal panel |
+| Output Settings | — | Edit `ClaudeOutput.sublime-settings` |
 | **Skills Marketplace** | — | Browse and install 27 curated skills |
 | **List Active Skills** | — | Show currently active skills |
 | **Disable All Skills** | — | Disable all active skills |
