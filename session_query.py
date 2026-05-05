@@ -106,7 +106,8 @@ class SessionQueryMixin:
         full_prompt, images = self._build_prompt_with_context(prompt)
         context_names = [item.name for item in self.pending_context]
         self.pending_context = []  # Clear after use
-        self._update_context_display()
+        if hasattr(self, '_context') and self._context:
+            self._context._update_display()
 
         # Store images for RPC call
         self._pending_images = images
