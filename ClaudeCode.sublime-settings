@@ -84,6 +84,10 @@
     // Auto-add current file to context when querying without explicit context
     "auto_add_current_file": true,
 
+    // Auto-compact context when it exceeds this percentage of the model's
+    // context window. Set to 0 to disable. Default is 70%.
+    "auto_compact_threshold": 70,
+
     // Environment variables passed to bridge process
     // "env": {},
 }

@@ -9,6 +9,7 @@ import sublime
 from .smart_context import build_smart_context
 from .constants import OUTPUT_VIEW_SETTING, MAX_FILE_SIZE_AUTO_ADD, MAX_DIFF_LENGTH
 from .memory import get_relevant_memories, format_memory_prompt, extract_memories_from_response
+from .session_env import _CONTEXT_LIMITS, _MODEL_CONTEXT_LIMITS
 
 # Module-level cache for CodebaseSearch instances and background index threads
 _codebase_instances: dict = {}
@@ -57,6 +58,14 @@ class SessionQueryMixin:
         """
         if not self.client or not self.initialized:
             sublime.error_message("Claude not initialized")
+            return
+
+        # --- Auto-compact: if context window is near full, compact first ---
+        if not silent and prompt != "/compact" and self._should_auto_compact():
+            self._queued_prompts.append(prompt)
+            sublime.status_message("Claude: Auto-compacting context...")
+            print(f"[Claude] Auto-compact triggered ({self._context_pct()}% context usage)")
+            self.query("/compact", display_prompt="⚙ Auto-compacting context...")
             return
 
         self.working = True
@@ -641,3 +650,38 @@ class SessionQueryMixin:
             None   # on_cancel
         )
 
+    def _context_pct(self) -> int:
+        """Calculate current context window utilization as percentage."""
+        if not self.context_usage:
+            return 0
+        u = self.context_usage
+        used = (u.get("input_tokens", 0)
+                + u.get("cache_read_input_tokens", 0)
+                + u.get("cache_creation_input_tokens", 0))
+        if not used:
+            return 0
+
+        max_ctx = None
+        model_id = self.sdk_model or ""
+        if model_id:
+            for suffix, tokens in _CONTEXT_LIMITS.items():
+                if model_id.endswith(suffix):
+                    max_ctx = tokens
+                    break
+            if max_ctx is None:
+                for family, tokens in _MODEL_CONTEXT_LIMITS.items():
+                    if family in model_id.lower():
+                        max_ctx = tokens
+                        break
+        if max_ctx is None:
+            max_ctx = 200000 if self.backend in ("claude", "kimi", "default", "") else 128000
+
+        return min(100, int(used / max_ctx * 100))
+
+    def _should_auto_compact(self) -> bool:
+        """Check if context usage exceeds auto-compact threshold."""
+        settings = sublime.load_settings("ClaudeCode.sublime-settings")
+        threshold = settings.get("auto_compact_threshold", 70)
+        if threshold <= 0:
+            return False
+        return self._context_pct() >= threshold

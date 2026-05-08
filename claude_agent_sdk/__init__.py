@@ -314,21 +314,40 @@ class ClaudeSDKClient:
         self._reader_task = asyncio.create_task(self._read_stdout())
 
     async def _read_stdout(self) -> None:
-        """Read JSON lines from stdout and enqueue SDK objects."""
+        """Read JSON lines from stdout and enqueue SDK objects.
+
+        Uses chunked reading instead of readline() to avoid the default
+        64KB StreamReader limit that breaks on large tool results.
+        """
         try:
+            buffer = b""
             while True:
                 if self._interrupted:
                     break
-                line = await self._proc.stdout.readline()
-                if not line:
+                chunk = await self._proc.stdout.read(65536)
+                if not chunk:
+                    # Process any remaining data in buffer
+                    if buffer.strip():
+                        try:
+                            data = json.loads(buffer.decode())
+                            msg = self._convert_event(data)
+                            if msg:
+                                await self._message_queue.put(msg)
+                        except json.JSONDecodeError:
+                            pass
                     break
-                try:
-                    data = json.loads(line.decode())
-                except json.JSONDecodeError:
-                    continue
-                msg = self._convert_event(data)
-                if msg:
-                    await self._message_queue.put(msg)
+                buffer += chunk
+                while b"\n" in buffer:
+                    idx = buffer.index(b"\n")
+                    line = buffer[:idx + 1]
+                    buffer = buffer[idx + 1:]
+                    try:
+                        data = json.loads(line.decode())
+                    except json.JSONDecodeError:
+                        continue
+                    msg = self._convert_event(data)
+                    if msg:
+                        await self._message_queue.put(msg)
         except Exception as e:
             self._log(f"read_stdout error: {e}")
             if not self._interrupted:
