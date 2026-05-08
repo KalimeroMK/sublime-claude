@@ -125,6 +125,9 @@ class BridgeManager:
             "permission_mode": permission_mode,
             "view_id": str(s.output.view.id()) if s.output and s.output.view else None,
         }
+        cli_path = settings.get("claude_cli_path")
+        if cli_path:
+            init_params["claude_cli_path"] = cli_path
         if s.resume_id:
             init_params["resume"] = s.resume_id
             if s.fork:

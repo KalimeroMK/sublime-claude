@@ -6,6 +6,7 @@ Communicates via JSON-RPC over stdio.
 import asyncio
 import json
 import os
+import shutil
 import sys
 import uuid
 from dataclasses import asdict, is_dataclass
@@ -53,6 +54,27 @@ def _bridge_log(message: str) -> None:
             f.write(message + "\n")
     except Exception:
         pass
+
+
+def _resolve_cli_path(configured: str) -> str:
+    """Resolve claude CLI path. If explicitly configured and exists, use it.
+    If default 'claude', try shutil.which first, then common install paths."""
+    if configured and configured != "claude":
+        return configured
+    found = shutil.which("claude")
+    if found:
+        return found
+    home = os.path.expanduser("~")
+    candidates = [
+        os.path.join(home, ".local", "bin", "claude"),
+        "/opt/homebrew/bin/claude",
+        "/usr/local/bin/claude",
+    ]
+    for p in candidates:
+        if os.path.isfile(p) and os.access(p, os.X_OK):
+            _logger.info(f"Auto-detected claude CLI at: {p}")
+            return p
+    return "claude"
 
 
 # Set env var so child processes (bash commands) can detect they're running under Claude agent
@@ -273,6 +295,8 @@ You are subsession **{subsession_id}**. Call signal_complete(session_id={view_id
 """
             system_prompt += subsession_guide
 
+        cli_path_raw = params.get("claude_cli_path", "claude")
+        cli_path = _resolve_cli_path(cli_path_raw)
         options_dict = {
             "allowed_tools": params.get("allowed_tools", []),
             "permission_mode": params.get("permission_mode", "default"),
@@ -284,7 +308,7 @@ You are subsession **{subsession_id}**. Call signal_complete(session_id={view_id
             "setting_sources": ["user", "project"],
             "max_buffer_size": 100 * 1024 * 1024,  # 100MB for large images/files
             "include_partial_messages": True,
-            "cli_path": "claude",
+            "cli_path": cli_path,
         }
 
         # Profile config: model, betas, effort

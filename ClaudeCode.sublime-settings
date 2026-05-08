@@ -16,6 +16,10 @@
     // These override ~/.claude/settings.json for the Sublime plugin only.
     // If left empty, the plugin uses your global `claude` CLI configuration.
     //
+    // Path to the `claude` CLI binary. Leave as "claude" to use PATH, or set
+    // an absolute path (e.g. "/Users/you/.local/bin/claude") if Sublime can't find it.
+    // "claude_cli_path": "claude",
+    //
     // "anthropic_base_url": "https://api.kimi.com/coding/",
     // "anthropic_api_key": "sk-ant-api03-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
     // "anthropic_model": "kimi-for-coding",
