@@ -47,6 +47,22 @@ def _start_background_index(project_root: str) -> None:
 
 
 class SessionQueryMixin:
+    @staticmethod
+    def _is_synthetic_turn(prompt: str) -> bool:
+        """Detect prompts that aren't real user messages (bg-task wakes, retain
+        injections, interruption markers, channel/subsession events, …)."""
+        if not prompt:
+            return True
+        first = prompt.lstrip().split("\n", 1)[0]
+        if first.startswith("<") and ">" in first:
+            tag = first[1:first.index(">")].split()[0].lstrip("/")
+            if tag in {"task-notification", "channel", "subsession", "wake", "inject", "timer", "notification", "retain"}:
+                return True
+        synthetic_brackets = ("[Request interrupted", "[retain context]", "[Loop]")
+        if any(first.startswith(p) for p in synthetic_brackets):
+            return True
+        return False
+
     def query(self, prompt: str, display_prompt: str = None, silent: bool = False) -> None:
         """
         Start a new query.
