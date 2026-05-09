@@ -561,7 +561,10 @@ class SessionQueryMixin:
         if completion != "success":
             self.working = False
             self._clear_deferred_state()
-            sublime.set_timeout(lambda: self._enter_input_with_draft() if not self.working else None, 100)
+            # If bridge was already torn down (e.g. by heartbeat auto-restart),
+            # _on_init will handle input mode — skip here to avoid race.
+            if self.client:
+                sublime.set_timeout(lambda: self._enter_input_with_draft() if not self.working else None, 100)
             return
 
         # 5. Process queued prompts (keep working=True, animation continues)
@@ -601,6 +604,8 @@ class SessionQueryMixin:
         """Enter input mode and restore draft with cursor at end."""
         # Skip if already in input mode or session is working
         if self.output.is_input_mode() or self.working:
+            if self.working:
+                print(f"[Claude] _enter_input_with_draft skipped: working={self.working}")
             return
 
         # Skip if we've already entered input mode after the last query
@@ -616,10 +621,12 @@ class SessionQueryMixin:
 
         # Check if enter_input_mode actually succeeded (might have deferred)
         if not self.output.is_input_mode():
+            print("[Claude] _enter_input_with_draft: enter_input_mode deferred or failed")
             return
 
         self._input_mode_entered = True
         self.last_idle_at = time.time()
+        print("[Claude] entered input mode")
 
         if self.draft_prompt and self.output.view:
             self.output.view.run_command("append", {"characters": self.draft_prompt})

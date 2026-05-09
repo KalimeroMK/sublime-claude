@@ -405,6 +405,9 @@ class BridgeManager:
         s.initialized = False
         s.working = False
         s._clear_deferred_state()
+        # Force reset any stuck input mode state so _enter_input_with_draft can succeed
+        if s.output and s.output.is_input_mode():
+            s.output.exit_input_mode(keep_text=False)
 
         if not s.session_id:
             return False

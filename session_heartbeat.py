@@ -12,7 +12,18 @@ class HeartbeatMonitor:
 
     HEARTBEAT_INTERVAL_MS = 15000  # 15 seconds
     STALL_WARNING_THRESHOLD_S = 60
-    STALL_RESTART_THRESHOLD_S = 120
+
+    @classmethod
+    def _stall_restart_threshold(cls) -> int:
+        """Read stall restart threshold from settings; default 300s for slow models."""
+        try:
+            settings = sublime.load_settings("ClaudeCode.sublime-settings")
+            val = settings.get("stall_restart_threshold_seconds")
+            if isinstance(val, int) and val >= 60:
+                return val
+        except Exception:
+            pass
+        return 300  # default: 5 min (opus with large context can take 300-600s)
 
     def __init__(self, session):
         self._s = session
@@ -74,7 +85,8 @@ class HeartbeatMonitor:
                 ):
                     self._stall_warning_shown = True
                     s._status("waiting for response...")
-                    print(f"[Claude] Heartbeat: {silent_for:.0f}s of silence — will auto-restart at {self.STALL_RESTART_THRESHOLD_S}s if no events arrive")
+                    threshold = self._stall_restart_threshold()
+                    print(f"[Claude] Heartbeat: {silent_for:.0f}s of silence — will auto-restart at {threshold}s if no events arrive")
             # Schedule next beat
             self.start()
 
@@ -83,7 +95,8 @@ class HeartbeatMonitor:
         s = self._s
         if not s.working:
             return False
-        if (time.time() - s.last_activity) <= self.STALL_RESTART_THRESHOLD_S:
+        threshold = self._stall_restart_threshold()
+        if (time.time() - s.last_activity) <= threshold:
             return False
         # User is reviewing a permission/plan/question — not a stall.
         if s.output.pending_permission or s.output.pending_plan or s.output.pending_question:

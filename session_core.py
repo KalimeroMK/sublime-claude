@@ -197,6 +197,11 @@ class Session(SessionQueryMixin, SessionPermissionsMixin):
         self._save_session()
         # Start heartbeat to monitor bridge health
         self._start_heartbeat()
+        # Force reset any stuck input mode state before entering fresh
+        if self.output and self.output.is_input_mode():
+            self.output.reset_input_mode()
+        else:
+            self._input_mode_entered = False
         # Auto-enter input mode when ready
         self._enter_input_with_draft()
 
