@@ -118,11 +118,15 @@ git clone https://github.com/KalimeroMK/sublime-claude ClaudeCode
 
 This build extends the base project with additional features, bug fixes, and a full test suite.
 
+> **Upstream sync status:** `tommo/sublime-claude` has ~30 new commits since last merge (as of May 2026). Notable upstream additions: live output settings, PTY terminal agent blocking, session bookmarks, undo quick panel, background task notification coalescing, and conversation-history truncation surfacing. Planning to merge these in a future update.
+
 ### Additional Features (not in the original)
 
 | Feature | Description |
 |---------|-------------|
 | **Context Window Gauge** | Visual 10-segment bar in the status bar showing context usage percentage with color coding (🟢🟡🔴) |
+| **Auto-Compact Context** | Automatically sends `/compact` when context exceeds a threshold (default 70%) — prevents empty responses from context overflow |
+| **Claude CLI Auto-Detection** | Auto-finds `claude` binary in common paths (`~/.local/bin`, `/opt/homebrew/bin`, `/usr/local/bin`) when not in PATH |
 | **Session Tags** | Label sessions with comma-separated tags (e.g. `bugfix, refactor`) — shown in status bar and persisted across restarts |
 | **Attach File / Image** | Single command (`Cmd+Shift+F`) for attaching any file or image to context — auto-detects file type and sends images as binary |
 | **Drag & Drop** | Drop files or images directly onto the output view — automatically added to context |
@@ -151,6 +155,8 @@ This build extends the base project with additional features, bug fixes, and a f
 | Duplicate event handlers | Removed duplicate `on_activated` and non-existent imports that caused runtime errors |
 | Dead code cleanup | Removed unused commands and modules that added unnecessary bloat |
 | **Stderr pipe deadlock** | `--verbose` filled stderr pipe (~64KB), blocked stdout. Fixed by redirecting stderr to per-session log file |
+| **StreamReader chunk limit** | `readline()` crashed on large tool results (>64KB). Fixed by chunked reading with manual newline splitting |
+| **Claude CLI not in PATH** | Sublime Text on macOS doesn't inherit shell PATH. Fixed by `claude_cli_path` setting + auto-detection of common install paths |
 | **Session lock deadlock** | Per-query CLI spawned new process with `--resume`, but old process held session lock. Fixed by persistent CLI process |
 | **Bridge race condition** | `_drain_stale()` 0.05s timeout could cancel `_start_query()` mid-flight, leaving zombie subprocess. Removed |
 | **Python 3.13 compat** | Removed deprecated `loop=` kwargs from `asyncio.StreamReader`/`StreamReaderProtocol` |
@@ -423,6 +429,8 @@ Options: `"claude"`, `"openai"`, `"deepseek"`, `"codex"`
 - **effort** — Reasoning effort: `"low"`, `"high"`, `"max"`
 - **smart_context_enabled** — Auto-expand queries with relevant context (`true` / `false`)
 - **auto_add_current_file** — Automatically add active file to context (`true` / `false`)
+- **auto_compact_threshold** — Auto-send `/compact` when context exceeds this % of model limit. `0` to disable. Default: `70`
+- **claude_cli_path** — Path to `claude` CLI binary. Leave as `"claude"` for PATH, or set absolute path (e.g. `"/Users/you/.local/bin/claude"`)
 - **claude_extra_args** — Extra CLI arguments for `claude` (e.g. `"--max-budget-usd 5 --verbose"`)
 - **claude_side_panel** — Show chat in a narrow right-side panel (`true` / `false`). Splits window into 2 columns (78% code, 22% chat) like VS Code. Default: `true`
 
@@ -1201,6 +1209,31 @@ rm .claude_codebase.db
 ```
 
 Next `@codebase` query will re-index automatically.
+
+### "claude" not found / `[Errno 2] No such file or directory: 'claude'`
+
+Sublime Text on macOS (launched as a GUI app) doesn't inherit your shell's `PATH`. If `claude` is installed in `~/.local/bin` (Anthropic's default), Sublime can't find it.
+
+**Fix 1 (recommended):** The plugin auto-detects common paths (`~/.local/bin`, `/opt/homebrew/bin`, `/usr/local/bin`). Just restart Sublime Text after updating the plugin.
+
+**Fix 2:** Set the explicit path in settings:
+```json
+{ "claude_cli_path": "/Users/you/.local/bin/claude" }
+```
+
+**Fix 3:** Create a symlink in a standard PATH directory:
+```bash
+ln -s ~/.local/bin/claude /usr/local/bin/claude
+```
+
+### Empty responses / spinner stuck after reading large files
+
+If Claude reads a large file and then the spinner stops spinning with no output, the context window is full. The plugin now auto-compacts when context exceeds 70%.
+
+**If it still happens:**
+1. Send `/compact` manually to summarize conversation history
+2. Or lower the threshold: `{ "auto_compact_threshold": 50 }`
+3. Start a fresh session for very large refactoring tasks
 
 ### "Broken pipe" or bridge crashes repeatedly
 
