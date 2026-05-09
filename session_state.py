@@ -241,6 +241,33 @@ class StateManager:
                     return candidate
         return None
 
+    @staticmethod
+    def _is_synthetic_turn(prompt: str) -> bool:
+        """Detect prompts that aren't real user messages (bg-task wakes, retain
+        injections, interruption markers, channel/subsession events, …) so the
+        undo quick panel doesn't list them as rewind targets."""
+        if not prompt:
+            return True
+        first = prompt.lstrip().split("\n", 1)[0]
+        # XML-tagged synthetic blocks: <task-notification>, <channel>, <wake>,
+        # <subsession>, <inject>, <timer>, etc.
+        if first.startswith("<") and ">" in first:
+            tag = first[1:first.index(">")].split()[0].lstrip("/")
+            if tag in {
+                "task-notification", "channel", "subsession",
+                "wake", "inject", "timer", "notification", "retain",
+            }:
+                return True
+        # Bracketed synthetic markers
+        synthetic_brackets = (
+            "[Request interrupted",
+            "[retain context]",
+            "[Loop]",
+        )
+        if any(first.startswith(p) for p in synthetic_brackets):
+            return True
+        return False
+
     def _read_turns(self) -> list:
         """Read JSONL and return [(prompt, prev_assistant_uuid)] for each user turn."""
         jsonl_path = self.find_jsonl_path()
@@ -290,6 +317,8 @@ class StateManager:
         for i, (prompt, prev_asst_uuid) in enumerate(turns):
             if not prev_asst_uuid:
                 continue  # first turn with no prior assistant — can't rewind here
+            if self._is_synthetic_turn(prompt):
+                continue  # bg notifications / interrupts / retain injects: not useful as rewind targets
             first_line = prompt.split("\n")[0][:72]
             label = f"{i + 1} — {first_line}" if first_line else f"{i + 1} — (empty)"
             result.append((label, prev_asst_uuid, prompt))
@@ -298,6 +327,8 @@ class StateManager:
 
     def find_rewind_point(self) -> tuple:
         """Find the assistant entry uuid to rewind to.
+        Skips synthetic turns (bg-task wakes, interrupts, retain injects) so
+        undo lands on the user's last real message.
         Returns (uuid, undone_prompt) or (None, "")."""
         turns = self._read_turns()
         if not turns:
@@ -306,18 +337,26 @@ class StateManager:
         if s._pending_resume_at:
             for i, (prompt, asst_uuid) in enumerate(turns):
                 if asst_uuid == s._pending_resume_at:
-                    if i < 2:
+                    # Walk back over synthetic turns to find the previous real one.
+                    j = i - 1
+                    while j >= 0 and self._is_synthetic_turn(turns[j][0]):
+                        j -= 1
+                    if j < 1:
                         return None, ""
-                    undone_prompt = turns[i - 1][0]
-                    rewind_to = turns[i - 1][1]
+                    undone_prompt = turns[j][0]
+                    rewind_to = turns[j][1]
                     if not rewind_to:
                         return None, ""
                     return rewind_to, undone_prompt
             return None, ""
-        if len(turns) < 2:
+        # Pick the most recent non-synthetic turn as the undo target.
+        idx = len(turns) - 1
+        while idx >= 0 and self._is_synthetic_turn(turns[idx][0]):
+            idx -= 1
+        if idx < 1:
             return None, ""
-        undone_prompt = turns[-1][0]
-        rewind_to = turns[-1][1]
+        undone_prompt = turns[idx][0]
+        rewind_to = turns[idx][1]
         if not rewind_to:
             return None, ""
         return rewind_to, undone_prompt

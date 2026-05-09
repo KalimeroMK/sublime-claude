@@ -249,24 +249,58 @@ class NotificationHandler:
             task_id = data.get("task_id", "")
             status = data.get("status", "")
             tool_use_id = s._task_tool_map.pop(task_id, None)
-            if tool_use_id and status == "completed":
-                tool = s.output.find_tool_by_id(tool_use_id)
-                if tool and tool.status == "background":
-                    from .output import DONE
-                    old_status = tool.status
-                    tool.status = DONE
-                    s.output._patch_tool_symbol(tool, old_status)
-                    output = ""
-                    output_file = data.get("output_file", "")
-                    if output_file:
-                        try:
-                            with open(output_file, "r") as f:
-                                output = f.read().strip()
-                        except Exception:
-                            pass
-                    summary = data.get("summary", "")
-                    wake_prompt = f"<task-notification>{summary}\n{output}</task-notification>" if output else f"<task-notification>{summary}</task-notification>"
-                    if s.working:
-                        s._queued_prompts.append(wake_prompt)
-                    else:
-                        s.query(wake_prompt, display_prompt=f"⚙ {summary}", silent=True)
+            if not status:
+                return
+            tool = s.output.find_tool_by_id(tool_use_id) if tool_use_id else None
+            # Only backgrounded tools should generate a wake. Foreground tools
+            # (regular Bash/Task/etc.) deliver their result via tool_result and
+            # don't need a synthetic <task-notification> user-message.
+            is_background = tool is not None and tool.status == "background"
+            if not is_background:
+                return
+            # Update tool UI from BACKGROUND → DONE/ERROR.
+            from .output import DONE, ERROR
+            old_status = tool.status
+            tool.status = DONE if status == "completed" else ERROR
+            s.output._patch_tool_symbol(tool, old_status)
+            # User-initiated kills don't need a wake — agent already knows it
+            # interrupted, and waking just spams the conversation.
+            if status in ("stopped", "killed"):
+                return
+            # Build the notification block
+            output = ""
+            output_file = data.get("output_file", "")
+            if output_file:
+                try:
+                    with open(output_file, "r") as f:
+                        output = f.read().strip()
+                except Exception:
+                    pass
+            summary = data.get("summary", "")
+            header = f"{summary} [{status}]" if status != "completed" else summary
+            block = (
+                f"<task-notification>{header}\n{output}</task-notification>"
+                if output else f"<task-notification>{header}</task-notification>"
+            )
+            # Coalesce: append to buffer and schedule a debounced flush. Multiple
+            # bg tasks finishing within the window are sent as a single wake.
+            s._pending_bg_notifications.append(block)
+            if not s._bg_flush_scheduled:
+                s._bg_flush_scheduled = True
+                sublime.set_timeout(lambda: self._flush_bg_notifications(s), 400)
+
+    def _flush_bg_notifications(self, s) -> None:
+        """Flush coalesced bg-task notifications into a single wake prompt."""
+        s._bg_flush_scheduled = False
+        if not s._pending_bg_notifications:
+            return
+        blocks = s._pending_bg_notifications
+        s._pending_bg_notifications = []
+        wake_prompt = "\n".join(blocks)
+        # Display: short single-line summary regardless of how many merged
+        n = len(blocks)
+        display = f"⚙ {n} task notification{'s' if n != 1 else ''}"
+        if s.working:
+            s._queued_prompts.append(wake_prompt)
+        else:
+            s.query(wake_prompt, display_prompt=display, silent=True)

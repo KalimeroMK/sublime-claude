@@ -137,7 +137,12 @@ class SessionQueryMixin:
             if not self.name:
                 self._set_name(ui_prompt[:30].strip() + ("..." if len(ui_prompt) > 30 else ""))
             self.output.prompt(ui_prompt, context_names)
-            self._animate()
+        # Always show busy indicator: flip tab title now and start the spinner
+        # loop. Silent queries (bg-task wakes, retain injects, …) still need a
+        # visible cue that the session is processing, even though the user
+        # prompt itself isn't rendered.
+        self.output._update_title()
+        self._animate()
         # --- Auto-extract memories from previous response ---
         try:
             if self.output.current and self.output.current.events:
@@ -562,8 +567,16 @@ class SessionQueryMixin:
         # 5. Process queued prompts (keep working=True, animation continues)
         if self._queued_prompts:
             prompt = self._queued_prompts.pop(0)
-            self.output.text(f"\n**[queued]** {prompt}\n\n")
-            self.query(prompt)
+            # Synthetic prompts (bg-task wakes, retain injects, etc.) should
+            # never be rendered as user input — fire them silently with a
+            # short status-bar/background hint.
+            if self._is_synthetic_turn(prompt):
+                first = prompt.lstrip().split("\n", 1)[0][:60]
+                display = f"⚙ {first}"
+                self.query(prompt, display_prompt=display, silent=True)
+            else:
+                self.output.text(f"\n**[queued]** {prompt}\n\n")
+                self.query(prompt)
             return
 
         # 6. Clear inject_pending - if inject was mid-query, it's done now
@@ -578,6 +591,8 @@ class SessionQueryMixin:
     def _clear_deferred_state(self) -> None:
         """Clear deferred action state. Called on error/interrupt."""
         self._queued_prompts.clear()
+        self._pending_bg_notifications.clear()
+        self._bg_flush_scheduled = False
         self._inject_pending = False
         self._pending_retain = None
         self._input_mode_entered = False  # Allow re-entry to input mode

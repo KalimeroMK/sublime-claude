@@ -84,6 +84,12 @@ class ClaudeCodeClearCommand(sublime_plugin.WindowCommand):
         s = get_active_session(self.window)
         if s:
             s.output.clear()
+            # Refresh status bar so loop banner / context tokens remain visible
+            s._update_status_bar()
+            # Re-render the pending-context indicator if any (Session-level state
+            # survives clear, but the view region was reset and needs re-write)
+            if hasattr(s, '_context') and s._context.items:
+                s.output.set_pending_context(s._context.items)
 
 
 
@@ -566,7 +572,15 @@ class ClaudeCodeSwitchCommand(sublime_plugin.WindowCommand):
                     sublime.status_message(msg)
                     return
                 if action == "undo_message" and data:
-                    data.undo_message()
+                    turns = data.get_turns_for_undo()
+                    if not turns:
+                        return
+                    labels = [t[0] for t in turns]
+                    def _on_undo(uidx, _turns=turns, _s=data):
+                        if uidx >= 0:
+                            _, rewind_id, draft_prompt = _turns[uidx]
+                            _s._apply_undo(rewind_id, draft_prompt)
+                    self.window.show_quick_panel(labels, _on_undo, placeholder="Undo to before…")
                 elif action == "restart" and data:
                     # Show profile picker for restart
                     self._show_restart_picker(data, profiles, checkpoints)

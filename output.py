@@ -146,7 +146,13 @@ class OutputView(PlanUIRendererMixin, PermissionUIRendererMixin, QuestionUIRende
             (self.pending_question and self.pending_question.callback) or
             (self.pending_plan and self.pending_plan.callback)
         )
-        is_working = self.current and self.current.working
+        # Tab title reflects the session-level working flag so silent wake-up
+        # queries (bg-task notifications, retain injects, …) still show ◉
+        # even though no visible Conversation was opened for them.
+        is_working = (
+            (session and session.working)
+            or (self.current and self.current.working)
+        )
         if is_sleeping:
             prefix = "⏸ "
         elif is_questioning:
@@ -441,8 +447,13 @@ class OutputView(PlanUIRendererMixin, PermissionUIRendererMixin, QuestionUIRende
                 self.current.working = False
                 self._render_current()
             self.conversations.append(self.current)
-            if len(self.conversations) > 20:
-                self.conversations = self.conversations[-20:]
+            # Cap conversation history (memory bound). Print a hint when truncating
+            # so users know history is being dropped (was previously silent).
+            HISTORY_CAP = 20
+            if len(self.conversations) > HISTORY_CAP:
+                dropped = len(self.conversations) - HISTORY_CAP
+                print(f"[Claude] conversation history capped: dropped {dropped} oldest turn(s)")
+                self.conversations = self.conversations[-HISTORY_CAP:]
             # Carry todos forward only if not all completed
             if not self.current.todos_all_done:
                 prev_todos = self.current.todos
@@ -640,11 +651,31 @@ class OutputView(PlanUIRendererMixin, PermissionUIRendererMixin, QuestionUIRende
         self._render_current()
 
     def clear(self) -> None:
-        """Clear all output (can undo with Cmd+Z)."""
+        """Clear all output (can undo with Cmd+Z).
+
+        Preserves and re-displays "supportive" UI elements that reflect current
+        state rather than chat history: active background tools and the open
+        todo list. Pending permission/plan/question UIs are turn-modal and
+        intentionally cleared.
+        """
         # Remember if we were in input mode
         was_input_mode = self._input_mode
         # Check if agent is currently working (before we clear state)
         was_working = self.current and self.current.working
+
+        # Snapshot supportive state BEFORE wiping conversations/current.
+        # Background tools we want to keep visible (their bash subprocesses are
+        # still running in the bridge); todos we carry forward like prompt() does.
+        carry_bg_tools = list(self.active_background_tools())
+        carry_todos = []
+        if self.current and self.current.todos and not self.current.todos_all_done:
+            carry_todos = list(self.current.todos)
+        else:
+            # No open todos on current; look at the most recent conversation
+            for conv in reversed(self.conversations):
+                if conv.todos and not conv.todos_all_done:
+                    carry_todos = list(conv.todos)
+                    break
 
         if self._input_mode:
             self.exit_input_mode(keep_text=False)
@@ -672,20 +703,49 @@ class OutputView(PlanUIRendererMixin, PermissionUIRendererMixin, QuestionUIRende
             self.view.erase_regions(PERMISSION_REGION_KEY)
 
         # If agent was working, create a stub conversation to receive further output
-        # This prevents output from being silently discarded after clear
+        # This prevents output from being silently discarded after clear.
+        # Attach the carried bg tools + todos so they remain visible while the
+        # turn keeps going.
         if was_working:
             self.current = Conversation(prompt="(continued)", working=True)
             self.current.region = (0, 0)  # Will be set on first render
+            self.current.events.extend(carry_bg_tools)
+            self.current.todos = carry_todos
             self._update_title()  # Show working indicator
             return  # Don't enter input mode while working
 
-        # Re-enter input mode if we were in it
+        # Idle case: build a zero-prompt carry-forward conversation so the
+        # supportive UI (bg-tool entries, todos) stays visible. _do_render skips
+        # the prompt header when prompt is empty.
+        if carry_bg_tools or carry_todos:
+            carry = Conversation(prompt="", working=False)
+            carry.events = list(carry_bg_tools)
+            carry.todos = carry_todos
+            carry.todos_all_done = False
+            carry.region = (0, 0)
+            self.current = carry
+            self._render_current()
+
+        # Re-enter input mode if we were in it (this also adds bg-tool hint
+        # lines and the pending-context line via session lookup)
         if was_input_mode:
             self.enter_input_mode()
 
     def undo_clear(self) -> None:
-        """Restore content from last clear."""
+        """Restore content from last clear.
+
+        Note: this recovers view text only — internal state (conversations,
+        current) is NOT restored. If clear() created a carry-forward
+        conversation (idle path) for supportive UI, we drop it here so the
+        restored view text isn't shadowed by a stale carry record.
+        """
         if self._cleared_content and self.view and self.view.is_valid():
+            # If current is a zero-prompt carry, drop it — its view region
+            # would now collide with the restored text
+            if self.current is not None and not self.current.prompt and not self.current.working:
+                self.current = None
+                if self.view:
+                    self.view.erase_regions(CONVERSATION_REGION_KEY)
             self._write(self._cleared_content)
             self._cleared_content = None
             self._scroll_to_end()
@@ -873,7 +933,11 @@ class OutputView(PlanUIRendererMixin, PermissionUIRendererMixin, QuestionUIRende
             # Fallback to tuple
             start, end = self.current.region
         if start > view_size or end > view_size:
-            # Region is invalid - recalculate from view content
+            # Region is invalid - recalculate from view content (skip recovery
+            # for empty-prompt carry conversations — there's no prompt marker
+            # to anchor on; just give up and let the next render reset region)
+            if not self.current.prompt:
+                return
             content = self.view.substr(sublime.Region(0, view_size))
             prompt_marker = f"◎ {self.current.prompt[:20]}"
             last_pos = content.rfind(prompt_marker)
@@ -888,21 +952,24 @@ class OutputView(PlanUIRendererMixin, PermissionUIRendererMixin, QuestionUIRende
 
         # Prompt (newline before only if not at start)
         prefix = "\n" if self.current.region[0] > 0 else ""
-        # Indent continuation lines
-        prompt_lines = self.current.prompt.split("\n")
-        if len(prompt_lines) > 1:
-            indented_prompt = prompt_lines[0] + "\n" + "\n".join("  " + l for l in prompt_lines[1:])
-        else:
-            indented_prompt = self.current.prompt
-        # Include context indicator if present
-        if self.current.context_names:
-            context_str = ", ".join(self.current.context_names)
-            lines.append(f"{prefix}◎ {indented_prompt} ▶\n")
-            lines.append(f"  📎 {context_str}\n")
-        else:
-            lines.append(f"{prefix}◎ {indented_prompt} ▶\n")
-        # Thin separator after prompt header
-        lines.append("  ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─\n")
+        # Skip prompt header for carry-forward conversations (empty prompt)
+        # used by clear() to keep todos / bg tools visible without a fake "◎ ▶".
+        if self.current.prompt:
+            # Indent continuation lines
+            prompt_lines = self.current.prompt.split("\n")
+            if len(prompt_lines) > 1:
+                indented_prompt = prompt_lines[0] + "\n" + "\n".join("  " + l for l in prompt_lines[1:])
+            else:
+                indented_prompt = self.current.prompt
+            # Include context indicator if present
+            if self.current.context_names:
+                context_str = ", ".join(self.current.context_names)
+                lines.append(f"{prefix}◎ {indented_prompt} ▶\n")
+                lines.append(f"  📎 {context_str}\n")
+            else:
+                lines.append(f"{prefix}◎ {indented_prompt} ▶\n")
+            # Thin separator after prompt header
+            lines.append("  ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─\n")
 
         # Events in time order (text chunks and tools interleaved)
         # Find the last pending tool to animate it when working

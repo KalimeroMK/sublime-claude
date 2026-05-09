@@ -83,6 +83,11 @@ class Session(SessionQueryMixin, SessionPermissionsMixin):
         self._heartbeat = HeartbeatMonitor(self)
         # Track if inject was sent (to skip "done" status until inject query completes)
         self._inject_pending: bool = False
+        # Buffer for coalescing background-task notifications. Multiple bg tasks
+        # finishing close together are combined into a single wake to avoid
+        # spamming the conversation and racing with user input.
+        self._pending_bg_notifications: List[str] = []
+        self._bg_flush_scheduled: bool = False
 
         # Terminal adapter for persistent shell session
         self._terminal = TerminalAdapter(self)
@@ -339,9 +344,9 @@ class Session(SessionQueryMixin, SessionPermissionsMixin):
         base = re.sub(r'^[◉◇•❓⏸⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]\s*', '', base) or "Claude"
         return base
 
-    def sleep(self) -> None:
+    def sleep(self, force: bool = False) -> bool:
         """Delegate to BridgeManager."""
-        self._bridge.sleep()
+        return self._bridge.sleep(force=force)
 
     def _apply_sleep_ui(self) -> None:
         """Delegate to SessionUIHelper."""
