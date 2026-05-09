@@ -36,9 +36,9 @@ class BaseBridge:
         sys.stderr.write(f"=== {self.name.upper()} STARTING ===\n")
         sys.stderr.flush()
 
-        loop = asyncio.get_event_loop()
-        reader = asyncio.StreamReader(limit=self.buffer_limit, loop=loop)
-        protocol = asyncio.StreamReaderProtocol(reader, loop=loop)
+        loop = asyncio.get_running_loop()
+        reader = asyncio.StreamReader(limit=self.buffer_limit)
+        protocol = asyncio.StreamReaderProtocol(reader)
         await loop.connect_read_pipe(lambda: protocol, sys.stdin)
 
         sys.stderr.write(f"=== StreamReader limit set to {self.buffer_limit} bytes ===\n")
