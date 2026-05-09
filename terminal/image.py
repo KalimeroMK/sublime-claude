@@ -1,9 +1,23 @@
 import struct
-import imghdr
+
+
+# Replacing deprecated imghdr (removed in Python 3.13+)
+# with a lightweight magic-byte detector.
+def _detect_image_type(head: bytes) -> str:
+    if len(head) < 8:
+        return ""
+    if head[:8] == b'\x89PNG\r\n\x1a\n':
+        return 'png'
+    if head[:6] in (b'GIF87a', b'GIF89a'):
+        return 'gif'
+    if head[:2] == b'\xff\xd8':
+        return 'jpeg'
+    if head[:2] == b'BM':
+        return 'bmp'
+    return ""
 
 
 # see https://bugs.python.org/issue16512#msg198034
-# not added to imghdr.tests because of potential issues with reloads
 def _is_jpg(h):
     return h.startswith(b'\xff\xd8')
 
@@ -12,7 +26,7 @@ def get_image_info(databytes):
     head = databytes[0:32]
     if len(head) != 32:
         return
-    what = imghdr.what(None, head)
+    what = _detect_image_type(head)
     if what == 'png':
         check = struct.unpack('>i', head[4:8])[0]
         if check != 0x0d0a1a0a:
