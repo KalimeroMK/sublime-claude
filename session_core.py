@@ -173,6 +173,7 @@ class Session(SessionQueryMixin, SessionPermissionsMixin):
         self.working = False
         self.current_tool = None
         self.last_activity = time.time()
+        self.last_idle_at = time.time()
         # Keep _pending_resume_at alive for consecutive undo support
         self._input_mode_entered = False  # Reset for fresh start after init
         # Capture session_id from initialize response (set via --session-id CLI arg)

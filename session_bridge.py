@@ -1,6 +1,7 @@
 """Bridge lifecycle management — start, stop, interrupt, sleep, wake, restart."""
 import os
 import shlex
+import time
 
 import sublime
 
@@ -349,6 +350,7 @@ class BridgeManager:
         s.fork = False
         resume_at = s._pending_resume_at
         s.current_tool = "waking..."
+        s.last_idle_at = time.time()
         self.start(resume_session_at=resume_at)
         s._persist_state("open")
         if s.output and s.output.view:
@@ -417,6 +419,7 @@ class BridgeManager:
         resume_at = s._pending_resume_at
         s.current_tool = "reconnecting..."
         s._status_mgr.status("reconnecting...")
+        s.last_idle_at = time.time()
         try:
             self.start(resume_session_at=resume_at)
             s._persist_state("open")

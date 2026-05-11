@@ -635,9 +635,10 @@ class SessionQueryMixin:
 
         self.output.enter_input_mode()
 
-        # Check if enter_input_mode actually succeeded (might have deferred)
+        # Check if enter_input_mode actually succeeded (might have deferred due to render pending)
         if not self.output.is_input_mode():
-            print("[Claude] _enter_input_with_draft: enter_input_mode deferred or failed")
+            # enter_input_mode may have scheduled its own retry — schedule ours too
+            sublime.set_timeout(self._enter_input_with_draft, 50)
             return
 
         self._input_mode_entered = True
