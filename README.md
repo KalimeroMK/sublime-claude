@@ -147,7 +147,7 @@ This build extends the base project with additional features, bug fixes, and a f
 | Issue | Fix |
 |-------|-----|
 | Import error | Fixed `ClaudeInsertCommand`/`ClaudeReplaceCommand` imported from wrong module |
-| Python 3.9 compatibility | Replaced `int \| None`, `dict[]`, `list[]` with `Optional`, `Dict`, `List` for Sublime's Python 3.8 |
+| Python 3.8-syntax compatibility | Replaced `int \| None`, `dict[]`, `list[]` with `Optional`, `Dict`, `List` — kept for the `.python-version` 3.8 alias |
 | Mouse selection unresponsive | Fixed dynamic `read_only` toggling to allow selection while protecting conversation history |
 | Input mode leaks | Blocked typing/pasting outside the input area when in input mode |
 | Orphaned view reconnection | Fixed blank lines being added on every reconnect after Sublime restart |
@@ -169,7 +169,7 @@ This build extends the base project with additional features, bug fixes, and a f
 ## Requirements
 
 - Sublime Text 4
-- Python 3.10+ (auto-detected; searches python3.13, 3.12, 3.11, 3.10, uv, pyenv)
+- Python 3.10+ for the bridge (auto-detected newest-first: python3.15 … python3.10, then uv, then pyenv)
 - One or more backends:
   - **Kimi/Claude** — `claude` CLI (v2.1+, native binary)
   - **Ollama** — local models (qwen, llama, mistral, etc.)
@@ -1010,7 +1010,7 @@ All tests run in ~0.03s without requiring Sublime Text to be open (uses mock API
 ```
 ┌─────────────────┐     JSON-RPC/stdio     ┌─────────────────┐
 │  Sublime Text   │ ◄────────────────────► │  bridge/main.py │ (Kimi/Claude)
-│  (Python 3.8)   │                        │  (CLI wrapper)  │
+│ (Python 3.14)   │                        │  (CLI wrapper)  │
 │                 │                        └────────┬────────┘
 │                 │                                 │
 │                 │        JSON-RPC/stdio           │  Persistent CLI
@@ -1059,7 +1059,7 @@ All tests run in ~0.03s without requiring Sublime Text to be open (uses mock API
 └─────────────────────────────────────────┘
 ```
 
-The plugin runs in Sublime's Python 3.8 environment and spawns a separate bridge process using Python 3.10+. Each bridge translates between Sublime's JSON-RPC protocol and the backend CLI:
+The plugin runs in Sublime's bundled plugin host (Python 3.14 as of build 4207) and spawns a separate bridge process on its own Python 3.10+ interpreter. Each bridge translates between Sublime's JSON-RPC protocol and the backend CLI:
 
 ### Persistent CLI Architecture (Claude/Kimi)
 

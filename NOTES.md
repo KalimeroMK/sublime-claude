@@ -31,7 +31,7 @@ Context & Search:
   web_search.py           # DuckDuckGo @web search (no API key)
   context_parser.py       # Context menus & @ picker
 
-Bridge (Python 3.10+ subprocess):
+Bridge (separate Python 3.10+ subprocess):
   bridge/
     base.py               # Base bridge class
     main.py               # Claude/Kimi bridge
@@ -41,7 +41,19 @@ Bridge (Python 3.10+ subprocess):
     rpc_helpers.py        # Shared JSON-RPC helpers
 ```
 
-Plugin code runs in Sublime's Python 3.8 host. Bridge subprocess auto-detects Python 3.10+.
+Two separate runtimes:
+
+- **Plugin code** runs in Sublime's bundled plugin host. Build 4207 ships
+  `plugin_host-3.14` and `plugin_host-3.3` only — the 3.8 host is gone. The
+  package declares `3.14` in `.python-version`; ST also still accepts `3.8`
+  and silently maps it to the 3.14 host, so either value loads today.
+- **Bridge subprocess** auto-detects its own interpreter, newest first
+  (`python3.15` … `python3.10`, then uv, then pyenv). It is *not* Sublime's
+  Python, so plugin side and bridge side routinely run different versions.
+
+Code in the package root is still written 3.8-syntax-clean, which is what
+keeps the `3.8` alias viable; check with
+`ast.parse(src, feature_version=(3, 8))` before using newer syntax.
 
 ## Sublime Text Module Caching
 

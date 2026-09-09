@@ -4,6 +4,9 @@ version = "1.0.0"
 description = "Claude Code integration for Sublime Text — Extended Edition"
 readme = "README.md"
 license = {text = "MIT"}
+# Applies to the bridge subprocess (bridge/*.py), which runs on its own
+# interpreter. Plugin-root modules load in Sublime's plugin host instead and
+# are kept 3.8-syntax-clean — see NOTES.md.
 requires-python = ">=3.10"
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -14,6 +17,7 @@ classifiers = [
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
 ]
 
 [project.optional-dependencies]
