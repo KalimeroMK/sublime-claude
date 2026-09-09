@@ -28,6 +28,15 @@ def plugin_loaded() -> None:
     from . import lsp_client
     sublime.set_timeout_async(lsp_client._mark_async_thread, 0)
 
+    # First-run check for LSP + a language server (never blocks startup)
+    def _lsp_check():
+        from . import lsp_install
+        try:
+            lsp_install.check()
+        except Exception as e:
+            print("[Claude] LSP install check skipped: {}".format(e))
+    sublime.set_timeout(_lsp_check, 2000)
+
     # Start MCP server
     from . import mcp_server
     mcp_server.start()

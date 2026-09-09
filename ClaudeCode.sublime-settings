@@ -47,6 +47,11 @@
     // Leave as "python3" to auto-detect, or set an explicit path.
     "python_path": "python3",
 
+    // Whether to offer to install the LSP package and a language server when
+    // they are missing. "ask" prompts once per start until answered; "never"
+    // stays quiet. The lsp tools need both — LSP alone has no server.
+    "lsp_install_prompt": "ask",
+
     // Default model when no profile is selected.
     // Only used by the claude backend; openai/deepseek use their own model settings.
     // "default_model": "kimi-for-coding",
