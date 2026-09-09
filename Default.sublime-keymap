@@ -1,4 +1,13 @@
 [
+    // Framework-aware go to definition: Laravel/Yii helper strings first,
+    // then the language server. Same thing super+click does.
+    {
+        "keys": ["super+alt+b"],
+        "command": "claude_goto_definition",
+        "context": [
+            { "key": "selector", "operator": "equal", "operand": "source.php" }
+        ]
+    },
     {
         "keys": [
             "super+alt+\\"

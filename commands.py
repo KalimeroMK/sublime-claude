@@ -14,5 +14,6 @@ from .commands_session import *   # noqa: F401,F403
 from .commands_tools import *     # noqa: F401,F403
 from .commands_ui import *        # noqa: F401,F403
 from .commands_voice import *     # noqa: F401,F403
+from .commands_nav import *       # noqa: F401,F403
 
 __all__ = []

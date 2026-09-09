@@ -567,10 +567,31 @@ multi-cursor) is untouched.
 If you already have this in `Packages/User/Default (OSX).sublime-mousemap`,
 delete it — `User` outranks package mousemaps and would shadow this one.
 
-**It does not resolve Blade views, route names, config keys or translation
-keys.** `view('contacts.index')` is a plain string to a PHP language server;
-navigating it needs Laravel-aware indexing, which is what Laravel Idea does for
-PhpStorm. Neither this package nor intelephense provides it.
+`super+click` runs `claude_goto_definition`, which resolves Laravel and Yii
+helper strings itself and hands off to the language server for everything else.
+`super+alt+b` and `Claude: Go to Definition (Laravel/Yii aware)` do the same.
+
+| You click | It opens |
+|---|---|
+| `view('emails.layout')` | `resources/views/emails/layout.blade.php` |
+| `@extends`, `@include`, `@component` in Blade | the same view resolution |
+| `config('instacom.sends.read_rate_limit')` | `config/instacom.php` at the nested key's line |
+| `__('auth.failed')`, `trans(...)` | `lang/<locale>/auth.php` at the key's line, one entry per locale |
+| `route('api-keys.rotate')` | the `->name(...)` line in `routes/*.php` |
+| `render('index')` (Yii) | the matching file under `views/` |
+| anything else | falls through to the language server |
+
+`$request->route('importId')` reads a route *parameter*, not a named route, so
+it is deliberately ignored — as is any `->` or `::` prefixed call sharing a
+helper's name. Every `route(...)` in one project tested here was that form, so a
+resolver matching it would navigate nowhere on every hit.
+
+Where a key is missing the file still opens, at the top: `__('auth.user_not_found')`
+opens `lang/en/auth.php` even though nothing defines that key.
+
+The project root is found by walking up from the clicked file for `artisan`,
+`yii`, or a `composer.json` naming the framework, so a modular layout
+(`app/Modules/<M>/...`) resolves against the real root.
 
 ### Stopping intelephense complaining about Blade files
 

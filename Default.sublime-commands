@@ -1,5 +1,9 @@
 [
     {
+        "caption": "Claude: Go to Definition (Laravel/Yii aware)",
+        "command": "claude_goto_definition"
+    },
+    {
         "caption": "Claude: Query",
         "command": "claude_code_query"
     },
