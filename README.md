@@ -523,7 +523,7 @@ Requires the `LSP` package plus a language server for your language
 | `references <file> <line> <col>` | `textDocument/references` | `referencesProvider` |
 | `completion <file> <line> <col>` | `textDocument/completion` | `completionProvider` |
 | `signature_help <file> <line> <col>` | `textDocument/signatureHelp` | `signatureHelpProvider` |
-| `call_hierarchy <file> <line> <col> [incoming\|outgoing]` | `callHierarchy/*Calls` | `callHierarchyProvider` † |
+| `call_hierarchy <file> <line> <col> [incoming\|outgoing]` | `callHierarchy/*Calls` | `callHierarchyProvider` ‡ |
 | `inlay_hint <file> <start_line> <end_line>` | `textDocument/inlayHint` | `inlayHintProvider` |
 | `symbols <file>` | `textDocument/documentSymbol` | `documentSymbolProvider` |
 | `workspace_symbols <query>` | `workspace/symbol` | `workspaceSymbolProvider` |
@@ -534,6 +534,11 @@ Requires the `LSP` package plus a language server for your language
 † Intelephense advertises these only with a premium licence. Without one the
 subcommand returns `No LSP server with <capability> capability` rather than
 failing silently.
+
+‡ Intelephense does not implement call hierarchy at all, licence or not —
+verified against 1.18.5, which returns `No LSP server with callHierarchyProvider
+capability`. The subcommand is there for servers that do support it
+(gopls, rust-analyzer, typescript-language-server).
 
 `rename` and `code_action` describe the change and write nothing unless
 `--apply` is passed. Line and col are 0-based.
