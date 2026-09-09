@@ -213,5 +213,40 @@ class CompletionTest(unittest.TestCase):
         self.assertEqual(out["count"], 0)
 
 
+class SignatureHelpTest(unittest.TestCase):
+    def test_requests_signature_help(self):
+        c = FakeClient(reply={"signatures": [
+            {"label": "where(string $column, mixed $value)"}], "activeSignature": 0})
+        out = run("signature_help", c, file_path="/x.php", line=8, col=20)
+        self.assertEqual(c.calls[0]["method"], "textDocument/signatureHelp")
+        self.assertEqual(c.calls[0]["capability"], "signatureHelpProvider")
+        self.assertEqual(out["signatures"][0]["label"], "where(string $column, mixed $value)")
+
+    def test_reports_active_signature_and_parameter(self):
+        c = FakeClient(reply={
+            "signatures": [{"label": "f(a, b)", "parameters": [{"label": "a"}, {"label": "b"}]}],
+            "activeSignature": 0, "activeParameter": 1})
+        out = run("signature_help", c, file_path="/x.php", line=1, col=1)
+        self.assertEqual(out["active_signature"], 0)
+        self.assertEqual(out["active_parameter"], 1)
+        self.assertEqual(out["signatures"][0]["parameters"], ["a", "b"])
+
+    def test_includes_documentation_when_present(self):
+        c = FakeClient(reply={"signatures": [
+            {"label": "f()", "documentation": {"kind": "markdown", "value": "does f"}}]})
+        out = run("signature_help", c, file_path="/x.php", line=1, col=1)
+        self.assertEqual(out["signatures"][0]["documentation"], "does f")
+
+    def test_missing_capability_reports_cleanly(self):
+        c = FakeClient(capability_error="No LSP server with signatureHelpProvider capability")
+        self.assertIn("signatureHelpProvider",
+                      run("signature_help", c, file_path="/x.php", line=1, col=1)["error"])
+
+    def test_empty_result(self):
+        c = FakeClient(reply=None)
+        out = run("signature_help", c, file_path="/x.php", line=1, col=1)
+        self.assertEqual(out["signatures"], [])
+
+
 if __name__ == "__main__":
     unittest.main()

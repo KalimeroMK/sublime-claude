@@ -232,6 +232,7 @@ def handle_request(request: dict) -> dict:
                     "description": """Language server integration - get type info, definitions, references, diagnostics from running LSP servers. Commands:
 - hover <file> <line> <col>         → type info and docs at position
 - completion <file> <line> <col>    → what can be called at this position
+- signature_help <file> <line> <col> → parameters of the call being typed
 - definition <file> <line> <col>    → jump to symbol definition
 - references <file> <line> <col>    → find all usages of symbol
 - symbols <file>                    → list all symbols in file

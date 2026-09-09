@@ -173,3 +173,38 @@ def completion(window, file_path, line, col, prefix="", detailed=False, client=N
     if total > len(shown):
         out["truncated"] = True
     return out
+
+
+def _doc_text(doc):
+    if isinstance(doc, dict):
+        return doc.get("value", "")
+    return str(doc or "")
+
+
+def signature_help(window, file_path, line, col, client=None):
+    """Parameter info for the call being typed at this position."""
+    c = _client(client)
+    result, err, _view, _s = c.position_request(
+        window, file_path, line, col, "textDocument/signatureHelp", "signatureHelpProvider")
+    if err:
+        return {"error": err}
+    if not result:
+        return {"signatures": []}
+
+    signatures = []
+    for sig in result.get("signatures", []) or []:
+        entry = {"label": sig.get("label", "")}
+        params = sig.get("parameters")
+        if params:
+            entry["parameters"] = [p.get("label", "") if isinstance(p, dict) else str(p)
+                                   for p in params]
+        doc = _doc_text(sig.get("documentation"))
+        if doc:
+            entry["documentation"] = doc
+        signatures.append(entry)
+
+    return {
+        "signatures": signatures,
+        "active_signature": result.get("activeSignature", 0),
+        "active_parameter": result.get("activeParameter", 0),
+    }

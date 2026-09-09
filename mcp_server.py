@@ -332,6 +332,8 @@ class MCPSocketServer:
             "lsp_diagnostics": lambda f=None: lsp_tools.diagnostics(self._get_window(), f),
             "lsp_completion": lambda f, l, c, prefix="", detailed=False: lsp_tools.completion(
                 self._get_window(), f, l, c, prefix, detailed),
+            "lsp_signature_help": lambda f, l, c: lsp_tools.signature_help(
+                self._get_window(), f, l, c),
         }
 
         # Add context variables

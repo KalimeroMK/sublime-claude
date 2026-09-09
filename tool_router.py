@@ -243,7 +243,8 @@ def create_sublime_router() -> ToolRouter:
         action = parts[0] if parts else ""
         rest = parts[1] if len(parts) > 1 else ""
 
-        if action in ("hover", "definition", "references", "completion"):
+        if action in ("hover", "definition", "references", "completion",
+                      "signature_help"):
             # Parse: <file> <line> <col>
             tokens = rest.rsplit(None, 2)
             if len(tokens) < 3:
