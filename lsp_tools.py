@@ -128,3 +128,48 @@ def diagnostics(window, file_path=None, client=None):
         "source": d.get("source", ""),
     } for d in items or []]
     return {"diagnostics": out, "count": len(out)}
+
+
+_COMPLETION_LIMIT = 200
+
+_COMPLETION_KINDS = {
+    1: "Text", 2: "Method", 3: "Function", 4: "Constructor", 5: "Field",
+    6: "Variable", 7: "Class", 8: "Interface", 9: "Module", 10: "Property",
+    11: "Unit", 12: "Value", 13: "Enum", 14: "Keyword", 15: "Snippet",
+    16: "Color", 17: "File", 18: "Reference", 19: "Folder", 20: "EnumMember",
+    21: "Constant", 22: "Struct", 23: "Event", 24: "Operator", 25: "TypeParameter",
+}
+
+
+def completion(window, file_path, line, col, prefix="", detailed=False, client=None):
+    """What the server says is callable at this position."""
+    c = _client(client)
+    result, err, _view, _s = c.position_request(
+        window, file_path, line, col, "textDocument/completion", "completionProvider",
+        extra_params={"context": {"triggerKind": 1}}, timeout=15.0)
+    if err:
+        return {"error": err}
+
+    if isinstance(result, dict):
+        raw = result.get("items", [])
+    else:
+        raw = result or []
+
+    if prefix:
+        raw = [i for i in raw if str(i.get("label", "")).startswith(prefix)]
+
+    total = len(raw)
+    shown = raw[:_COMPLETION_LIMIT]
+    if detailed:
+        items = [{
+            "label": i.get("label", ""),
+            "kind": _COMPLETION_KINDS.get(i.get("kind", 0), "Unknown"),
+            "detail": i.get("detail", ""),
+        } for i in shown]
+    else:
+        items = [i.get("label", "") for i in shown]
+
+    out = {"items": items, "count": total}
+    if total > len(shown):
+        out["truncated"] = True
+    return out

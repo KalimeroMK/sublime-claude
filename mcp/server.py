@@ -231,6 +231,7 @@ def handle_request(request: dict) -> dict:
                     "name": "lsp",
                     "description": """Language server integration - get type info, definitions, references, diagnostics from running LSP servers. Commands:
 - hover <file> <line> <col>         → type info and docs at position
+- completion <file> <line> <col>    → what can be called at this position
 - definition <file> <line> <col>    → jump to symbol definition
 - references <file> <line> <col>    → find all usages of symbol
 - symbols <file>                    → list all symbols in file
@@ -241,6 +242,7 @@ Line and col are 0-based. File can be a path or view name.
 
 Examples:
   lsp("hover /path/to/file.py 42 10")
+  lsp("completion /path/to/file.php 42 10")
   lsp("definition /path/to/file.py 42 10")
   lsp("references /path/to/file.py 42 10")
   lsp("symbols /path/to/file.py")

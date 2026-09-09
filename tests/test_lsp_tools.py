@@ -167,5 +167,51 @@ class DiagnosticsTest(unittest.TestCase):
         self.assertIn("No LSP listener", out["error"])
 
 
+class CompletionTest(unittest.TestCase):
+    def test_requests_completion_with_capability(self):
+        c = FakeClient(reply={"items": [{"label": "where"}, {"label": "whereHas"}]})
+        out = run("completion", c, file_path="/x.php", line=8, col=13)
+        self.assertEqual(c.calls[0]["method"], "textDocument/completion")
+        self.assertEqual(c.calls[0]["capability"], "completionProvider")
+        self.assertEqual(out["items"], ["where", "whereHas"])
+        self.assertEqual(out["count"], 2)
+
+    def test_accepts_bare_list_response(self):
+        c = FakeClient(reply=[{"label": "get"}])
+        self.assertEqual(run("completion", c, file_path="/x.php", line=1, col=1)["items"], ["get"])
+
+    def test_includes_detail_and_kind_when_present(self):
+        c = FakeClient(reply={"items": [
+            {"label": "where", "kind": 2, "detail": "Builder where(...)"}]})
+        out = run("completion", c, file_path="/x.php", line=1, col=1, detailed=True)
+        self.assertEqual(
+            out["items"],
+            [{"label": "where", "kind": "Method", "detail": "Builder where(...)"}],
+        )
+
+    def test_truncates_to_limit_and_says_so(self):
+        c = FakeClient(reply={"items": [{"label": "m%d" % i} for i in range(300)]})
+        out = run("completion", c, file_path="/x.php", line=1, col=1)
+        self.assertEqual(len(out["items"]), 200)
+        self.assertEqual(out["count"], 300)
+        self.assertTrue(out["truncated"])
+
+    def test_prefix_filter(self):
+        c = FakeClient(reply={"items": [{"label": "where"}, {"label": "get"}]})
+        out = run("completion", c, file_path="/x.php", line=1, col=1, prefix="wh")
+        self.assertEqual(out["items"], ["where"])
+
+    def test_missing_capability_reports_cleanly(self):
+        c = FakeClient(capability_error="No LSP server with completionProvider capability")
+        self.assertIn("completionProvider",
+                      run("completion", c, file_path="/x.php", line=1, col=1)["error"])
+
+    def test_empty_result(self):
+        c = FakeClient(reply=None)
+        out = run("completion", c, file_path="/x.php", line=1, col=1)
+        self.assertEqual(out["items"], [])
+        self.assertEqual(out["count"], 0)
+
+
 if __name__ == "__main__":
     unittest.main()
