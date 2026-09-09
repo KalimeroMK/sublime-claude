@@ -22,6 +22,12 @@ def plugin_loaded() -> None:
     if not hasattr(sublime, '_claude_sessions'):
         sublime._claude_sessions = {}
 
+    # Record Sublime's async worker so lsp_client can refuse to block it.
+    # LSP delivers request responses on that thread; blocking it means the
+    # response can never arrive, which shows up as every request timing out.
+    from . import lsp_client
+    sublime.set_timeout_async(lsp_client._mark_async_thread, 0)
+
     # Start MCP server
     from . import mcp_server
     mcp_server.start()
