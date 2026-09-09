@@ -216,3 +216,20 @@ def apply_workspace_edit(session, edit, label=None, timeout=15.0):
     if error[0]:
         return False, error[0]
     return True, None
+
+
+def execute_command(session, command, arguments=None, timeout=15.0):
+    """Run a server-side command. Returns (ok, error).
+
+    Intelephense's code actions carry a Command rather than an edit (it does not
+    implement codeAction/resolve), so this is the only way to apply them. The
+    server responds by pushing workspace/applyEdit back, which LSP applies — so
+    this writes, and callers must gate it the same way they gate an edit.
+    """
+    _result, err = request(
+        session, "workspace/executeCommand",
+        {"command": command, "arguments": list(arguments or [])},
+        timeout=timeout)
+    if err:
+        return False, err
+    return True, None

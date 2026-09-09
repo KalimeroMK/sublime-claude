@@ -169,5 +169,39 @@ class ApplyWorkspaceEditTest(unittest.TestCase):
         self.assertIn("server refused", err)
 
 
+class ExecuteCommandTest(unittest.TestCase):
+    """Intelephense's code actions carry a Command, not an edit — applying one
+    means workspace/executeCommand, after which the server pushes
+    workspace/applyEdit back and LSP applies it."""
+
+    def setUp(self):
+        client._REQUEST_FACTORY = FakeRequest
+
+    def tearDown(self):
+        client._REQUEST_FACTORY = None
+
+    def test_sends_command_and_arguments(self):
+        s = FakeSession(reply=None)
+        ok, err = client.execute_command(
+            s, "intelephense.import.symbol", ["file:///a.php", "X", 1])
+        self.assertTrue(ok)
+        self.assertIsNone(err)
+        self.assertEqual(s.sent[0].method, "workspace/executeCommand")
+        self.assertEqual(s.sent[0].params, {
+            "command": "intelephense.import.symbol",
+            "arguments": ["file:///a.php", "X", 1]})
+
+    def test_missing_arguments_sends_empty_list(self):
+        s = FakeSession(reply=None)
+        client.execute_command(s, "some.command", None)
+        self.assertEqual(s.sent[0].params["arguments"], [])
+
+    def test_propagates_error(self):
+        s = FakeSession(error="Unhandled method")
+        ok, err = client.execute_command(s, "nope", [])
+        self.assertFalse(ok)
+        self.assertEqual(err, "Unhandled method")
+
+
 if __name__ == "__main__":
     unittest.main()

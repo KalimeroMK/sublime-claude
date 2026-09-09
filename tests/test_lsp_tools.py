@@ -477,14 +477,22 @@ class CodeActionTest(unittest.TestCase):
         {"title": "Add missing method", "kind": "quickfix"},
     ]
 
-    def _client(self, reply=None, capability_error=None):
+    def _client(self, reply=None, capability_error=None, stored_diagnostics=None):
         class C(FakeClient):
             def __init__(self):
                 super().__init__(reply=reply, capability_error=capability_error)
                 self.applied = []
+                self.commands = []
 
             def apply_workspace_edit(self, session, edit, label=None, timeout=15.0):
                 self.applied.append({"edit": edit, "label": label})
+                return True, None
+
+            def diagnostics_for_view(self, view):
+                return list(stored_diagnostics or []), None
+
+            def execute_command(self, session, command, arguments=None, timeout=15.0):
+                self.commands.append({"command": command, "arguments": arguments})
                 return True, None
 
         return C()
@@ -496,9 +504,9 @@ class CodeActionTest(unittest.TestCase):
         self.assertEqual(
             out["actions"],
             [{"index": 0, "title": "Import 'App\\Models\\User'", "kind": "quickfix",
-              "has_edit": True},
+              "has_edit": True, "has_command": False},
              {"index": 1, "title": "Add missing method", "kind": "quickfix",
-              "has_edit": False}],
+              "has_edit": False, "has_command": False}],
         )
 
     def test_uses_code_action_capability(self):
@@ -507,13 +515,52 @@ class CodeActionTest(unittest.TestCase):
         # calls[0] is resolve_view; the capability check is the second call
         self.assertEqual(c.calls[1]["session_capability"], "codeActionProvider")
 
-    def test_sends_range_and_empty_diagnostic_context(self):
+    def test_sends_the_requested_range(self):
         c = self._client(reply=[])
         run("code_action", c, file_path="/src/a.php", line=5, col=0)
         params = c.calls[-1]["params"]
         self.assertEqual(params["range"], {"start": {"line": 5, "character": 0},
                                            "end": {"line": 5, "character": 0}})
-        self.assertEqual(params["context"], {"diagnostics": []})
+
+    def test_passes_diagnostics_at_that_line_into_the_context(self):
+        """Intelephense's import quickfixes are diagnostic-driven: with an empty
+        context.diagnostics it offers nothing at all. Verified live — the same
+        position returned 0 actions with [] and 4 with the diagnostic."""
+        diag = {"message": "Undefined type 'Collection'.",
+                "range": {"start": {"line": 5, "character": 13},
+                          "end": {"line": 5, "character": 23}}}
+        c = self._client(reply=[], stored_diagnostics=[diag])
+        run("code_action", c, file_path="/src/a.php", line=5, col=13)
+        self.assertEqual(c.calls[-1]["params"]["context"], {"diagnostics": [diag]})
+
+    def test_omits_diagnostics_from_other_lines(self):
+        elsewhere = {"message": "other", "range": {"start": {"line": 99, "character": 0},
+                                                   "end": {"line": 99, "character": 4}}}
+        c = self._client(reply=[], stored_diagnostics=[elsewhere])
+        run("code_action", c, file_path="/src/a.php", line=5, col=0)
+        self.assertEqual(c.calls[-1]["params"]["context"], {"diagnostics": []})
+
+    def test_includes_a_multiline_diagnostic_that_spans_the_line(self):
+        spanning = {"message": "block", "range": {"start": {"line": 3, "character": 0},
+                                                  "end": {"line": 8, "character": 0}}}
+        c = self._client(reply=[], stored_diagnostics=[spanning])
+        run("code_action", c, file_path="/src/a.php", line=5, col=0)
+        self.assertEqual(c.calls[-1]["params"]["context"], {"diagnostics": [spanning]})
+
+    def test_survives_a_diagnostics_read_failure(self):
+        """A store read that errors must not sink the whole request."""
+        class C(FakeClient):
+            def __init__(self):
+                super().__init__(reply=[])
+                self.applied = []
+
+            def diagnostics_for_view(self, view):
+                return None, "No LSP listener for this view"
+
+        c = C()
+        out = run("code_action", c, file_path="/src/a.php", line=5, col=0)
+        self.assertEqual(c.calls[-1]["params"]["context"], {"diagnostics": []})
+        self.assertNotIn("error", out)
 
     def test_listing_writes_nothing(self):
         """The safety decision: listing actions must never apply one."""
@@ -534,11 +581,36 @@ class CodeActionTest(unittest.TestCase):
         self.assertIn("out of range", out["error"])
         self.assertEqual(c.applied, [])
 
-    def test_apply_action_without_an_edit(self):
-        c = self._client(reply=self.ACTIONS)
-        out = run("code_action", c, file_path="/src/a.php", line=5, col=0, apply_index=1)
-        self.assertIn("no edit", out["error"])
+    def test_apply_command_based_action(self):
+        """Intelephense returns a Command rather than an edit and does not
+        implement codeAction/resolve, so applying one goes through
+        workspace/executeCommand. Verified live against intelephense 1.18.5."""
+        actions = [{"title": "use Collection", "kind": "quickfix",
+                    "command": {"title": "Import Symbol",
+                                "command": "intelephense.import.symbol",
+                                "arguments": ["file:///a.php", "Collection", 1]}}]
+        c = self._client(reply=actions)
+        out = run("code_action", c, file_path="/src/a.php", line=5, col=0, apply_index=0)
+        self.assertEqual(c.commands, [{"command": "intelephense.import.symbol",
+                                       "arguments": ["file:///a.php", "Collection", 1]}])
+        self.assertEqual(c.applied, [], "a command-based action must not go through applyEdit")
+        self.assertTrue(out["applied"])
+
+    def test_apply_action_with_neither_edit_nor_command(self):
+        c = self._client(reply=[{"title": "inert", "kind": "quickfix"}])
+        out = run("code_action", c, file_path="/src/a.php", line=5, col=0, apply_index=0)
+        self.assertIn("neither an edit nor a command", out["error"])
         self.assertEqual(c.applied, [])
+        self.assertEqual(c.commands, [])
+
+    def test_edit_takes_precedence_over_command(self):
+        actions = [{"title": "both",
+                    "edit": {"changes": {"file:///a.php": [{"range": {}}]}},
+                    "command": {"command": "x", "arguments": []}}]
+        c = self._client(reply=actions)
+        run("code_action", c, file_path="/src/a.php", line=5, col=0, apply_index=0)
+        self.assertEqual(len(c.applied), 1)
+        self.assertEqual(c.commands, [])
 
     def test_no_actions_available(self):
         c = self._client(reply=[])

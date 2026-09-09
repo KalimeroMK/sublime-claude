@@ -80,6 +80,18 @@ the async thread and so schedules itself there.
 `textDocument/diagnostic` — intelephense pushes diagnostics and does not serve
 the pull request.
 
+`code_action` has two traps, both found by testing against a live server:
+
+1. `context.diagnostics` must carry the diagnostics at the requested line.
+   Intelephense's import quickfixes are diagnostic-driven — the same position
+   returned 0 actions with an empty list and 4 with the diagnostic passed in.
+2. Its actions carry a `Command`, not an `edit`, and `codeAction/resolve` comes
+   back `Unhandled method`. Applying one therefore means
+   `workspace/executeCommand`; the server then pushes `workspace/applyEdit`
+   back and LSP applies it. `executeCommandProvider` lists what is available
+   (`intelephense.import.symbol`, `implement.abstract.method.all`,
+   `phpdoc.add`).
+
 ```
 lsp_format.py   pure formatters, stdlib only
 lsp_client.py   the only LSP.plugin.* importer; test seam

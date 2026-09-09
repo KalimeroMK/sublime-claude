@@ -343,6 +343,16 @@ def rename(window, file_path, line, col, new_name, apply=False, client=None):
     return dict(summary, applied=True)
 
 
+def _spans_line(diagnostic, line):
+    """True if the diagnostic's range covers `line` (start and end inclusive)."""
+    rng = diagnostic.get("range") or {}
+    start = (rng.get("start") or {}).get("line")
+    end = (rng.get("end") or {}).get("line", start)
+    if start is None:
+        return False
+    return start <= line <= (end if end is not None else start)
+
+
 def code_action(window, file_path, line, col, apply_index=None, client=None):
     """List the fixes and refactors the server offers at a position.
 
@@ -357,10 +367,17 @@ def code_action(window, file_path, line, col, apply_index=None, client=None):
     if err:
         return {"error": err}
 
+    # Intelephense's quickfixes (imports above all) are diagnostic-driven: with
+    # an empty context.diagnostics it offers nothing. Verified live — the same
+    # position gave 0 actions with [] and 4 with the diagnostic passed through.
+    stored, diag_err = c.diagnostics_for_view(view)
+    at_line = [] if diag_err else [d for d in (stored or [])
+                                   if _spans_line(d, line)]
+
     params = c.document_params(view)
     params["range"] = {"start": {"line": line, "character": col},
                        "end": {"line": line, "character": col}}
-    params["context"] = {"diagnostics": []}
+    params["context"] = {"diagnostics": at_line}
     result, err = c.request(session, "textDocument/codeAction", params, view, 15.0)
     if err:
         return {"error": err}
@@ -371,6 +388,7 @@ def code_action(window, file_path, line, col, apply_index=None, client=None):
         "title": a.get("title", ""),
         "kind": a.get("kind", ""),
         "has_edit": bool(a.get("edit")),
+        "has_command": bool(a.get("command")),
     } for i, a in enumerate(actions)]
 
     if apply_index is None:
@@ -385,14 +403,27 @@ def code_action(window, file_path, line, col, apply_index=None, client=None):
                     apply_index, len(actions) - 1 if actions else 0)}
 
     chosen = actions[apply_index]
+    title = chosen.get("title", "")
     edit = chosen.get("edit")
-    if not edit:
-        return {"actions": listed,
-                "error": "Action {!r} carries no edit; it needs a server command, "
-                         "which is not supported".format(chosen.get("title", ""))}
+    command = chosen.get("command")
 
-    ok, err = c.apply_workspace_edit(session, edit, label=chosen.get("title", ""))
-    if not ok:
-        return {"actions": listed, "applied": False, "error": err}
-    summary = lsp_format.summarize_workspace_edit(edit)
-    return dict(summary, actions=listed, applied=True, title=chosen.get("title", ""))
+    if edit:
+        ok, err = c.apply_workspace_edit(session, edit, label=title)
+        if not ok:
+            return {"actions": listed, "applied": False, "error": err}
+        summary = lsp_format.summarize_workspace_edit(edit)
+        return dict(summary, actions=listed, applied=True, title=title)
+
+    if command:
+        # Intelephense ships a Command instead of an edit and does not implement
+        # codeAction/resolve, so this is the only way to apply its quickfixes.
+        # The server answers by pushing workspace/applyEdit, which LSP applies.
+        ok, err = c.execute_command(session, command.get("command", ""),
+                                    command.get("arguments"))
+        if not ok:
+            return {"actions": listed, "applied": False, "error": err}
+        return {"actions": listed, "applied": True, "title": title,
+                "via": "workspace/executeCommand"}
+
+    return {"actions": listed,
+            "error": "Action {!r} carries neither an edit nor a command".format(title)}

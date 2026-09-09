@@ -543,6 +543,13 @@ capability`. The subcommand is there for servers that do support it
 `rename` and `code_action` describe the change and write nothing unless
 `--apply` is passed. Line and col are 0-based.
 
+`code_action` passes the diagnostics at the requested line into the request —
+intelephense's quickfixes are diagnostic-driven and it offers nothing without
+them. Its actions carry a `Command` rather than an edit and it does not
+implement `codeAction/resolve`, so `--apply` runs them through
+`workspace/executeCommand`; the listing reports `has_edit` and `has_command` so
+you can tell which path an action will take.
+
 **Settings:**
 ```json
 {
