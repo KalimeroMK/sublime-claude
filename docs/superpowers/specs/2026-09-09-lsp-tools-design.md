@@ -28,9 +28,12 @@ framework with no server, so PHP also needs `LSP-intelephense`.
 | file | ~lines | responsibility |
 |---|---|---|
 | `lsp_client.py` | 130 | the only importer of `LSP.plugin.*`: session lookup, sync request, capability check, package detection |
-| `lsp_tools.py` | 470 | the 14 subcommands, each shallow over the client |
+| `lsp_tools.py` | 670 | the 14 subcommands, each shallow over the client |
 | `lsp_install.py` | 120 | first-run check, language detection, Package Control call |
 | `mcp_server.py` | −371 | registration only; 2044 → ~1690 lines |
+
+Sizes are measured, not guessed: the current LSP block is 371 lines — 83 of
+helpers that move to `lsp_client.py`, and 289 for 6 subcommands, so ~48 each.
 
 `lsp_client.py` is the test seam — replaced by a fake so all 14 subcommands are
 testable without Sublime and without a server.
@@ -73,7 +76,7 @@ subcommands are the established shape (`lsp hover <file> <line> <col>`).
 `can_use_tool` (`bridge/main.py:661`) already gates every MCP tool unless
 `autoAllowedMcpTools` matches, so no new permission machinery is needed.
 
-One gap: `match_permission_pattern` (`permissions.py:251`) inspects
+One gap: `match_permission_pattern` (`permissions.py:252`) inspects
 `command`/`path`/`query`, but the `lsp` tool carries its subcommand in `cmd`, so
 no pattern can ever match. Fix is to add `cmd` to the fields it inspects. Then:
 
