@@ -293,5 +293,70 @@ class ImplementationTest(unittest.TestCase):
         self.assertIn("No implementation", out["message"])
 
 
+class CallHierarchyTest(unittest.TestCase):
+    def _client_with(self, prepare, calls):
+        """prepare -> prepareCallHierarchy reply; calls -> incoming/outgoing reply."""
+        class C(FakeClient):
+            def __init__(self):
+                super().__init__()
+                self.methods = []
+
+            def position_request(self, window, file_path, line, col, method, capability,
+                                 extra_params=None, timeout=5.0):
+                self.methods.append(method)
+                self.calls.append({"method": method, "capability": capability})
+                return prepare, None, object(), self
+
+            def request(self, session, method, params, view=None, timeout=5.0):
+                self.methods.append(method)
+                self.calls.append({"method": method, "params": params})
+                return calls, None
+
+        return C()
+
+    def test_incoming_calls(self):
+        prepare = [{"name": "rotate", "kind": 6, "uri": "file:///A.php",
+                    "selectionRange": {"start": {"line": 10, "character": 4}}}]
+        calls = [{"from": {"name": "controller", "kind": 6, "uri": "file:///C.php",
+                           "selectionRange": {"start": {"line": 3, "character": 2}}}}]
+        c = self._client_with(prepare, calls)
+        out = run("call_hierarchy", c, file_path="/A.php", line=10, col=4)
+        self.assertEqual(c.methods[0], "textDocument/prepareCallHierarchy")
+        self.assertEqual(c.methods[1], "callHierarchy/incomingCalls")
+        self.assertEqual(out["direction"], "incoming")
+        self.assertEqual(out["calls"], [{"name": "controller", "kind": "Method",
+                                         "file": "/C.php", "line": 3, "col": 2}])
+
+    def test_outgoing_calls(self):
+        prepare = [{"name": "rotate", "kind": 6, "uri": "file:///A.php",
+                    "selectionRange": {"start": {"line": 10, "character": 4}}}]
+        calls = [{"to": {"name": "save", "kind": 6, "uri": "file:///R.php",
+                         "selectionRange": {"start": {"line": 8, "character": 4}}}}]
+        c = self._client_with(prepare, calls)
+        out = run("call_hierarchy", c, file_path="/A.php", line=10, col=4,
+                  direction="outgoing")
+        self.assertEqual(c.methods[1], "callHierarchy/outgoingCalls")
+        self.assertEqual(out["calls"][0]["name"], "save")
+
+    def test_uses_call_hierarchy_capability(self):
+        c = self._client_with([], [])
+        run("call_hierarchy", c, file_path="/A.php", line=1, col=1)
+        self.assertEqual(c.calls[0]["capability"], "callHierarchyProvider")
+
+    def test_no_item_at_position_short_circuits(self):
+        """prepare returned nothing, so no second request must be issued."""
+        c = self._client_with([], [])
+        out = run("call_hierarchy", c, file_path="/A.php", line=1, col=1)
+        self.assertEqual(out["calls"], [])
+        self.assertIn("No call hierarchy", out["message"])
+        self.assertEqual(len(c.methods), 1)
+
+    def test_rejects_unknown_direction(self):
+        c = self._client_with([], [])
+        out = run("call_hierarchy", c, file_path="/A.php", line=1, col=1, direction="sideways")
+        self.assertIn("direction", out["error"])
+        self.assertEqual(c.methods, [])
+
+
 if __name__ == "__main__":
     unittest.main()

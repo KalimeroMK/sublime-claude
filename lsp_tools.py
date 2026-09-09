@@ -234,3 +234,39 @@ def implementation(window, file_path, line, col, client=None):
     if not locations:
         return {"locations": [], "message": "No implementation found"}
     return {"locations": locations, "count": len(locations)}
+
+
+def call_hierarchy(window, file_path, line, col, direction="incoming", client=None):
+    """Who calls this (incoming) or what this calls (outgoing)."""
+    if direction not in ("incoming", "outgoing"):
+        return {"error": "direction must be 'incoming' or 'outgoing', got {!r}".format(direction)}
+
+    c = _client(client)
+    items, err, view, session = c.position_request(
+        window, file_path, line, col,
+        "textDocument/prepareCallHierarchy", "callHierarchyProvider")
+    if err:
+        return {"error": err}
+    if not items:
+        return {"calls": [], "message": "No call hierarchy item at this position"}
+
+    method = "callHierarchy/{}Calls".format(direction)
+    result, err = c.request(session, method, {"item": items[0]}, view, 15.0)
+    if err:
+        return {"error": err}
+
+    key = "from" if direction == "incoming" else "to"
+    calls = []
+    for entry in result or []:
+        node = entry.get(key) or {}
+        rng = node.get("selectionRange") or node.get("range") or {}
+        start = rng.get("start", {})
+        calls.append({
+            "name": node.get("name", ""),
+            "kind": lsp_format.symbol_kind_name(node.get("kind", 0)),
+            "file": lsp_format.uri_to_path(node.get("uri", "")),
+            "line": start.get("line", 0),
+            "col": start.get("character", 0),
+        })
+
+    return {"direction": direction, "calls": calls, "count": len(calls)}

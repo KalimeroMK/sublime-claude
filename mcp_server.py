@@ -338,6 +338,8 @@ class MCPSocketServer:
                 self._get_window(), f, l, c),
             "lsp_implementation": lambda f, l, c: lsp_tools.implementation(
                 self._get_window(), f, l, c),
+            "lsp_call_hierarchy": lambda f, l, c, direction="incoming": lsp_tools.call_hierarchy(
+                self._get_window(), f, l, c, direction),
         }
 
         # Add context variables

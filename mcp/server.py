@@ -235,6 +235,7 @@ def handle_request(request: dict) -> dict:
 - signature_help <file> <line> <col> → parameters of the call being typed
 - type_definition <file> <line> <col> → where the symbol's type is declared
 - implementation <file> <line> <col>  → concrete implementations
+- call_hierarchy <file> <line> <col> [incoming|outgoing] → callers or callees
 - definition <file> <line> <col>    → jump to symbol definition
 - references <file> <line> <col>    → find all usages of symbol
 - symbols <file>                    → list all symbols in file

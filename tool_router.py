@@ -256,6 +256,19 @@ def create_sublime_router() -> ToolRouter:
                 return f"return {{'error': 'line and col must be integers'}}"
             func = f"lsp_{action}"
             return f"return {func}({file_path!r}, {line}, {col})"
+        elif action == "call_hierarchy":
+            # <file> <line> <col> [incoming|outgoing]
+            tokens = rest.split()
+            if len(tokens) < 3:
+                return "return {'error': 'Usage: call_hierarchy <file> <line> <col> [incoming|outgoing]'}"
+            file_path, line_s, col_s = tokens[0], tokens[1], tokens[2]
+            direction = tokens[3] if len(tokens) > 3 else "incoming"
+            try:
+                line, col = int(line_s), int(col_s)
+            except ValueError:
+                return "return {'error': 'line and col must be integers'}"
+            return "return lsp_call_hierarchy({!r}, {}, {}, {!r})".format(
+                file_path, line, col, direction)
         elif action == "symbols":
             file_path = rest.strip()
             if not file_path:
