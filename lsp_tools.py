@@ -341,3 +341,58 @@ def rename(window, file_path, line, col, new_name, apply=False, client=None):
     if not ok:
         return dict(summary, applied=False, error=err)
     return dict(summary, applied=True)
+
+
+def code_action(window, file_path, line, col, apply_index=None, client=None):
+    """List the fixes and refactors the server offers at a position.
+
+    Listing never writes. Pass apply_index to apply one — that is a separate
+    tool use, so it reaches the permission prompt.
+    """
+    c = _client(client)
+    view, err = c.resolve_view(window, file_path)
+    if err:
+        return {"error": err}
+    session, err = c.session_for_view(view, "codeActionProvider")
+    if err:
+        return {"error": err}
+
+    params = c.document_params(view)
+    params["range"] = {"start": {"line": line, "character": col},
+                       "end": {"line": line, "character": col}}
+    params["context"] = {"diagnostics": []}
+    result, err = c.request(session, "textDocument/codeAction", params, view, 15.0)
+    if err:
+        return {"error": err}
+
+    actions = result or []
+    listed = [{
+        "index": i,
+        "title": a.get("title", ""),
+        "kind": a.get("kind", ""),
+        "has_edit": bool(a.get("edit")),
+    } for i, a in enumerate(actions)]
+
+    if apply_index is None:
+        if not listed:
+            return {"actions": [], "message": "No code actions at this position"}
+        return {"actions": listed,
+                "message": "Listed only — nothing written. Re-run with --apply <index> to apply one."}
+
+    if not 0 <= apply_index < len(actions):
+        return {"actions": listed,
+                "error": "apply index {} is out of range (0-{})".format(
+                    apply_index, len(actions) - 1 if actions else 0)}
+
+    chosen = actions[apply_index]
+    edit = chosen.get("edit")
+    if not edit:
+        return {"actions": listed,
+                "error": "Action {!r} carries no edit; it needs a server command, "
+                         "which is not supported".format(chosen.get("title", ""))}
+
+    ok, err = c.apply_workspace_edit(session, edit, label=chosen.get("title", ""))
+    if not ok:
+        return {"actions": listed, "applied": False, "error": err}
+    summary = lsp_format.summarize_workspace_edit(edit)
+    return dict(summary, actions=listed, applied=True, title=chosen.get("title", ""))

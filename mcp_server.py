@@ -343,6 +343,8 @@ class MCPSocketServer:
             "lsp_inlay_hint": lambda f, s_, e: lsp_tools.inlay_hint(self._get_window(), f, s_, e),
             "lsp_rename": lambda f, l, c, new_name, apply=False: lsp_tools.rename(
                 self._get_window(), f, l, c, new_name, apply),
+            "lsp_code_action": lambda f, l, c, apply_index=None: lsp_tools.code_action(
+                self._get_window(), f, l, c, apply_index),
         }
 
         # Add context variables

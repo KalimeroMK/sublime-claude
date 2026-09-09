@@ -256,6 +256,27 @@ def create_sublime_router() -> ToolRouter:
                 return f"return {{'error': 'line and col must be integers'}}"
             func = f"lsp_{action}"
             return f"return {func}({file_path!r}, {line}, {col})"
+        elif action == "code_action":
+            # <file> <line> <col> [--apply <index>]
+            tokens = rest.split()
+            apply_index = None
+            if "--apply" in tokens:
+                i = tokens.index("--apply")
+                if i + 1 >= len(tokens):
+                    return "return {'error': '--apply needs an action index'}"
+                try:
+                    apply_index = int(tokens[i + 1])
+                except ValueError:
+                    return "return {'error': '--apply index must be an integer'}"
+                tokens = tokens[:i] + tokens[i + 2:]
+            if len(tokens) < 3:
+                return "return {'error': 'Usage: code_action <file> <line> <col> [--apply <index>]'}"
+            try:
+                line, col = int(tokens[1]), int(tokens[2])
+            except ValueError:
+                return "return {'error': 'line and col must be integers'}"
+            return "return lsp_code_action({!r}, {}, {}, {!r})".format(
+                tokens[0], line, col, apply_index)
         elif action == "rename":
             # <file> <line> <col> <new_name> [--apply]
             tokens = rest.split()

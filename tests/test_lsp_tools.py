@@ -469,5 +469,83 @@ class RenameTest(unittest.TestCase):
         self.assertEqual(c.applied, [])
 
 
+class CodeActionTest(unittest.TestCase):
+    ACTIONS = [
+        {"title": "Import 'App\\Models\\User'",
+         "kind": "quickfix",
+         "edit": {"changes": {"file:///src/a.php": [{"range": {}}]}}},
+        {"title": "Add missing method", "kind": "quickfix"},
+    ]
+
+    def _client(self, reply=None, capability_error=None):
+        class C(FakeClient):
+            def __init__(self):
+                super().__init__(reply=reply, capability_error=capability_error)
+                self.applied = []
+
+            def apply_workspace_edit(self, session, edit, label=None, timeout=15.0):
+                self.applied.append({"edit": edit, "label": label})
+                return True, None
+
+        return C()
+
+    def test_lists_available_actions(self):
+        c = self._client(reply=self.ACTIONS)
+        out = run("code_action", c, file_path="/src/a.php", line=5, col=0)
+        self.assertEqual(c.calls[-1]["method"], "textDocument/codeAction")
+        self.assertEqual(
+            out["actions"],
+            [{"index": 0, "title": "Import 'App\\Models\\User'", "kind": "quickfix",
+              "has_edit": True},
+             {"index": 1, "title": "Add missing method", "kind": "quickfix",
+              "has_edit": False}],
+        )
+
+    def test_uses_code_action_capability(self):
+        c = self._client(reply=[])
+        run("code_action", c, file_path="/src/a.php", line=1, col=0)
+        # calls[0] is resolve_view; the capability check is the second call
+        self.assertEqual(c.calls[1]["session_capability"], "codeActionProvider")
+
+    def test_sends_range_and_empty_diagnostic_context(self):
+        c = self._client(reply=[])
+        run("code_action", c, file_path="/src/a.php", line=5, col=0)
+        params = c.calls[-1]["params"]
+        self.assertEqual(params["range"], {"start": {"line": 5, "character": 0},
+                                           "end": {"line": 5, "character": 0}})
+        self.assertEqual(params["context"], {"diagnostics": []})
+
+    def test_listing_writes_nothing(self):
+        """The safety decision: listing actions must never apply one."""
+        c = self._client(reply=self.ACTIONS)
+        run("code_action", c, file_path="/src/a.php", line=5, col=0)
+        self.assertEqual(c.applied, [])
+
+    def test_apply_by_index(self):
+        c = self._client(reply=self.ACTIONS)
+        out = run("code_action", c, file_path="/src/a.php", line=5, col=0, apply_index=0)
+        self.assertEqual(len(c.applied), 1)
+        self.assertEqual(c.applied[0]["label"], "Import 'App\\Models\\User'")
+        self.assertTrue(out["applied"])
+
+    def test_apply_index_out_of_range(self):
+        c = self._client(reply=self.ACTIONS)
+        out = run("code_action", c, file_path="/src/a.php", line=5, col=0, apply_index=9)
+        self.assertIn("out of range", out["error"])
+        self.assertEqual(c.applied, [])
+
+    def test_apply_action_without_an_edit(self):
+        c = self._client(reply=self.ACTIONS)
+        out = run("code_action", c, file_path="/src/a.php", line=5, col=0, apply_index=1)
+        self.assertIn("no edit", out["error"])
+        self.assertEqual(c.applied, [])
+
+    def test_no_actions_available(self):
+        c = self._client(reply=[])
+        out = run("code_action", c, file_path="/src/a.php", line=5, col=0)
+        self.assertEqual(out["actions"], [])
+        self.assertIn("No code actions", out["message"])
+
+
 if __name__ == "__main__":
     unittest.main()
