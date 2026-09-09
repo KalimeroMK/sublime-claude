@@ -358,5 +358,49 @@ class CallHierarchyTest(unittest.TestCase):
         self.assertEqual(c.methods, [])
 
 
+class InlayHintTest(unittest.TestCase):
+    def test_requests_inlay_hints_for_a_line_range(self):
+        c = FakeClient(reply=[
+            {"label": ": string", "position": {"line": 5, "character": 12}},
+            {"label": "$column:", "position": {"line": 6, "character": 20}},
+        ])
+        out = run("inlay_hint", c, file_path="/x.php", start_line=5, end_line=6)
+        self.assertEqual(c.calls[-1]["method"], "textDocument/inlayHint")
+        self.assertEqual(
+            c.calls[-1]["params"]["range"],
+            {"start": {"line": 5, "character": 0}, "end": {"line": 7, "character": 0}},
+        )
+        self.assertEqual(out["hints"][0], {"label": ": string", "line": 5, "col": 12})
+        self.assertEqual(out["count"], 2)
+
+    def test_uses_inlay_hint_capability(self):
+        c = FakeClient(reply=[])
+        run("inlay_hint", c, file_path="/x.php", start_line=0, end_line=0)
+        # calls[0] is resolve_view; the capability check is the second call
+        self.assertEqual(c.calls[1]["session_capability"], "inlayHintProvider")
+
+    def test_label_parts_are_joined(self):
+        c = FakeClient(reply=[
+            {"label": [{"value": "$a"}, {"value": ": int"}], "position": {"line": 1, "character": 2}}])
+        out = run("inlay_hint", c, file_path="/x.php", start_line=1, end_line=1)
+        self.assertEqual(out["hints"][0]["label"], "$a: int")
+
+    def test_missing_capability_reports_cleanly(self):
+        c = FakeClient(capability_error="No LSP server with inlayHintProvider capability")
+        self.assertIn("inlayHintProvider",
+                      run("inlay_hint", c, file_path="/x.php", start_line=0, end_line=0)["error"])
+
+    def test_rejects_inverted_range(self):
+        c = FakeClient(reply=[])
+        out = run("inlay_hint", c, file_path="/x.php", start_line=9, end_line=2)
+        self.assertIn("end_line", out["error"])
+        self.assertEqual(c.calls, [])
+
+    def test_empty_result(self):
+        c = FakeClient(reply=None)
+        out = run("inlay_hint", c, file_path="/x.php", start_line=0, end_line=1)
+        self.assertEqual(out["hints"], [])
+
+
 if __name__ == "__main__":
     unittest.main()

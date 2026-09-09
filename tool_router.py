@@ -256,6 +256,16 @@ def create_sublime_router() -> ToolRouter:
                 return f"return {{'error': 'line and col must be integers'}}"
             func = f"lsp_{action}"
             return f"return {func}({file_path!r}, {line}, {col})"
+        elif action == "inlay_hint":
+            # <file> <start_line> <end_line>
+            tokens = rest.rsplit(None, 2)
+            if len(tokens) < 3:
+                return "return {'error': 'Usage: inlay_hint <file> <start_line> <end_line>'}"
+            try:
+                start, end = int(tokens[1]), int(tokens[2])
+            except ValueError:
+                return "return {'error': 'start_line and end_line must be integers'}"
+            return "return lsp_inlay_hint({!r}, {}, {})".format(tokens[0], start, end)
         elif action == "call_hierarchy":
             # <file> <line> <col> [incoming|outgoing]
             tokens = rest.split()

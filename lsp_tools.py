@@ -270,3 +270,42 @@ def call_hierarchy(window, file_path, line, col, direction="incoming", client=No
         })
 
     return {"direction": direction, "calls": calls, "count": len(calls)}
+
+
+def _hint_label(label):
+    if isinstance(label, list):
+        return "".join(p.get("value", "") if isinstance(p, dict) else str(p) for p in label)
+    return str(label or "")
+
+
+def inlay_hint(window, file_path, start_line, end_line, client=None):
+    """Inferred types and parameter names the server would render inline."""
+    if end_line < start_line:
+        return {"error": "end_line ({}) is before start_line ({})".format(end_line, start_line)}
+
+    c = _client(client)
+    view, err = c.resolve_view(window, file_path)
+    if err:
+        return {"error": err}
+    session, err = c.session_for_view(view, "inlayHintProvider")
+    if err:
+        return {"error": err}
+
+    params = c.document_params(view)
+    params["range"] = {
+        "start": {"line": start_line, "character": 0},
+        "end": {"line": end_line + 1, "character": 0},
+    }
+    result, err = c.request(session, "textDocument/inlayHint", params, view)
+    if err:
+        return {"error": err}
+
+    hints = []
+    for h in result or []:
+        pos = h.get("position") or {}
+        hints.append({
+            "label": _hint_label(h.get("label")),
+            "line": pos.get("line", 0),
+            "col": pos.get("character", 0),
+        })
+    return {"hints": hints, "count": len(hints)}
