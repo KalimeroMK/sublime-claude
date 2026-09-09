@@ -240,5 +240,178 @@ class FindRootTest(unittest.TestCase):
         self.assertIsNone(nav.find_root(None, folders=[], exists=lambda x: False))
 
 
+MODEL_SRC = """<?php
+
+namespace App\\Modules\\ApiKey\\Infrastructure\\Models;
+
+use Illuminate\\Database\\Eloquent\\Model;
+
+/**
+ * @property string $id
+ * @property string $brand_id
+ * @property \\Illuminate\\Support\\Carbon|null $revoked_at
+ */
+class ApiKey extends Model
+{
+    protected $table = 'api_keys';
+
+    protected $fillable = [
+        'brand_id',
+        'label',
+    ];
+
+    protected $casts = [
+        'scopes' => 'array',
+        'revoked_at' => 'datetime',
+    ];
+
+    protected $hidden = ['key_hash'];
+
+    public function brand()
+    {
+        return $this->belongsTo(Brand::class, 'brand_id');
+    }
+
+    public function sends()
+    {
+        return $this->hasMany(Send::class);
+    }
+}
+"""
+
+
+class ModelSummaryTest(unittest.TestCase):
+    def _s(self):
+        return nav.model_summary("/p/ApiKey.php", read=lambda _p: MODEL_SRC)
+
+    def test_class_and_parent(self):
+        s = self._s()
+        self.assertEqual(s["class"], "ApiKey")
+        self.assertEqual(s["extends"], "Model")
+
+    def test_table(self):
+        self.assertEqual(self._s()["table"], "api_keys")
+
+    def test_fillable(self):
+        self.assertEqual(self._s()["fillable"], ["brand_id", "label"])
+
+    def test_casts_keys_and_values(self):
+        self.assertEqual(self._s()["casts"],
+                         ["scopes", "array", "revoked_at", "datetime"])
+
+    def test_hidden(self):
+        self.assertEqual(self._s()["hidden"], ["key_hash"])
+
+    def test_docblock_properties(self):
+        props = {p["name"]: p["type"] for p in self._s()["properties"]}
+        self.assertEqual(props["id"], "string")
+        self.assertEqual(props["revoked_at"], "\\Illuminate\\Support\\Carbon|null")
+
+    def test_relations(self):
+        rels = {r["name"]: (r["kind"], r["target"]) for r in self._s()["relations"]}
+        self.assertEqual(rels["brand"], ("belongsTo", "Brand"))
+        self.assertEqual(rels["sends"], ("hasMany", "Send"))
+
+    def test_unreadable_file_yields_empty(self):
+        def boom(_p):
+            raise OSError("nope")
+        self.assertEqual(nav.model_summary("/p/X.php", read=boom), {})
+
+
+class FindModelTest(unittest.TestCase):
+    def test_prefers_a_models_directory(self):
+        def walk(start):
+            if start.endswith("app"):
+                return [("/p/app/Modules/ApiKey/Infrastructure/Models", [], ["ApiKey.php"]),
+                        ("/p/app/Support", [], ["ApiKey.php"])]
+            return []
+        self.assertEqual(nav.find_model("/p", "ApiKey", walk=walk),
+                         "/p/app/Modules/ApiKey/Infrastructure/Models/ApiKey.php")
+
+    def test_accepts_a_filename(self):
+        def walk(start):
+            return [("/p/app/Models", [], ["User.php"])] if start.endswith("app") else []
+        self.assertEqual(nav.find_model("/p", "User.php", walk=walk), "/p/app/Models/User.php")
+
+    def test_missing_model(self):
+        self.assertIsNone(nav.find_model("/p", "Nope", walk=lambda s: []))
+
+
+MATCH_SRC = """<?php
+
+Route::prefix('v1/webhooks')->group(function () {
+    Route::match(['get', 'post'], '/elasticemail', [WebhookController::class, 'elasticemail']);
+    Route::match(['get', 'post'], '/okroute', [WebhookController::class, 'okroute'])
+        ->middleware('throttle:120,1');
+});
+"""
+
+
+class RouteMatchTest(unittest.TestCase):
+    """Route::match takes the verb array first, so the URI is not the first
+    argument. The real project has three of these and an earlier regex that
+    expected a quote right after "(" silently dropped all of them."""
+
+    def _routes(self):
+        return nav.route_summary("/p", read=lambda _p: MATCH_SRC,
+                                 exists=lambda x: x.endswith(("routes", "api.php")))
+
+    def test_match_routes_are_found(self):
+        self.assertEqual(len(self._routes()), 2)
+
+    def test_verbs_come_from_the_array(self):
+        self.assertEqual(self._routes()[0]["verb"], "GET|POST")
+
+    def test_uri_is_the_second_argument(self):
+        self.assertEqual(self._routes()[0]["uri"], "/elasticemail")
+
+    def test_prefix_still_applies(self):
+        self.assertEqual(self._routes()[0]["prefix"], "v1/webhooks")
+
+    def test_action_still_resolves(self):
+        self.assertEqual(self._routes()[1]["action"], "WebhookController::okroute")
+
+
+ROUTES_SRC = """<?php
+
+Route::get('/healthz', [HealthController::class, 'liveness']);
+
+Route::prefix('v1')->middleware('auth:api_key')->group(function () {
+    Route::post('/events', [EventController::class, 'ingest'])
+        ->name('events.ingest');
+    Route::delete('/keys/{id}', [ApiKeyController::class, 'revoke']);
+});
+"""
+
+
+class RouteSummaryTest(unittest.TestCase):
+    def _routes(self):
+        return nav.route_summary("/p", read=lambda _p: ROUTES_SRC,
+                                 exists=lambda p: p.endswith(("routes", "api.php")))
+
+    def test_finds_every_route(self):
+        self.assertEqual(len(self._routes()), 3)
+
+    def test_verb_uri_and_line(self):
+        r = self._routes()[0]
+        self.assertEqual((r["verb"], r["uri"], r["line"]), ("GET", "/healthz", 3))
+
+    def test_action_from_array_callable(self):
+        self.assertEqual(self._routes()[0]["action"], "HealthController::liveness")
+
+    def test_name_found_on_a_following_line(self):
+        self.assertEqual(self._routes()[1]["name"], "events.ingest")
+
+    def test_prefix_is_carried(self):
+        self.assertEqual(self._routes()[1]["prefix"], "v1")
+
+    def test_unnamed_route_has_no_name_key(self):
+        self.assertNotIn("name", self._routes()[2])
+
+    def test_no_routes_dir(self):
+        self.assertEqual(nav.route_summary("/p", read=lambda p: "",
+                                           exists=lambda p: False), [])
+
+
 if __name__ == "__main__":
     unittest.main()

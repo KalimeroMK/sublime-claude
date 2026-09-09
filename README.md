@@ -593,6 +593,24 @@ The project root is found by walking up from the clicked file for `artisan`,
 `yii`, or a `composer.json` naming the framework, so a modular layout
 (`app/Modules/<M>/...`) resolves against the real root.
 
+### `@model` and `@routes`
+
+Both read the project source directly — no `artisan`, no booting the app, so
+they work when the app cannot boot.
+
+```
+@model ApiKey     table, connection, fillable, hidden, casts, @property
+                  docblocks and relations, read out of the model file
+@routes           every route in routes/*.php with verb, prefixed URI, name,
+                  controller::action and file:line
+```
+
+`@model` searches `app/`, `src/` and `models/`, preferring a path containing
+`Models/`, so a modular layout (`app/Modules/<M>/Infrastructure/Models/`) is
+found. `@routes` understands `Route::match(['get','post'], ...)`, where the verb
+array comes before the URI — a parser keying on the first argument silently
+drops those.
+
 ### Stopping intelephense complaining about Blade files
 
 `.blade.php` ends in `.php`, so intelephense's default `*.php` association

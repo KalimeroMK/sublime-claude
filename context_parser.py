@@ -83,6 +83,20 @@ class ContextParser:
             description="Search the web via DuckDuckGo (no API key)"
         ))
 
+        # @model -- Laravel model summary, read from the source
+        items.append(ContextMenuItem(
+            action="model",
+            label="@model",
+            description="Laravel model: table, fillable, casts, relations"
+        ))
+
+        # @routes -- parsed from routes/*.php
+        items.append(ContextMenuItem(
+            action="routes",
+            label="@routes",
+            description="Routes parsed from routes/*.php (no artisan needed)"
+        ))
+
         # Browse option
         items.append(ContextMenuItem(
             action="browse",

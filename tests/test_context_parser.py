@@ -43,15 +43,15 @@ class ContextParserTest(unittest.TestCase):
             open_files=[("main.py", "/proj/main.py")],
             has_pending_context=False
         )
-        self.assertTrue(len(menu) > 0)
-        # First item should be "codebase" action
-        self.assertEqual(menu[0].action, "codebase")
-        # Second item should be "git"
-        self.assertEqual(menu[1].action, "git")
-        # Third item should be "web"
-        self.assertEqual(menu[2].action, "web")
-        # Fourth item should be "browse"
-        self.assertEqual(menu[3].action, "browse")
+        # Assert the order by name rather than by index: the @-command list
+        # grows, and positional assertions break on every addition.
+        actions = [item.action for item in menu]
+        self.assertEqual(
+            actions,
+            ["codebase", "git", "web", "model", "routes", "browse", "file"],
+        )
+        # the trailing "file" entry comes from the open_files argument
+        self.assertEqual(menu[-1].label, "main.py")
 
     def test_build_menu_has_codebase(self):
         """Menu includes @codebase option."""

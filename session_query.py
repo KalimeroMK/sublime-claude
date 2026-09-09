@@ -278,6 +278,8 @@ class SessionQueryMixin:
             @codebase <query>  -- search project for relevant code (TF-IDF)
             @file:<path>       -- inline file reference
             @web <query>       -- web search via DuckDuckGo (no API key)
+            @model <Name>      -- Laravel model: table, fillable, casts, relations
+            @routes            -- routes parsed from routes/*.php
 
         Returns the prompt with @-markers removed.
         """
@@ -330,6 +332,56 @@ class SessionQueryMixin:
             return query_text
 
         prompt = re.sub(r'@codebase\s+([^@\n]+)', replace_codebase, prompt)
+
+        # @model <Name> -- read the model source; no artisan, no booting the app
+        def replace_model(match):
+            name = match.group(1).strip()
+            root = _framework_root(self.window)
+            if not (name and root):
+                return ""
+            try:
+                from . import framework_nav
+                path = framework_nav.find_model(root, name)
+                if not path:
+                    print("[Claude] @model: no model named {}".format(name))
+                    return ""
+                info = framework_nav.model_summary(path)
+            except Exception as e:
+                print("[Claude] @model error: {}".format(e))
+                return ""
+            self.pending_context.append(ContextItem(
+                kind="file",
+                name="@model {}".format(name),
+                content=_format_model(info, root),
+            ))
+            print("[Claude] @model: added {}".format(name))
+            return ""
+
+        prompt = re.sub(r'@model\s+([A-Za-z_]\w*)', replace_model, prompt)
+
+        # @routes -- parsed out of routes/*.php, so it works on a broken app too
+        def replace_routes(match):
+            root = _framework_root(self.window)
+            if not root:
+                return ""
+            try:
+                from . import framework_nav
+                routes = framework_nav.route_summary(root)
+            except Exception as e:
+                print("[Claude] @routes error: {}".format(e))
+                return ""
+            if not routes:
+                print("[Claude] @routes: nothing found under routes/")
+                return ""
+            self.pending_context.append(ContextItem(
+                kind="file",
+                name="@routes ({})".format(len(routes)),
+                content=_format_routes(routes),
+            ))
+            print("[Claude] @routes: added {} routes".format(len(routes)))
+            return ""
+
+        prompt = re.sub(r'@routes\b', replace_routes, prompt)
 
         # @file:<path> -- inline file reference
         def replace_file(match):
@@ -724,3 +776,71 @@ class SessionQueryMixin:
         if threshold <= 0:
             return False
         return self._context_pct() >= threshold
+
+
+# ─── @model / @routes formatting ────────────────────────────────────────────
+
+def _framework_root(window):
+    """Framework root for the open project, or None."""
+    from . import framework_nav
+    folders = window.folders() if window else []
+    for folder in folders:
+        if framework_nav.detect_framework(folder):
+            return folder
+    return folders[0] if folders else None
+
+
+def _format_model(info, root=""):
+    """Render a model summary compactly — this goes into the prompt."""
+    import os as _os
+    if not info:
+        return "[model] (unreadable)"
+    path = info.get("path", "")
+    rel = _os.path.relpath(path, root) if root and path else path
+    lines = ["[model] {}".format(info.get("class") or rel), "path: {}".format(rel)]
+    if info.get("extends"):
+        lines.append("extends: {}".format(info["extends"]))
+    for key in ("table", "connection"):
+        if info.get(key):
+            lines.append("{}: {}".format(key, info[key]))
+    for key in ("fillable", "hidden", "guarded", "appends", "dates"):
+        if info.get(key):
+            lines.append("{}: {}".format(key, ", ".join(info[key])))
+    casts = info.get("casts")
+    if casts:
+        # the regex yields a flat key,value,key,value list; an odd tail means the
+        # source did not parse cleanly, so drop the line rather than print "casts:"
+        pairs = ["{} => {}".format(casts[i], casts[i + 1])
+                 for i in range(0, len(casts) - 1, 2)]
+        if pairs:
+            lines.append("casts: {}".format(", ".join(pairs)))
+    props = info.get("properties") or []
+    if props:
+        lines.append("properties:")
+        lines.extend("  ${} : {}".format(p["name"], p["type"]) for p in props)
+    rels = info.get("relations") or []
+    if rels:
+        lines.append("relations:")
+        lines.extend("  {}() {} {}".format(r["name"], r["kind"], r["target"]).rstrip()
+                     for r in rels)
+    return "\n".join(lines)
+
+
+def _format_routes(routes):
+    """Render routes as an aligned table — compact enough for a prompt."""
+    if not routes:
+        return "[routes] none found"
+    rows = []
+    for r in routes:
+        uri = r.get("uri", "")
+        prefix = r.get("prefix") or ""
+        if prefix and not uri.startswith("/" + prefix):
+            uri = "/{}{}".format(prefix.strip("/"), uri if uri.startswith("/") else "/" + uri)
+        rows.append((r.get("verb", ""), uri, r.get("name", ""), r.get("action", ""),
+                     "{}:{}".format(r.get("file", ""), r.get("line", ""))))
+    w = [max(len(row[i]) for row in rows) for i in range(4)]
+    out = ["[routes] {} found".format(len(rows))]
+    for verb, uri, name, action, where in rows:
+        out.append("{}  {}  {}  {}  {}".format(
+            verb.ljust(w[0]), uri.ljust(w[1]), name.ljust(w[2]), action.ljust(w[3]), where))
+    return "\n".join(out)
