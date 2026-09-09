@@ -208,3 +208,29 @@ def signature_help(window, file_path, line, col, client=None):
         "active_signature": result.get("activeSignature", 0),
         "active_parameter": result.get("activeParameter", 0),
     }
+
+
+def type_definition(window, file_path, line, col, client=None):
+    """Where the *type* of the symbol is declared. Premium in intelephense."""
+    c = _client(client)
+    result, err, _view, _s = c.position_request(
+        window, file_path, line, col, "textDocument/typeDefinition", "typeDefinitionProvider")
+    if err:
+        return {"error": err}
+    locations = lsp_format.parse_locations(result)
+    if not locations:
+        return {"locations": [], "message": "No type definition found"}
+    return {"locations": locations, "count": len(locations)}
+
+
+def implementation(window, file_path, line, col, client=None):
+    """Concrete implementations of an interface or abstract member. Premium."""
+    c = _client(client)
+    result, err, _view, _s = c.position_request(
+        window, file_path, line, col, "textDocument/implementation", "implementationProvider")
+    if err:
+        return {"error": err}
+    locations = lsp_format.parse_locations(result)
+    if not locations:
+        return {"locations": [], "message": "No implementation found"}
+    return {"locations": locations, "count": len(locations)}

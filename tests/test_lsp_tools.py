@@ -248,5 +248,50 @@ class SignatureHelpTest(unittest.TestCase):
         self.assertEqual(out["signatures"], [])
 
 
+class TypeDefinitionTest(unittest.TestCase):
+    def test_requests_type_definition(self):
+        c = FakeClient(reply={"uri": "file:///T.php", "range": {"start": {"line": 2, "character": 6}}})
+        out = run("type_definition", c, file_path="/x.php", line=1, col=1)
+        self.assertEqual(c.calls[0]["method"], "textDocument/typeDefinition")
+        self.assertEqual(c.calls[0]["capability"], "typeDefinitionProvider")
+        self.assertEqual(out["locations"], [{"file": "/T.php", "line": 2, "col": 6}])
+
+    def test_premium_capability_absent_reports_cleanly(self):
+        """typeDefinition is an intelephense premium feature — without a licence
+        the server does not advertise it, and that must read as a clear message."""
+        c = FakeClient(capability_error="No LSP server with typeDefinitionProvider capability")
+        out = run("type_definition", c, file_path="/x.php", line=1, col=1)
+        self.assertIn("typeDefinitionProvider", out["error"])
+
+    def test_empty_result(self):
+        c = FakeClient(reply=None)
+        out = run("type_definition", c, file_path="/x.php", line=1, col=1)
+        self.assertEqual(out["locations"], [])
+        self.assertIn("No type definition", out["message"])
+
+
+class ImplementationTest(unittest.TestCase):
+    def test_requests_implementation(self):
+        c = FakeClient(reply=[
+            {"uri": "file:///A.php", "range": {"start": {"line": 1, "character": 0}}},
+            {"uri": "file:///B.php", "range": {"start": {"line": 2, "character": 0}}},
+        ])
+        out = run("implementation", c, file_path="/I.php", line=5, col=10)
+        self.assertEqual(c.calls[0]["method"], "textDocument/implementation")
+        self.assertEqual(c.calls[0]["capability"], "implementationProvider")
+        self.assertEqual(out["count"], 2)
+
+    def test_premium_capability_absent_reports_cleanly(self):
+        c = FakeClient(capability_error="No LSP server with implementationProvider capability")
+        self.assertIn("implementationProvider",
+                      run("implementation", c, file_path="/x.php", line=1, col=1)["error"])
+
+    def test_empty_result(self):
+        c = FakeClient(reply=[])
+        out = run("implementation", c, file_path="/x.php", line=1, col=1)
+        self.assertEqual(out["locations"], [])
+        self.assertIn("No implementation", out["message"])
+
+
 if __name__ == "__main__":
     unittest.main()

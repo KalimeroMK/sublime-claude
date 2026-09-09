@@ -233,6 +233,8 @@ def handle_request(request: dict) -> dict:
 - hover <file> <line> <col>         → type info and docs at position
 - completion <file> <line> <col>    → what can be called at this position
 - signature_help <file> <line> <col> → parameters of the call being typed
+- type_definition <file> <line> <col> → where the symbol's type is declared
+- implementation <file> <line> <col>  → concrete implementations
 - definition <file> <line> <col>    → jump to symbol definition
 - references <file> <line> <col>    → find all usages of symbol
 - symbols <file>                    → list all symbols in file

@@ -334,6 +334,10 @@ class MCPSocketServer:
                 self._get_window(), f, l, c, prefix, detailed),
             "lsp_signature_help": lambda f, l, c: lsp_tools.signature_help(
                 self._get_window(), f, l, c),
+            "lsp_type_definition": lambda f, l, c: lsp_tools.type_definition(
+                self._get_window(), f, l, c),
+            "lsp_implementation": lambda f, l, c: lsp_tools.implementation(
+                self._get_window(), f, l, c),
         }
 
         # Add context variables
