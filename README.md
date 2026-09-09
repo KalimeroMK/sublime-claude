@@ -108,7 +108,8 @@ git clone https://github.com/KalimeroMK/sublime-claude ClaudeCode
 | **Auto-Restart** | Manual restart on crash | Heartbeat + auto-restart on bridge crash |
 | **Generate Commit** | — | Generate commit message from `git diff --staged` |
 | **Git Status** | — | Show `git status --short` in output view |
-| **Tests** | Minimal | 284 unit tests, mock Sublime API |
+| **LSP Tools** | hover, definition, references, symbols, workspace_symbols, diagnostics | + completion, signature_help, type_definition, implementation, call_hierarchy, inlay_hint, rename, code_action (14 total) |
+| **Tests** | Minimal | 446 unit tests, mock Sublime API |
 
 [↑ Back to Top](#table-of-contents)
 
@@ -140,7 +141,9 @@ This build extends the base project with additional features, bug fixes, and a f
 | **Scroll Respect** | Viewport-aware auto-scroll — doesn't jump to bottom when reading history |
 | **Generate Commit Message** | Generate commit message from `git diff --staged` |
 | **Git Status** | Show `git status --short` in output view |
-| **Comprehensive Test Suite** | 284 unit tests covering all core utilities, running in ~0.03s with a mock Sublime API |
+| **Full LSP Tool Surface** | 14 `lsp` subcommands give Claude the language server's own view of the code — `completion` (what is callable here), `signature_help`, `type_definition`, `implementation`, `call_hierarchy`, `inlay_hint`, `rename` and `code_action`, alongside the original hover/definition/references/symbols/diagnostics |
+| **LSP Install Check** | On first run, offers to install the `LSP` package and a language server matched to the project (detected from `composer.json`, `package.json`, `go.mod`, `Cargo.toml`, `pyproject.toml`) |
+| **Comprehensive Test Suite** | 446 unit tests covering all core utilities, running in ~3s with a mock Sublime API |
 
 ### Bug Fixes
 
@@ -159,7 +162,11 @@ This build extends the base project with additional features, bug fixes, and a f
 | **Claude CLI not in PATH** | Sublime Text on macOS doesn't inherit shell PATH. Fixed by `claude_cli_path` setting + auto-detection of common install paths |
 | **Session lock deadlock** | Per-query CLI spawned new process with `--resume`, but old process held session lock. Fixed by persistent CLI process |
 | **Bridge race condition** | `_drain_stale()` 0.05s timeout could cancel `_start_query()` mid-flight, leaving zombie subprocess. Removed |
-| **Python 3.13 compat** | Removed deprecated `loop=` kwargs from `asyncio.StreamReader`/`StreamReaderProtocol` |
+| **Python 3.13/3.14 compat** | Removed deprecated `loop=` kwargs from `asyncio.StreamReader`/`StreamReaderProtocol`; replaced `imghdr` (removed in 3.13) with a magic-byte detector |
+| **Duplicate command and listener registration** | `claude_code.py` and `commands.py` re-exported classes whose defining modules are themselves top-level plugin modules, so Sublime registered each one 2–3 times: 186 registrations for 102 commands, and `ClaudeCodeEventListener` twice — every `on_activated`/`on_close`/`on_post_save` fired twice after any plugin file was saved. Both modules now pin `__all__` |
+| **Bridge skipped Python 3.14** | Interpreter detection stopped at `python3.13`, so a machine whose newest Python is 3.14 fell through to `python3` — 3.9 here, below the bridge's minimum |
+| **`code_action` returned nothing** | `context.diagnostics` was sent empty, but intelephense's quickfixes are diagnostic-driven: the same position gave 0 actions with `[]` and 4 with the line's diagnostic passed through |
+| **`code_action --apply` refused everything** | Intelephense's actions carry a `Command` rather than an edit and it answers `codeAction/resolve` with `Unhandled method`, so the apply path always hit its "carries no edit" branch. It now falls through to `workspace/executeCommand` |
 | **MCP config race** | Per-session temp files for MCP config and stderr logs prevent collisions between parallel sessions |
 
 [↑ Back to Top](#table-of-contents)
@@ -168,8 +175,13 @@ This build extends the base project with additional features, bug fixes, and a f
 
 ## Requirements
 
-- Sublime Text 4
+- Sublime Text 4 (build 4205+ runs plugins on Python 3.14; older builds use the
+  3.8 host, which still works — package code is kept 3.8-syntax-clean)
 - Python 3.10+ for the bridge (auto-detected newest-first: python3.15 … python3.10, then uv, then pyenv)
+- Optional, for the `lsp` tools: the `LSP` package plus a language server
+  (`LSP-intelephense`, `LSP-typescript`, `LSP-pyright`, `LSP-gopls`,
+  `LSP-rust-analyzer`). The plugin offers to install both on first run —
+  `LSP` alone is a framework with no server, so both are needed.
 - One or more backends:
   - **Kimi/Claude** — `claude` CLI (v2.1+, native binary)
   - **Ollama** — local models (qwen, llama, mistral, etc.)
@@ -1041,10 +1053,10 @@ Run the test suite from the project root:
 
 ```bash
 cd ~/PhpstormProjects/sublime-claude
-python3 -m unittest discover tests/ -v
+python3 -m unittest discover tests/          # add -v for per-test output
 ```
 
-**284 tests** covering all core utilities:
+**446 tests** covering all core utilities:
 - Context window gauge, session tags, drag-drop, usage graph
 - Attach commands (image/file auto-detect, MIME mapping)
 - Swarm monitor (status icons, session tracking)
@@ -1060,8 +1072,18 @@ python3 -m unittest discover tests/ -v
 - Terminal integration (PTY lifecycle, ANSI rendering, blocking capture, quiescence)
 - Undo quick panel, session bookmarks, live output settings
 - Sleep protection (background tool abort, orphan cleanup)
+- Auto-sleep thresholds and the wake/auto-restart idle-clock reset
+- Event listener teardown, settings reload, close-window scoping
+- `Session._on_init` on both the ready and error paths
+- LSP result formatters, the client's async-thread guard, and all 14 subcommands
+  against a fake client — including that `rename` and `code_action` write nothing
+  without `--apply`
+- LSP install detection by marker file, and permission patterns for the `lsp`
+  subcommand
 
-All tests run in ~0.03s without requiring Sublime Text to be open (uses mock API).
+All tests run in ~3s without requiring Sublime Text to be open (uses mock API).
+`tests/plugin_pkg.py` aliases the repo root as a package so tests exercise the
+real modules through their relative imports rather than a copy of the logic.
 
 [↑ Back to Top](#table-of-contents)
 
@@ -1196,6 +1218,12 @@ sublime-claude/
 │   ├── tool_router.py          # MCP tool dispatch to Sublime
 │   ├── persona_client.py       # Persona server client
 │   └── skills_manager.py       # Skills marketplace (install/manage)
+│
+├── LSP integration:
+│   ├── lsp_client.py           # The only importer of LSP.plugin.* — the test seam
+│   ├── lsp_tools.py            # The 14 lsp subcommands
+│   ├── lsp_format.py           # Pure result formatters (stdlib only)
+│   └── lsp_install.py          # First-run LSP + language-server check
 │
 ├── Terminal (embedded PTY):
 │   └── terminal/
