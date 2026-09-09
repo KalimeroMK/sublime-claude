@@ -249,7 +249,14 @@ def match_permission_pattern(
         match_value = tool_input.get("skill", "")
     else:
         # For other tools, try common field names
-        match_value = tool_input.get("command") or tool_input.get("path") or tool_input.get("query", "")
+        # `cmd` is the lsp tool's subcommand string; it comes last so tools that
+        # use `command` (the established field) keep their existing behaviour.
+        match_value = (
+            tool_input.get("command")
+            or tool_input.get("path")
+            or tool_input.get("query")
+            or tool_input.get("cmd", "")
+        )
 
     if not match_value:
         return False

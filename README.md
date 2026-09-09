@@ -444,6 +444,30 @@ Options: `"claude"`, `"openai"`, `"deepseek"`, `"codex"`
 
 **Recommendation:** Use `acceptEdits` for normal work — it removes friction for file operations while still confirming destructive commands (`Bash`, `WebSearch`). Use `default` when touching production code. Use `bypassPermissions` only for quick experiments.
 
+### Auto-allowing read-only LSP subcommands
+
+`lsp` is permission-gated like any MCP tool. The twelve read-only subcommands are
+safe to auto-allow; `rename` and `code_action` are deliberately left out so they
+always prompt:
+
+```jsonc
+// .claude/settings.json
+"autoAllowedMcpTools": [
+  "mcp__sublime__lsp(hover:*)",
+  "mcp__sublime__lsp(definition:*)",
+  "mcp__sublime__lsp(references:*)",
+  "mcp__sublime__lsp(symbols:*)",
+  "mcp__sublime__lsp(workspace_symbols:*)",
+  "mcp__sublime__lsp(diagnostics:*)",
+  "mcp__sublime__lsp(completion:*)",
+  "mcp__sublime__lsp(signature_help:*)",
+  "mcp__sublime__lsp(type_definition:*)",
+  "mcp__sublime__lsp(implementation:*)",
+  "mcp__sublime__lsp(call_hierarchy:*)",
+  "mcp__sublime__lsp(inlay_hint:*)"
+]
+```
+
 ### Project Settings (.sublime-project)
 
 ```json

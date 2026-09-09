@@ -117,5 +117,44 @@ class MatchPermissionPatternTest(unittest.TestCase):
         self.assertTrue(match_permission_pattern('WebFetch', {'url': 'https://example.com/page'}, 'WebFetch(https://example.com/:*)'))
 
 
+class LspSubcommandPatternTest(unittest.TestCase):
+    """The lsp tool puts its subcommand in `cmd`, which is what lets read-only
+    subcommands be auto-allowed while rename/code_action still prompt."""
+
+    def test_read_only_subcommand_matches_its_pattern(self):
+        self.assertTrue(match_permission_pattern(
+            "mcp__sublime__lsp",
+            {"cmd": "hover /src/a.php 10 4"},
+            "mcp__sublime__lsp(hover:*)"))
+
+    def test_subcommand_pattern_does_not_match_a_different_subcommand(self):
+        self.assertFalse(match_permission_pattern(
+            "mcp__sublime__lsp",
+            {"cmd": "rename /src/a.php 10 4 NewName"},
+            "mcp__sublime__lsp(hover:*)"))
+
+    def test_rename_is_not_covered_by_read_only_patterns(self):
+        read_only = ["mcp__sublime__lsp({}:*)".format(a) for a in (
+            "hover", "definition", "references", "symbols", "workspace_symbols",
+            "diagnostics", "completion", "signature_help", "type_definition",
+            "implementation", "call_hierarchy", "inlay_hint")]
+        rename = {"cmd": "rename /src/a.php 10 4 NewName --apply"}
+        self.assertFalse(any(
+            match_permission_pattern("mcp__sublime__lsp", rename, p) for p in read_only))
+
+    def test_bare_tool_pattern_still_matches_everything(self):
+        self.assertTrue(match_permission_pattern(
+            "mcp__sublime__lsp",
+            {"cmd": "rename /src/a.php 10 4 NewName"},
+            "mcp__sublime__lsp"))
+
+    def test_command_field_still_wins_when_both_present(self):
+        """Existing tools use `command`; adding `cmd` must not shadow it."""
+        self.assertTrue(match_permission_pattern(
+            "some_tool",
+            {"command": "git status", "cmd": "hover x 1 1"},
+            "some_tool(git:*)"))
+
+
 if __name__ == "__main__":
     unittest.main()
