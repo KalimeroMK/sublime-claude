@@ -555,6 +555,51 @@ capability`. The subcommand is there for servers that do support it
 `rename` and `code_action` describe the change and write nothing unless
 `--apply` is passed. Line and col are 0-based.
 
+### Cmd/Ctrl+Click to go to definition
+
+The package ships a mousemap that turns `super+click` into go-to-definition
+wherever a language server offers `definitionProvider` — the same thing PhpStorm
+and VS Code do. It is gated twice: on the capability, so it never fires without a
+server, and against the Claude output view, where `super+click` opens links
+instead. Where neither context matches, Sublime's own `super+click` (additive
+multi-cursor) is untouched.
+
+If you already have this in `Packages/User/Default (OSX).sublime-mousemap`,
+delete it — `User` outranks package mousemaps and would shadow this one.
+
+**It does not resolve Blade views, route names, config keys or translation
+keys.** `view('contacts.index')` is a plain string to a PHP language server;
+navigating it needs Laravel-aware indexing, which is what Laravel Idea does for
+PhpStorm. Neither this package nor intelephense provides it.
+
+### Stopping intelephense complaining about Blade files
+
+`.blade.php` ends in `.php`, so intelephense's default `*.php` association
+picks Blade files up and then reports every `@extends` and `@foreach` as a
+syntax error. Exclude them:
+
+```jsonc
+// Packages/User/LSP-intelephense.sublime-settings
+"settings": {
+  "intelephense": {
+    "files": {
+      "exclude": [
+        // the defaults must be repeated — overriding this array replaces it
+        "**/.git/**", "**/.svn/**", "**/.hg/**", "**/CVS/**",
+        "**/.DS_Store/**", "**/node_modules/**", "**/bower_components/**",
+        "**/vendor/**/{Tests,tests}/**", "**/.history/**",
+        "**/vendor/**/vendor/**",
+        "**/*.blade.php"
+      ]
+    }
+  }
+}
+```
+
+Blade files then get no PHP intelligence at all, which is the right trade —
+intelephense cannot parse Blade either way. Restart the server afterwards
+(`LSP: Restart Server`).
+
 `code_action` passes the diagnostics at the requested line into the request —
 intelephense's quickfixes are diagnostic-driven and it offers nothing without
 them. Its actions carry a `Command` rather than an edit and it does not

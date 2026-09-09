@@ -1,4 +1,22 @@
 [
+    // Cmd/Ctrl+Click -> go to definition, wherever a language server offers one.
+    // Gated twice: on the capability, so it never fires without a server, and
+    // against the Claude output view, where the next binding owns super+click.
+    // Where neither context matches, Sublime's own super+click (additive
+    // multi-cursor) is left untouched.
+    {
+        "button": "button1",
+        "count": 1,
+        "modifiers": ["super"],
+        "press_command": "drag_select",
+        "command": "lsp_symbol_definition",
+        "context": [
+            { "key": "lsp.session_with_capability", "operand": "definitionProvider" },
+            { "key": "setting.claude_output", "operator": "not_equal", "operand": true }
+        ]
+    },
+    // Inside the Claude output view super+click opens links instead. Listed
+    // last so it wins there — Sublime takes the last matching binding.
     {
         "button": "button1",
         "count": 1,
