@@ -510,7 +510,33 @@ The plugin automatically enriches queries with relevant context when no explicit
 - **Relevant open files** — same directory, same extension (score-based ranking)
 - **Symbol definitions** — uses Sublime's built-in symbol index (`window.symbol_locations()`)
 
-Works with any language server (Intelephense, LSP, etc.) without external dependencies.
+Requires the `LSP` package plus a language server for your language
+(`LSP-intelephense` for PHP, `LSP-typescript`, `LSP-pyright`, `LSP-gopls`,
+`LSP-rust-analyzer`). The plugin offers to install both on first run.
+
+| Subcommand | LSP method | Capability |
+|---|---|---|
+| `hover <file> <line> <col>` | `textDocument/hover` | `hoverProvider` |
+| `definition <file> <line> <col>` | `textDocument/definition` | `definitionProvider` |
+| `type_definition <file> <line> <col>` | `textDocument/typeDefinition` | `typeDefinitionProvider` † |
+| `implementation <file> <line> <col>` | `textDocument/implementation` | `implementationProvider` † |
+| `references <file> <line> <col>` | `textDocument/references` | `referencesProvider` |
+| `completion <file> <line> <col>` | `textDocument/completion` | `completionProvider` |
+| `signature_help <file> <line> <col>` | `textDocument/signatureHelp` | `signatureHelpProvider` |
+| `call_hierarchy <file> <line> <col> [incoming\|outgoing]` | `callHierarchy/*Calls` | `callHierarchyProvider` † |
+| `inlay_hint <file> <start_line> <end_line>` | `textDocument/inlayHint` | `inlayHintProvider` |
+| `symbols <file>` | `textDocument/documentSymbol` | `documentSymbolProvider` |
+| `workspace_symbols <query>` | `workspace/symbol` | `workspaceSymbolProvider` |
+| `diagnostics [file]` | reads LSP's pushed-diagnostic cache | — |
+| `rename <file> <line> <col> <new_name> [--apply]` | `textDocument/rename` | `renameProvider` † |
+| `code_action <file> <line> <col> [--apply <index>]` | `textDocument/codeAction` | `codeActionProvider` |
+
+† Intelephense advertises these only with a premium licence. Without one the
+subcommand returns `No LSP server with <capability> capability` rather than
+failing silently.
+
+`rename` and `code_action` describe the change and write nothing unless
+`--apply` is passed. Line and col are 0-based.
 
 **Settings:**
 ```json

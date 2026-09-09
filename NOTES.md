@@ -62,6 +62,31 @@ keeps the `3.8` alias viable; check with
 - Enum classes cause issues when cached — use plain string constants
 - Dataclass definitions also get cached
 
+## LSP integration
+
+`lsp_client.py` is the only module that imports `LSP.plugin.*`. Everything else
+goes through it, which is what makes `lsp_tools.py` testable with a fake.
+
+**Never call `lsp_client.request` from Sublime's async thread.** LSP delivers
+responses there, so blocking it means the response can never arrive — the
+symptom is every request timing out while the server sits idle at 0% CPU.
+`mcp_server` is safe because its socket loop runs on its own daemon thread
+(`mcp_server.py:98`). `request()` raises if called from the async thread rather
+than hanging. The one exception is `apply_workspace_edit`, which must run *on*
+the async thread and so schedules itself there.
+
+`diagnostics` reads LSP's pushed-diagnostic cache
+(`session.diagnostics.get_diagnostics_for_uri`) instead of issuing
+`textDocument/diagnostic` — intelephense pushes diagnostics and does not serve
+the pull request.
+
+```
+lsp_format.py   pure formatters, stdlib only
+lsp_client.py   the only LSP.plugin.* importer; test seam
+lsp_tools.py    the 14 subcommands
+lsp_install.py  first-run LSP + language-server check
+```
+
 ## Output View
 
 - Read-only scratch view controlled by plugin

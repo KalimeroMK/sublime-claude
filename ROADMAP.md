@@ -2,6 +2,13 @@
 
 ## Done
 
+### Full LSP tool surface
+All 14 subcommands: hover, definition, references, symbols, workspace_symbols,
+diagnostics, completion, signature_help, type_definition, implementation,
+call_hierarchy, inlay_hint, rename, code_action. The last two preview by default
+and write only with `--apply`, which routes through the permission prompt.
+First-run check offers to install `LSP` plus a language server for the project.
+
 ### Skills Marketplace
 Browse and install 27 curated skills with one click. Install globally (`~/.claude/CLAUDE.md`) or per-project (`./CLAUDE.md`).
 
