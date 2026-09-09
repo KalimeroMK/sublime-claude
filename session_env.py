@@ -18,7 +18,7 @@ def _find_python_310_plus() -> str:
     """Auto-detect a Python 3.10+ interpreter for the bridge process.
 
     Searches in order:
-    1. python3.13, python3.12, python3.11, python3.10 on PATH
+    1. python3.15 … python3.10 on PATH (newest first)
     2. uv-managed python installations
     3. pyenv shims
     4. Fallback to 'python3' (bridge will fail with clear message if < 3.10)
@@ -30,7 +30,7 @@ def _find_python_310_plus() -> str:
         return _PYTHON_310_CACHE
 
     # 1. Check explicit versioned binaries on PATH
-    for binary in ("python3.13", "python3.12", "python3.11", "python3.10"):
+    for binary in ("python3.15", "python3.14", "python3.13", "python3.12", "python3.11", "python3.10"):
         path = shutil.which(binary)
         if path:
             try:
@@ -72,7 +72,7 @@ def _find_python_310_plus() -> str:
         for entry in sorted(os.listdir(uv_home), reverse=True):
             if entry.startswith("cpython-3."):
                 bin_dir = os.path.join(uv_home, entry, "bin")
-                for binary in ("python3.13", "python3.12", "python3.11", "python3.10"):
+                for binary in ("python3.15", "python3.14", "python3.13", "python3.12", "python3.11", "python3.10"):
                     candidate = os.path.join(bin_dir, binary)
                     if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
                         _PYTHON_310_CACHE = candidate
@@ -81,7 +81,7 @@ def _find_python_310_plus() -> str:
     # 4. pyenv shims
     pyenv_shim = shutil.which("pyenv")
     if pyenv_shim:
-        for binary in ("python3.13", "python3.12", "python3.11", "python3.10"):
+        for binary in ("python3.15", "python3.14", "python3.13", "python3.12", "python3.11", "python3.10"):
             try:
                 out = subprocess.run(
                     [pyenv_shim, "which", binary],
