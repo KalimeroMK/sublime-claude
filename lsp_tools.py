@@ -309,3 +309,35 @@ def inlay_hint(window, file_path, start_line, end_line, client=None):
             "col": pos.get("character", 0),
         })
     return {"hints": hints, "count": len(hints)}
+
+
+def rename(window, file_path, line, col, new_name, apply=False, client=None):
+    """Rename a symbol project-wide.
+
+    Without apply=True this only describes the edit. That split is deliberate:
+    the apply is a separate tool use, so it is not covered by the read-only
+    auto-allow patterns and reaches the permission prompt.
+    """
+    if not new_name:
+        return {"error": "new_name is required"}
+
+    c = _client(client)
+    result, err, _view, session = c.position_request(
+        window, file_path, line, col, "textDocument/rename", "renameProvider",
+        extra_params={"newName": new_name}, timeout=30.0)
+    if err:
+        return {"error": err}
+
+    summary = lsp_format.summarize_workspace_edit(result)
+    if not summary["file_count"]:
+        return dict(summary, applied=False,
+                    message="The symbol at this position cannot be renamed")
+
+    if not apply:
+        return dict(summary, applied=False,
+                    message="Preview only — nothing written. Re-run with --apply to write it.")
+
+    ok, err = c.apply_workspace_edit(session, result, label="rename to {}".format(new_name))
+    if not ok:
+        return dict(summary, applied=False, error=err)
+    return dict(summary, applied=True)

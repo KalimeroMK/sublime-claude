@@ -191,3 +191,28 @@ def position_request(window, file_path, line, col, method, capability,
         params.update(extra_params)
     result, err = request(session, method, params, view, timeout)
     return result, err, view, session
+
+
+def apply_workspace_edit(session, edit, label=None, timeout=15.0):
+    """Apply a WorkspaceEdit.
+
+    session.apply_workspace_edit_async must run on Sublime's async thread — the
+    same thread request() refuses to block. So schedule it there and wait here.
+    """
+    done = threading.Event()
+    error = [None]
+
+    def run():
+        try:
+            session.apply_workspace_edit_async(edit, label=label, is_refactoring=True)
+        except Exception as e:
+            error[0] = str(e)
+        finally:
+            done.set()
+
+    sublime.set_timeout_async(run, 0)
+    if not done.wait(timeout):
+        return False, "Timed out after {}s applying the edit".format(timeout)
+    if error[0]:
+        return False, error[0]
+    return True, None

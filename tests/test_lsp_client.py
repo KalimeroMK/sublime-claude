@@ -116,5 +116,58 @@ class PackageDetectionTest(unittest.TestCase):
         self.assertFalse(client.is_package_installed("LSP", lambda p: False))
 
 
+class ApplyWorkspaceEditTest(unittest.TestCase):
+    def test_schedules_apply_on_the_async_thread(self):
+        """apply_workspace_edit_async must run on the async thread, which is the
+        one request() refuses to block — so the apply is scheduled, not called."""
+        scheduled = []
+
+        class FakeSublime:
+            @staticmethod
+            def set_timeout_async(fn, delay=0):
+                scheduled.append(fn)
+                fn()  # run it as the async worker would
+
+        applied = []
+
+        class Session:
+            def apply_workspace_edit_async(self, edit, label=None, is_refactoring=False):
+                applied.append({"edit": edit, "label": label, "is_refactoring": is_refactoring})
+
+        original = client.sublime
+        client.sublime = FakeSublime
+        try:
+            ok, err = client.apply_workspace_edit(
+                Session(), {"changes": {}}, label="rename x", timeout=1.0)
+        finally:
+            client.sublime = original
+
+        self.assertTrue(ok)
+        self.assertIsNone(err)
+        self.assertEqual(len(scheduled), 1)
+        self.assertEqual(applied[0]["label"], "rename x")
+        self.assertTrue(applied[0]["is_refactoring"])
+
+    def test_reports_apply_failure(self):
+        class FakeSublime:
+            @staticmethod
+            def set_timeout_async(fn, delay=0):
+                fn()
+
+        class Session:
+            def apply_workspace_edit_async(self, edit, label=None, is_refactoring=False):
+                raise RuntimeError("server refused")
+
+        original = client.sublime
+        client.sublime = FakeSublime
+        try:
+            ok, err = client.apply_workspace_edit(Session(), {"changes": {}}, timeout=1.0)
+        finally:
+            client.sublime = original
+
+        self.assertFalse(ok)
+        self.assertIn("server refused", err)
+
+
 if __name__ == "__main__":
     unittest.main()

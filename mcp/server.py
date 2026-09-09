@@ -237,6 +237,9 @@ def handle_request(request: dict) -> dict:
 - implementation <file> <line> <col>  → concrete implementations
 - call_hierarchy <file> <line> <col> [incoming|outgoing] → callers or callees
 - inlay_hint <file> <start_line> <end_line> → inferred types in a line range
+- rename <file> <line> <col> <new_name> [--apply]
+      → without --apply: which files would change, nothing written
+      → with --apply: performs the rename (prompts for permission)
 - definition <file> <line> <col>    → jump to symbol definition
 - references <file> <line> <col>    → find all usages of symbol
 - symbols <file>                    → list all symbols in file

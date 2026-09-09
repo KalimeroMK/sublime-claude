@@ -402,5 +402,72 @@ class InlayHintTest(unittest.TestCase):
         self.assertEqual(out["hints"], [])
 
 
+class RenameTest(unittest.TestCase):
+    EDIT = {"changes": {
+        "file:///src/ApiKey.php": [{"range": {}}, {"range": {}}],
+        "file:///src/ApiKeyRepo.php": [{"range": {}}],
+    }}
+
+    def _client(self, reply=None, error=None, capability_error=None):
+        class C(FakeClient):
+            def __init__(self):
+                super().__init__(reply=reply, error=error,
+                                 capability_error=capability_error)
+                self.applied = []
+
+            def apply_workspace_edit(self, session, edit, label=None, timeout=15.0):
+                self.applied.append({"edit": edit, "label": label})
+                return True, None
+
+        return C()
+
+    def test_preview_reports_files_and_edit_counts(self):
+        c = self._client(reply=self.EDIT)
+        out = run("rename", c, file_path="/src/ApiKey.php", line=10, col=4, new_name="ApiToken")
+        self.assertEqual(c.calls[0]["method"], "textDocument/rename")
+        self.assertEqual(c.calls[0]["capability"], "renameProvider")
+        self.assertEqual(out["file_count"], 2)
+        self.assertEqual(out["edit_count"], 3)
+        self.assertFalse(out["applied"])
+
+    def test_preview_writes_nothing(self):
+        """This assertion is the safety decision — preview must never apply."""
+        c = self._client(reply=self.EDIT)
+        run("rename", c, file_path="/src/ApiKey.php", line=10, col=4, new_name="ApiToken")
+        self.assertEqual(c.applied, [])
+
+    def test_preview_says_how_to_apply(self):
+        c = self._client(reply=self.EDIT)
+        out = run("rename", c, file_path="/src/ApiKey.php", line=10, col=4, new_name="ApiToken")
+        self.assertIn("--apply", out["message"])
+
+    def test_apply_sends_new_name_and_applies(self):
+        c = self._client(reply=self.EDIT)
+        out = run("rename", c, file_path="/src/ApiKey.php", line=10, col=4,
+                  new_name="ApiToken", apply=True)
+        self.assertEqual(c.calls[0]["extra"], {"newName": "ApiToken"})
+        self.assertEqual(len(c.applied), 1)
+        self.assertEqual(c.applied[0]["label"], "rename to ApiToken")
+        self.assertTrue(out["applied"])
+
+    def test_rejects_empty_new_name(self):
+        c = self._client(reply=self.EDIT)
+        out = run("rename", c, file_path="/src/ApiKey.php", line=10, col=4, new_name="")
+        self.assertIn("new_name", out["error"])
+        self.assertEqual(c.calls, [])
+
+    def test_missing_capability_reports_cleanly(self):
+        c = self._client(capability_error="No LSP server with renameProvider capability")
+        out = run("rename", c, file_path="/x.php", line=1, col=1, new_name="N")
+        self.assertIn("renameProvider", out["error"])
+
+    def test_server_returns_no_edit(self):
+        c = self._client(reply=None)
+        out = run("rename", c, file_path="/x.php", line=1, col=1, new_name="N")
+        self.assertEqual(out["file_count"], 0)
+        self.assertIn("cannot be renamed", out["message"])
+        self.assertEqual(c.applied, [])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -256,6 +256,20 @@ def create_sublime_router() -> ToolRouter:
                 return f"return {{'error': 'line and col must be integers'}}"
             func = f"lsp_{action}"
             return f"return {func}({file_path!r}, {line}, {col})"
+        elif action == "rename":
+            # <file> <line> <col> <new_name> [--apply]
+            tokens = rest.split()
+            apply_flag = "--apply" in tokens
+            tokens = [t for t in tokens if t != "--apply"]
+            if len(tokens) < 4:
+                return "return {'error': 'Usage: rename <file> <line> <col> <new_name> [--apply]'}"
+            file_path, line_s, col_s, new_name = tokens[0], tokens[1], tokens[2], tokens[3]
+            try:
+                line, col = int(line_s), int(col_s)
+            except ValueError:
+                return "return {'error': 'line and col must be integers'}"
+            return "return lsp_rename({!r}, {}, {}, {!r}, {!r})".format(
+                file_path, line, col, new_name, apply_flag)
         elif action == "inlay_hint":
             # <file> <start_line> <end_line>
             tokens = rest.rsplit(None, 2)
