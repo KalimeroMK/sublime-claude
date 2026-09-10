@@ -109,7 +109,7 @@ git clone https://github.com/KalimeroMK/sublime-claude ClaudeCode
 | **Generate Commit** | — | Generate commit message from `git diff --staged` |
 | **Git Status** | — | Show `git status --short` in output view |
 | **LSP Tools** | hover, definition, references, symbols, workspace_symbols, diagnostics | + completion, signature_help, type_definition, implementation, call_hierarchy, inlay_hint, rename, code_action (14 total) |
-| **Tests** | Minimal | 446 unit tests, mock Sublime API |
+| **Tests** | Minimal | 517 unit tests, mock Sublime API |
 
 [↑ Back to Top](#table-of-contents)
 
@@ -143,7 +143,7 @@ This build extends the base project with additional features, bug fixes, and a f
 | **Git Status** | Show `git status --short` in output view |
 | **Full LSP Tool Surface** | 14 `lsp` subcommands give Claude the language server's own view of the code — `completion` (what is callable here), `signature_help`, `type_definition`, `implementation`, `call_hierarchy`, `inlay_hint`, `rename` and `code_action`, alongside the original hover/definition/references/symbols/diagnostics |
 | **LSP Install Check** | On first run, offers to install the `LSP` package and a language server matched to the project (detected from `composer.json`, `package.json`, `go.mod`, `Cargo.toml`, `pyproject.toml`) |
-| **Comprehensive Test Suite** | 446 unit tests covering all core utilities, running in ~3s with a mock Sublime API |
+| **Comprehensive Test Suite** | 517 unit tests covering all core utilities, running in ~3s with a mock Sublime API |
 
 ### Bug Fixes
 
@@ -1140,7 +1140,7 @@ cd ~/PhpstormProjects/sublime-claude
 python3 -m unittest discover tests/          # add -v for per-test output
 ```
 
-**446 tests** covering all core utilities:
+**517 tests** covering all core utilities:
 - Context window gauge, session tags, drag-drop, usage graph
 - Attach commands (image/file auto-detect, MIME mapping)
 - Swarm monitor (status icons, session tracking)
@@ -1374,6 +1374,31 @@ Usually means the input mode state got corrupted. Try:
 1. `Cmd+Shift+P` → "Claude: Reset Input Mode"
 2. If that fails, `Claude: Restart Session` (keeps conversation history)
 3. If Sublime froze entirely, check Console (`View > Show Console`) for `plugin_host` errors
+
+### Enter inserts a newline instead of accepting a completion
+
+Not a plugin problem — it is one Sublime setting. Sublime's built-in binding is
+
+```json
+{"keys": ["enter"], "command": "commit_completion",
+ "context": [{"key": "auto_complete_visible"},
+             {"key": "setting.auto_complete_commit_on_tab", "operand": false}]}
+```
+
+so it only fires while `auto_complete_commit_on_tab` is `false` — which is
+Sublime's default. Set it to `true` and Enter falls through to inserting a
+newline while Tab keeps committing, because Tab's binding carries no such
+condition. Check `Packages/User/Preferences.sublime-settings`:
+
+```jsonc
+"auto_complete_commit_on_tab": false
+```
+
+With `false`, Enter and Tab both accept a completion.
+
+Worth ruling out first: no keymap in this package binds Enter outside the Claude
+output view — both of its `enter` bindings are gated on
+`setting.claude_output`, so they never reach a source file.
 
 ### @codebase index is broken / outdated
 
