@@ -6,8 +6,33 @@ import time
 import sublime
 
 from .rpc import JsonRpcClient
-from .session_env import resolve_default_model as _resolve_default_model, _find_python_310_plus, _resolve_model_id, load_saved_sessions
+from .session_env import resolve_default_model as _resolve_default_model, model_is_configured as _model_is_configured, _find_python_310_plus, _resolve_model_id, load_saved_sessions
 from . import backends
+
+
+
+_MODEL_PROMPTED = set()
+
+
+def _prompt_for_model(window, backend, falling_back_to):
+    """Open the settings file when no model has been chosen for this backend.
+
+    Once per backend per Sublime run — the session still starts on the built-in
+    fallback, so this points the choice out without blocking any work.
+    """
+    settings = sublime.load_settings("ClaudeCode.sublime-settings")
+    if not settings.get("prompt_for_model", True):
+        return
+    if backend in _MODEL_PROMPTED:
+        return
+    _MODEL_PROMPTED.add(backend)
+    print("[Claude] no model set for backend {!r} — using {!r}".format(
+        backend, falling_back_to))
+    sublime.status_message(
+        "Claude: no model set for {} — using {}. Set \"default_model\" in settings.".format(
+            backend, falling_back_to))
+    if window:
+        window.run_command("claude_settings")
 
 
 class BridgeManager:
@@ -41,6 +66,8 @@ class BridgeManager:
 
         # Resolve virtual model ID (e.g. @400k suffix) → real model + context limit
         default_model = _resolve_default_model(settings.get, s.backend, spec.fallback_model)
+        if not _model_is_configured(settings.get, s.backend):
+            _prompt_for_model(s.window, s.backend, default_model)
         model_for_env = (s.profile.get("model") if s.profile else None) or default_model
         if model_for_env:
             _, ctx = _resolve_model_id(model_for_env)

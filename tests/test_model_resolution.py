@@ -62,6 +62,38 @@ class ResolveDefaultModelTest(unittest.TestCase):
         self.assertEqual(got, "kimi-for-coding")
 
 
+class ModelIsConfiguredTest(unittest.TestCase):
+    """resolve_default_model always returns something, so a session with no
+    model in the settings file is indistinguishable from a configured one
+    without this."""
+
+    def test_per_backend_counts(self):
+        self.assertTrue(env.model_is_configured(
+            getter({"default_models": {"claude": "sonnet"}}), "claude"))
+
+    def test_global_setting_counts(self):
+        self.assertTrue(env.model_is_configured(getter({"default_model": "opus"}), "claude"))
+
+    def test_legacy_alias_counts_for_claude(self):
+        self.assertTrue(env.model_is_configured(
+            getter({"anthropic_model": "kimi-for-coding"}), "claude"))
+
+    def test_legacy_alias_does_not_count_for_openai(self):
+        self.assertFalse(env.model_is_configured(
+            getter({"anthropic_model": "kimi-for-coding"}), "openai"))
+
+    def test_nothing_set(self):
+        self.assertFalse(env.model_is_configured(getter({}), "claude"))
+
+    def test_entry_for_another_backend_does_not_count(self):
+        self.assertFalse(env.model_is_configured(
+            getter({"default_models": {"openai": "qwen2.5"}}), "claude"))
+
+    def test_empty_value_does_not_count(self):
+        self.assertFalse(env.model_is_configured(
+            getter({"default_model": "", "default_models": {"claude": ""}}), "claude"))
+
+
 class ResolveModelIdTest(unittest.TestCase):
     def test_unknown_model_name_passes_through(self):
         """A provider-specific name must reach the CLI unchanged."""

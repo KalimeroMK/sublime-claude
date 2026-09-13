@@ -62,6 +62,11 @@
     // stays quiet. The lsp tools need both — LSP alone has no server.
     "lsp_install_prompt": "ask",
 
+    // Open this file when a session starts with no model chosen for its
+    // backend, so the choice is made rather than silently defaulted.
+    // Once per backend per Sublime run; the session still starts meanwhile.
+    "prompt_for_model": true,
+
     // Which model a new session asks for, when no profile is selected.
     // Precedence, most specific first:
     //     default_models[backend]  >  default_model  >  built-in fallback

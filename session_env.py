@@ -176,6 +176,22 @@ def resolve_default_model(get, backend, fallback):
     return fallback
 
 
+def model_is_configured(get, backend):
+    """Whether a model was actually chosen, rather than fallen back to.
+
+    resolve_default_model always returns something, so without this a session
+    started with no model in the settings file looks identical to one that was
+    configured on purpose.
+    """
+    if ((get("default_models", {}) or {}).get(backend)):
+        return True
+    if get("default_model"):
+        return True
+    if backend in _CLAUDE_FAMILY and get("anthropic_model"):
+        return True
+    return False
+
+
 # ─── Session Persistence ──────────────────────────────────────────────────────
 
 SESSIONS_FILE = os.path.join(os.path.dirname(__file__), ".sessions.json")
