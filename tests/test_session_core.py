@@ -112,24 +112,35 @@ class OnInitErrorTest(unittest.TestCase):
         s._start_heartbeat.assert_not_called()
         s._enter_input_with_draft.assert_not_called()
 
+    # These go through output.note(), not output.text(): text() appends to the
+    # conversation turn in progress and returns silently when there is none,
+    # which is always the case at init — so every one of these messages was
+    # being written nowhere.
+
     def test_expired_session_gets_restart_hint(self):
         s = make_self()
         Session._on_init(s, {"error": {"message": "No conversation found"}})
-        text = s.output.text.call_args[0][0]
+        text = s.output.note.call_args[0][0]
         self.assertIn("Session expired", text)
         self.assertIn("Restart Session", text)
 
     def test_command_failed_treated_as_session_error(self):
         s = make_self()
         Session._on_init(s, {"error": {"message": "Command failed with code 1"}})
-        self.assertIn("Session expired", s.output.text.call_args[0][0])
+        self.assertIn("Session expired", s.output.note.call_args[0][0])
 
     def test_other_error_reports_the_message(self):
         s = make_self()
         Session._on_init(s, {"error": {"message": "connection refused"}})
-        text = s.output.text.call_args[0][0]
+        text = s.output.note.call_args[0][0]
         self.assertIn("Failed to connect", text)
         self.assertIn("connection refused", text)
+
+    def test_init_errors_never_use_text(self):
+        """text() needs a live turn and drops anything written without one."""
+        s = make_self()
+        Session._on_init(s, {"error": {"message": "boom"}})
+        s.output.text.assert_not_called()
 
     def test_error_sets_error_status(self):
         s = make_self()

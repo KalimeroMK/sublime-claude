@@ -162,9 +162,9 @@ class Session(SessionQueryMixin, SessionPermissionsMixin):
                 "Command failed" in error_msg
             )
             if is_session_error:
-                self.output.text("\n*Session expired or not found.*\n\nUse `Claude: Restart Session` (Cmd+Shift+R) to start fresh.\n")
+                self.output.note("\n*Session expired or not found.*\n\nUse `Claude: Restart Session` (Cmd+Shift+R) to start fresh.\n")
             else:
-                self.output.text(f"\n*Failed to connect: {error_msg}*\n\nTry `Claude: Restart Session` (Cmd+Shift+R).\n")
+                self.output.note(f"\n*Failed to connect: {error_msg}*\n\nTry `Claude: Restart Session` (Cmd+Shift+R).\n")
             return
         self._ui.clear_overlay()
         self.initialized = True
@@ -203,6 +203,38 @@ class Session(SessionQueryMixin, SessionPermissionsMixin):
             self._input_mode_entered = False
         # Auto-enter input mode when ready
         self._enter_input_with_draft()
+        # A resumed tab is created empty, so nothing on screen says which
+        # conversation it is or whether the resume actually connected. This
+        # runs after input mode exists so the recap lands above the prompt
+        # rather than below a stale marker.
+        if self.resume_id:
+            self._show_resume_recap()
+
+    def _show_resume_recap(self) -> None:
+        """Print where this conversation left off, into the resumed tab."""
+        try:
+            recap = self._state.recap()
+        except Exception as e:
+            print("[Claude] resume recap error: {}".format(e))
+            return
+        short = (self.session_id or self.resume_id or "")[:8]
+        if not recap or not recap.get("exchanges"):
+            print("[Claude] resumed {} (no transcript found)".format(short))
+            self.output.note(
+                "\n*Resumed session `{}` — connected, but no transcript found "
+                "to replay.*\n\n".format(short))
+            return
+        lines = ["", "*Resumed `{}` — {} turn(s), last active {}*".format(
+            short, recap["turns"], recap["last_active"] or "unknown"), ""]
+        for exchange in recap["exchanges"]:
+            lines.append("> **you:** {}".format(_one_line(exchange["prompt"])))
+            if exchange["reply"]:
+                lines.append("> **claude:** {}".format(_one_line(exchange["reply"])))
+            lines.append(">")
+        lines.append("")
+        self.output.note("\n".join(lines))
+        print("[Claude] resumed {}: {} turn(s), last active {}".format(
+            short, recap["turns"], recap["last_active"]))
 
     def _get_retain_path(self) -> Optional[str]:
         """Get path to session's dynamic retain file."""
@@ -441,3 +473,8 @@ class Session(SessionQueryMixin, SessionPermissionsMixin):
         """Delegate to ServiceAdapter."""
         self._services.signal_subsession_complete(result_summary, callback)
 
+
+def _one_line(text: str, limit: int = 160) -> str:
+    """Collapse a prompt or reply to a single, bounded line."""
+    flat = " ".join((text or "").split())
+    return flat[:limit] + "…" if len(flat) > limit else flat

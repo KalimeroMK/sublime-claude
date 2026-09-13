@@ -148,6 +148,30 @@ class InputModeControllerMixin:
             return ""
         return self.view.substr(sublime.Region(self._input_start, self.view.size()))
 
+    def note(self, text: str) -> None:
+        """Write a standalone note into the view, outside any conversation turn.
+
+        OutputView.text() needs a live turn (self.current) and silently drops
+        anything written without one — which is every message shown at session
+        start, before a query has run.
+        """
+        if not self.view or not self.view.is_valid():
+            return
+        was_input = self.is_input_mode()
+        # keep_text=True leaves the marker and the draft in the buffer, so the
+        # note would land underneath a stale input line
+        draft = self.get_input_text() if was_input else ""
+        if was_input:
+            self.exit_input_mode()
+        self._write(text)
+        if was_input:
+            self.enter_input_mode()
+            if draft and self.view:
+                self.view.run_command("append", {"characters": draft})
+                end = self.view.size()
+                self.view.sel().clear()
+                self.view.sel().add(sublime.Region(end, end))
+
     def is_input_mode(self) -> bool:
         """Check if currently in input mode."""
         return self._input_mode

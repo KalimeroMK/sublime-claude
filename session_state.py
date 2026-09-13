@@ -1,6 +1,7 @@
 """State persistence manager for sessions (sessions.json, retain files, JSONL)."""
 import json
 import os
+import re
 from typing import Optional, List, Dict
 
 from .session_env import load_saved_sessions, save_sessions
@@ -240,6 +241,86 @@ class StateManager:
                 if os.path.exists(candidate):
                     return candidate
         return None
+
+    # Smart context is prepended to the prompt as fenced blocks, so the words
+    # the user actually typed sit after the last fence.
+    _CONTEXT_HEAD = re.compile(
+        r"^\[(cursor|recently_modified|open_file|symbol|codebase|model|routes|"
+        r"module|terminal|web|git|quality|artisan|file)\]")
+
+    @classmethod
+    def strip_context_preamble(cls, text: str) -> str:
+        """The user's own words, without the context blocks prepended to them."""
+        if not text:
+            return ""
+        stripped = text.lstrip()
+        if not cls._CONTEXT_HEAD.match(stripped):
+            return text.strip()
+        end = text.rfind("```")
+        if end == -1:
+            return text.strip()
+        return text[end + 3:].strip()
+
+    @staticmethod
+    def _entry_text(entry: dict) -> str:
+        """Visible text of a transcript entry, ignoring thinking and tool blocks."""
+        content = (entry.get("message") or {}).get("content")
+        if isinstance(content, str):
+            return content
+        if not isinstance(content, list):
+            return ""
+        return "".join(
+            b.get("text", "") for b in content
+            if isinstance(b, dict) and b.get("type") == "text")
+
+    def recap(self, max_turns: int = 3, max_chars: int = 220) -> dict:
+        """What this conversation already contains, for a resumed session.
+
+        A resumed tab is created empty, so without this there is nothing on
+        screen to say which conversation it is or whether the resume worked.
+        """
+        path = self.find_jsonl_path()
+        if not path:
+            return {}
+        exchanges = []
+        pending = None
+        turns = 0
+        last_active = ""
+        try:
+            with open(path, "r", encoding="utf-8", errors="replace") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        entry = json.loads(line)
+                    except ValueError:
+                        continue
+                    if entry.get("isSidechain") or entry.get("isMeta"):
+                        continue
+                    stamp = entry.get("timestamp") or ""
+                    if stamp:
+                        last_active = stamp
+                    etype = entry.get("type")
+                    if etype == "user":
+                        text = self.strip_context_preamble(self._entry_text(entry))
+                        if not text or self._is_synthetic_turn(text):
+                            continue
+                        turns += 1
+                        pending = {"prompt": text[:max_chars], "reply": ""}
+                        exchanges.append(pending)
+                    elif etype == "assistant" and pending is not None:
+                        text = self._entry_text(entry).strip()
+                        if text and not pending["reply"]:
+                            pending["reply"] = text[:max_chars]
+        except OSError:
+            return {}
+        return {
+            "path": path,
+            "turns": turns,
+            "last_active": last_active[:19].replace("T", " "),
+            "exchanges": exchanges[-max_turns:],
+        }
 
     @staticmethod
     def _is_synthetic_turn(prompt: str) -> bool:
