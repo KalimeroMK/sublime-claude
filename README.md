@@ -113,7 +113,7 @@ git clone https://github.com/KalimeroMK/sublime-claude ClaudeCode
 | **Generate Commit** | — | Generate commit message from `git diff --staged` |
 | **Git Status** | — | Show `git status --short` in output view |
 | **LSP Tools** | hover, definition, references, symbols, workspace_symbols, diagnostics | + completion, signature_help, type_definition, implementation, call_hierarchy, inlay_hint, rename, code_action (14 total) |
-| **Tests** | Minimal | 712 unit tests, mock Sublime API |
+| **Tests** | Minimal | 724 unit tests, mock Sublime API |
 
 [↑ Back to Top](#table-of-contents)
 
@@ -153,7 +153,7 @@ This build extends the base project with additional features, bug fixes, and a f
 | **Blade & Livewire Navigation** | Cmd/Ctrl+Click resolves `<x-forms.input />` and `<livewire:brand.table />` component tags, which carry no quotes and so were invisible to the helper-call resolver |
 | **Full LSP Tool Surface** | 14 `lsp` subcommands give Claude the language server's own view of the code — `completion` (what is callable here), `signature_help`, `type_definition`, `implementation`, `call_hierarchy`, `inlay_hint`, `rename` and `code_action`, alongside the original hover/definition/references/symbols/diagnostics |
 | **LSP Install Check** | On first run, offers to install the `LSP` package and a language server matched to the project (detected from `composer.json`, `package.json`, `go.mod`, `Cargo.toml`, `pyproject.toml`) |
-| **Comprehensive Test Suite** | 712 unit tests covering all core utilities, running in ~3s with a mock Sublime API |
+| **Comprehensive Test Suite** | 724 unit tests covering all core utilities, running in ~3s with a mock Sublime API |
 
 ### Bug Fixes
 
@@ -162,6 +162,9 @@ This build extends the base project with additional features, bug fixes, and a f
 | `@model` and `@routes` in the `@` menu did nothing | The menu offered them but the handler had no branch for either, so choosing one silently closed the panel. Any `@`-command now inserts its text |
 | PHPStan reported a clean file it had never analysed | It crashes on PHP's stock 128M limit and returns zero errors; runs now default to 512M |
 | Pint and PHPStan findings were silently dropped | Both wrap their JSON in banner text, so parsing the whole stream failed and read as "nothing to fix" |
+| The terminal panel showed stale output and escape junk | It was a text appender, not a terminal: `clear` was stripped rather than honoured so old output stayed, `\r` never overwrote a line, and the `?2004h` / `]0;title` sequences every shell emits were left in the buffer. The panel now hosts the same `pyte` PTY the tabs and the agent use |
+| Toggling the terminal panel erased its scrollback | `create_output_panel` returns the existing view but empties it, and the panel was recreated on every show |
+| A command sent to a just-opened terminal vanished | A freshly spawned `zsh -i -l` sources its rc files before reading stdin; sends now wait for the prompt |
 | Import error | Fixed `ClaudeInsertCommand`/`ClaudeReplaceCommand` imported from wrong module |
 | Python 3.8-syntax compatibility | Replaced `int \| None`, `dict[]`, `list[]` with `Optional`, `Dict`, `List` — kept for the `.python-version` 3.8 alias |
 | Mouse selection unresponsive | Fixed dynamic `read_only` toggling to allow selection while protecting conversation history |
@@ -894,13 +897,19 @@ A full embedded PTY terminal inside Sublime Text — shared between you and the 
 | Keybinding | Action |
 |-----------|--------|
 | `Cmd+Shift+P` → "Claude: Open Terminal" | Open a new terminal tab |
-| ``Ctrl+` `` | Toggle terminal panel |
-| ``Ctrl+Shift+` `` | Send command to terminal |
+| ``Ctrl+` `` | Toggle the terminal panel |
+| ``Ctrl+Shift+` `` | Send a command to the panel without focusing it |
+| `Cmd+Shift+P` → "Claude: Restart Terminal" | Kill the panel's shell and start a fresh one |
+
+The panel and the tabs run the same emulator, so `clear`, progress bars, colour
+and TUI programs behave identically in both. The panel keeps its shell and
+scrollback across toggles; closing the window kills it.
 
 ### Features
 
 - **Real PTY** — `htop`, `vim`, `less`, `npm init`, SSH, and REPLs work correctly
 - **Agent blocking** — `terminal_run("npm test", wait=60)` blocks until the shell returns to prompt
+- **Panel or tab** — the same `pyte` terminal either way; the panel holds one long-lived shell, tabs are per-session
 - **Multiple tabs** — Each session gets its own terminal; users can open additional tabs
 - **Index targeting** — Target any terminal by its `#N` index (shown in tab title)
 - **Shell integration** — OSC 133 hooks for zsh/bash/fish give ~50ms prompt detection
@@ -1281,7 +1290,7 @@ cd ~/PhpstormProjects/sublime-claude
 python3 -m unittest discover tests/          # add -v for per-test output
 ```
 
-**712 tests** covering all core utilities:
+**724 tests** covering all core utilities:
 - Context window gauge, session tags, drag-drop, usage graph
 - Attach commands (image/file auto-detect, MIME mapping)
 - Swarm monitor (status icons, session tracking)
@@ -1312,6 +1321,8 @@ python3 -m unittest discover tests/          # add -v for per-test output
   `apiResource` expansion, array-syntax groups, and module route discovery
 - Module summaries, form-request rule extraction, and the decoy-directory guard
   that keeps `tests/Feature/Modules` from shadowing the real module
+- Terminal panel reuse (a recreated panel loses its scrollback), the view
+  settings the key bindings match on, and the send-when-ready retry
 - The artisan and Pint/PHPStan bridges against a fake runner — JSON buried in
   banner output, PHPStan's exit code 1 meaning "found errors" rather than
   "failed", and the PATH a Dock-launched editor does not inherit
