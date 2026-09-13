@@ -81,6 +81,12 @@
     // Options: "default", "acceptEdits", "plan", "bypassPermissions"
     "permission_mode": "acceptEdits",
 
+    // Send agentic tools (Read/Write/Edit/Bash/Glob/Grep) to the model.
+    // Set false for a chat-only session — some local models (abliterated /
+    // thinking ones) garble plain code generation when tools are attached,
+    // so turning tools off gives clean code output from them.
+    "tools_enabled": true,
+
     // Reasoning effort level: "low", "high", "max"
     "effort": "high",
 

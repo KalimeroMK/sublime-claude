@@ -438,6 +438,7 @@ class Bridge(BaseBridge):
         self._system_prompt: str = ""
         self._cwd: str = "."
         self._allowed_tools: List[str] = []
+        self._tools_enabled: bool = True
         self._is_ollama = False
 
     async def handle_request(self, req: dict) -> None:
@@ -469,6 +470,7 @@ class Bridge(BaseBridge):
         settings = load_project_settings(self._cwd)
 
         self._allowed_tools = params.get("allowed_tools", [])
+        self._tools_enabled = params.get("tools_enabled", True)
 
         self.base_url = (settings.get("openai_base_url")
                          or os.environ.get("OPENAI_BASE_URL", "")
@@ -784,6 +786,11 @@ class Bridge(BaseBridge):
         send_result(id, {"status": "complete"})
 
     def _filter_tools(self, tools: list) -> list:
+        # a chat-only session sends no tools; some local models (abliterated
+        # qwen among them) garble a plain generation request when tools are
+        # present, so this is how you get clean code output from them
+        if not self._tools_enabled:
+            return []
         if not self._allowed_tools:
             return tools
         allowed = set(self._allowed_tools)
