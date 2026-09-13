@@ -24,11 +24,13 @@ A Sublime Text plugin for [Kimi](https://kimi.ai/), [Claude Code](https://claude
 - [Settings](#settings)
   - [Backend Selection](#backend-selection)
   - [General Settings](#general-settings)
+  - [Laravel / PHP settings](#laravel--php-settings)
   - [Permission Modes](#permission-modes)
   - [Project Settings](#project-settings-sublime-project)
 - [Context](#context)
   - [Smart Context (Auto)](#smart-context-auto)
   - [@-Commands](#-commands)
+  - [Laravel context commands](#laravel-context-commands)
   - [Related Files (Manual)](#related-files-manual)
 - [Voice Input](#voice-input)
 - [Terminal Integration](#terminal-integration)
@@ -96,6 +98,8 @@ git clone https://github.com/KalimeroMK/sublime-claude ClaudeCode
 |---------|---------------------|----------------------|
 | **Backends** | Claude, Codex, Copilot, DeepSeek | + Kimi, Ollama, OpenAI |
 | **Context Tools** | Manual add only | Smart Context, `@codebase` TF-IDF search, `@web` DuckDuckGo, auto-related files |
+| **Laravel context** | — | `@model` with real migration columns, `@routes` across modules, `@module` slices, `@artisan`, `@quality` |
+| **Laravel navigation** | — | Cmd+Click on `<x-component>` and `<livewire:…>` tags |
 | **MCP Marketplace** | — | 21 curated MCP servers, one-click install |
 | **Skills Marketplace** | — | 27 curated skills (global / per-project) |
 | **Monitoring** | — | Swarm Monitor, Token Usage Graph, Context Gauge |
@@ -109,7 +113,7 @@ git clone https://github.com/KalimeroMK/sublime-claude ClaudeCode
 | **Generate Commit** | — | Generate commit message from `git diff --staged` |
 | **Git Status** | — | Show `git status --short` in output view |
 | **LSP Tools** | hover, definition, references, symbols, workspace_symbols, diagnostics | + completion, signature_help, type_definition, implementation, call_hierarchy, inlay_hint, rename, code_action (14 total) |
-| **Tests** | Minimal | 517 unit tests, mock Sublime API |
+| **Tests** | Minimal | 712 unit tests, mock Sublime API |
 
 [↑ Back to Top](#table-of-contents)
 
@@ -141,14 +145,23 @@ This build extends the base project with additional features, bug fixes, and a f
 | **Scroll Respect** | Viewport-aware auto-scroll — doesn't jump to bottom when reading history |
 | **Generate Commit Message** | Generate commit message from `git diff --staged` |
 | **Git Status** | Show `git status --short` in output view |
+| **Laravel Model Truth** | `@model` replays the migrations — `database/migrations` plus every per-module and tenant directory — so the AI sees the table's real columns, types, nullability and foreign keys instead of guessing from `$fillable` |
+| **Project-Wide Route Map** | `@routes` parses every file that declares routes, nests group prefixes/names/middleware correctly and expands `Route::resource`. On a modular project that is 428 routes where the old `routes/*.php` scan found 11 |
+| **Module Slices** | `@module <Name>` gives one feature's whole vertical: models with tables and relations, controllers with their methods, form requests with their validation rules, actions, DTOs, policies, observers, repositories, migrations and routes |
+| **Artisan Bridge** | `@artisan route:list / db:table / model:show / about` asks the running app for what only the framework knows. Configurable command, so a dockerised app works too |
+| **PHP Quality Loop** | `@quality` runs the project's own Pint and PHPStan and feeds the findings back — a signal intelephense diagnostics cannot give, since they know nothing about your PHPStan level or Pint ruleset |
+| **Blade & Livewire Navigation** | Cmd/Ctrl+Click resolves `<x-forms.input />` and `<livewire:brand.table />` component tags, which carry no quotes and so were invisible to the helper-call resolver |
 | **Full LSP Tool Surface** | 14 `lsp` subcommands give Claude the language server's own view of the code — `completion` (what is callable here), `signature_help`, `type_definition`, `implementation`, `call_hierarchy`, `inlay_hint`, `rename` and `code_action`, alongside the original hover/definition/references/symbols/diagnostics |
 | **LSP Install Check** | On first run, offers to install the `LSP` package and a language server matched to the project (detected from `composer.json`, `package.json`, `go.mod`, `Cargo.toml`, `pyproject.toml`) |
-| **Comprehensive Test Suite** | 517 unit tests covering all core utilities, running in ~3s with a mock Sublime API |
+| **Comprehensive Test Suite** | 712 unit tests covering all core utilities, running in ~3s with a mock Sublime API |
 
 ### Bug Fixes
 
 | Issue | Fix |
 |-------|-----|
+| `@model` and `@routes` in the `@` menu did nothing | The menu offered them but the handler had no branch for either, so choosing one silently closed the panel. Any `@`-command now inserts its text |
+| PHPStan reported a clean file it had never analysed | It crashes on PHP's stock 128M limit and returns zero errors; runs now default to 512M |
+| Pint and PHPStan findings were silently dropped | Both wrap their JSON in banner text, so parsing the whole stream failed and read as "nothing to fix" |
 | Import error | Fixed `ClaudeInsertCommand`/`ClaudeReplaceCommand` imported from wrong module |
 | Python 3.8-syntax compatibility | Replaced `int \| None`, `dict[]`, `list[]` with `Optional`, `Dict`, `List` — kept for the `.python-version` 3.8 alias |
 | Mouse selection unresponsive | Fixed dynamic `read_only` toggling to allow selection while protecting conversation history |
@@ -446,6 +459,32 @@ Options: `"claude"`, `"openai"`, `"deepseek"`, `"codex"`
 - **claude_extra_args** — Extra CLI arguments for `claude` (e.g. `"--max-budget-usd 5 --verbose"`)
 - **claude_side_panel** — Show chat in a narrow right-side panel (`true` / `false`). Splits window into 2 columns (78% code, 22% chat) like VS Code. Default: `true`
 
+### Laravel / PHP settings
+
+| Setting | Default | What it does |
+|---------|---------|--------------|
+| `artisan_command` | `"php artisan"` | How `@artisan` invokes artisan. Dockerised: `"docker compose exec -T app php artisan"` |
+| `artisan_timeout` | `20` | Seconds before an artisan call is given up on |
+| `php_pint` | `true` | Run Pint in `@quality` (skipped anyway without `pint.json`) |
+| `php_phpstan` | `true` | Run PHPStan in `@quality` (skipped anyway without `phpstan.neon`) |
+| `php_pint_command` | — | Override when the binary is not in `vendor/bin` or on PATH |
+| `php_phpstan_command` | — | Same, for PHPStan |
+| `php_phpstan_level` | — | Override the level in `phpstan.neon` for `@quality` only |
+| `php_phpstan_memory_limit` | `"512M"` | PHP's stock 128M makes PHPStan crash and report nothing |
+| `php_timeout` | `120` | Seconds before a Pint/PHPStan run is given up on |
+| `routes_max` | `150` | Cap on unfiltered `@routes` output |
+
+**A note on PATH:** an editor launched from the Dock inherits a minimal PATH, so
+a Homebrew or asdf `php` is invisible to it even though the same command works
+in your terminal. The plugin adds the usual locations
+(`/opt/homebrew/bin`, `/usr/local/bin`, Composer's global bin) before running
+anything. If your setup is unusual, point the `*_command` settings at absolute
+paths.
+
+[↑ Back to Top](#table-of-contents)
+
+---
+
 ### Permission Modes
 
 | Mode | Behavior | Safest for |
@@ -667,6 +706,11 @@ Type `@` in the inline input area to trigger the context menu, or type commands 
 | `@file:<path>` | Inline reference to a specific file |
 | `@web <query>` | Search the web via DuckDuckGo (no API key) |
 | `@terminal` | Inject current terminal output into context |
+| `@model <Name>` | Laravel model: **real columns from the migrations**, casts, relations |
+| `@routes [filter]` | Every route in the project, modules included |
+| `@module <Name>` | One module's whole vertical slice |
+| `@artisan <sub>` | Ask the running app: `route:list`, `db:table`, `model:show`, `about` |
+| `@quality [path]` | Run the project's own Pint and PHPStan |
 
 **`@codebase`** finds the most relevant files based on your query keywords and adds them to context automatically:
 
@@ -706,6 +750,103 @@ This will:
 3. Useful for debugging build errors, test failures, or server logs
 
 Requires an active terminal session (use **Toggle Terminal** first, or it auto-starts on first `@terminal` use).
+
+### Laravel context commands
+
+These read the project source directly. They need no running app, no database
+and no artisan, so they still answer on a project that will not boot.
+
+**`@model <Name>`** — a model's real shape. `$fillable` is a mass-assignment
+allowlist, not the table, so the columns are replayed out of the migrations
+(`database/migrations` **and** every `**/Database/Migrations` a modular app
+keeps per module, tenant subdirectories included). Creates, drops, renames and
+later `Schema::table()` edits are applied in filename order, so what you see is
+the table as it stands today:
+
+```
+[model] Brand
+path: app/Modules/Brand/Infrastructure/Models/Brand.php
+table: brands
+columns (30):
+  id                       bigint unsigned    pk
+  name                     string(100)
+  slug                     string(255)        unique nullable
+  company_id               bigint unsigned    nullable FK->companies
+  is_active                boolean            default=true
+relations:
+  competitors() hasMany Competitor
+  company() belongsTo Company
+```
+
+**`@routes [filter]`** — routes parsed from every file that declares them, not
+just the four `routes/*.php` Laravel ships. Group prefixes, name prefixes and
+middleware nest properly, and `Route::resource` / `apiResource` expand to the
+routes they actually register. On a modular project this is the difference
+between 11 routes and 428.
+
+The optional filter matches module, URI, name, action, verb or file:
+
+```
+◎ @routes Brand ▶      13 routes instead of 428
+◎ @routes /api/v1 ▶
+```
+
+Unfiltered output is capped at `routes_max` (default 150) so a large project
+cannot crowd everything else out of the context window.
+
+**`@module <Name>`** — the vertical slice, which is how a modular app is
+actually read. Models with their table and relations, controllers with their
+public methods, form requests with their validation rules, plus actions, DTOs,
+policies, observers, repositories, migrations and routes — the shape of the
+feature in about 450 tokens, not twenty files.
+
+**`@artisan <sub>`** — ground truth from the running app, for what only the
+framework knows: route model binding, middleware groups, package routes, the
+live schema.
+
+```
+◎ @artisan routes ▶          php artisan route:list --json
+◎ @artisan table brands ▶    php artisan db:table
+◎ @artisan model Brand ▶     php artisan model:show
+◎ @artisan about ▶
+```
+
+Set `artisan_command` for a dockerised app:
+
+```json
+{ "artisan_command": "docker compose exec -T app php artisan" }
+```
+
+**`@quality [path]`** — the project's own Pint and PHPStan, on the current file
+by default. Intelephense diagnostics know nothing about your configured PHPStan
+level or your Pint ruleset, so this is a separate signal:
+
+```
+[pint] 1 file(s) need formatting:
+  app/Modules/Brand/Actions/CreateBrand.php — declare_strict_types, braces_position
+[phpstan] 2 error(s):
+  app/Modules/Brand/Models/Brand.php:22 Access to an undefined property Brand::$slug. [property.notFound]
+```
+
+Each tool is skipped when the project does not configure it (`pint.json`,
+`phpstan.neon`). PHPStan runs with a 512M memory limit by default — PHP's stock
+128M makes it crash mid-analysis and report nothing, which reads as a clean
+result.
+
+### Cmd/Ctrl+Click: Blade components and Livewire
+
+Alongside `view()`, `config()`, `route()` and `__()`, a Cmd/Ctrl+Click now
+resolves component tags, which carry no quotes and so were invisible to the
+helper-call resolver:
+
+| Source | Resolves to |
+|--------|-------------|
+| `<x-forms.input />` | `resources/views/components/forms/input.blade.php`, and `app/View/Components/Forms/Input.php` when present |
+| `<livewire:brand.table />` | `app/Livewire/Brand/Table.php` (or legacy `app/Http/Livewire`), plus its Blade view |
+| `@livewire('brand.table')` | same as above |
+
+A modular app that keeps Livewire classes inside the module is found by a
+project-wide search when the conventional paths miss.
 
 ### Related Files (Manual)
 
@@ -1140,7 +1281,7 @@ cd ~/PhpstormProjects/sublime-claude
 python3 -m unittest discover tests/          # add -v for per-test output
 ```
 
-**517 tests** covering all core utilities:
+**712 tests** covering all core utilities:
 - Context window gauge, session tags, drag-drop, usage graph
 - Attach commands (image/file auto-detect, MIME mapping)
 - Swarm monitor (status icons, session tracking)
@@ -1164,6 +1305,16 @@ python3 -m unittest discover tests/          # add -v for per-test output
   without `--apply`
 - LSP install detection by marker file, and permission patterns for the `lsp`
   subcommand
+- Migration replay: column types, modifiers, `morphs`/`timestamps`/`softDeletes`
+  expansion, drops and renames, and discovery across modular and tenant
+  migration directories
+- Route parsing: nested group prefixes/names/middleware, `Route::resource` and
+  `apiResource` expansion, array-syntax groups, and module route discovery
+- Module summaries, form-request rule extraction, and the decoy-directory guard
+  that keeps `tests/Feature/Modules` from shadowing the real module
+- The artisan and Pint/PHPStan bridges against a fake runner — JSON buried in
+  banner output, PHPStan's exit code 1 meaning "found errors" rather than
+  "failed", and the PATH a Dock-launched editor does not inherit
 
 All tests run in ~3s without requiring Sublime Text to be open (uses mock API).
 `tests/plugin_pkg.py` aliases the repo root as a package so tests exercise the
