@@ -353,6 +353,57 @@ def _make_ctx():
     return ctx
 
 
+_TOOL_TAG_RE = re.compile(r"<tool_call>\s*(\{.*?\})\s*</tool_call>", re.S)
+_BARE_TOOL_RE = re.compile(r'\{[^{}]*"name"\s*:\s*"(?P<name>[^"]+)"[^{}]*"arguments"\s*:\s*(?P<args>\{.*?\})[^{}]*\}', re.S)
+
+
+def extract_text_tool_calls(content):
+    """Tool calls a model emitted as text instead of the structured field.
+
+    An abliterated or loosely-templated model often prints
+    <tool_call>{"name": "...", "arguments": {...}}</tool_call> (or the bare
+    JSON) into the content, and Ollama leaves it there rather than filling
+    message.tool_calls. Without this the JSON leaks to the screen and nothing
+    runs. Returns (tool_calls, cleaned_text).
+    """
+    if not content or '"name"' not in content:
+        return [], content
+    calls = []
+    spans = []
+    for m in _TOOL_TAG_RE.finditer(content):
+        blob = m.group(1)
+        try:
+            obj = json.loads(blob)
+        except ValueError:
+            continue
+        if isinstance(obj, dict) and obj.get("name"):
+            calls.append(obj)
+            spans.append(m.span())
+    if not calls:
+        for m in _BARE_TOOL_RE.finditer(content):
+            try:
+                obj = json.loads(m.group(0))
+            except ValueError:
+                continue
+            if isinstance(obj, dict) and obj.get("name") and isinstance(obj.get("arguments"), dict):
+                calls.append(obj)
+                spans.append(m.span())
+    if not calls:
+        return [], content
+    cleaned = content
+    for a, b in reversed(spans):
+        cleaned = cleaned[:a] + cleaned[b:]
+    # drop an orphan closing tag left behind
+    cleaned = cleaned.replace("<tool_call>", "").replace("</tool_call>", "").strip()
+    normalized = [
+        {"id": "call_" + uuid.uuid4().hex[:8], "type": "function",
+         "function": {"name": c["name"], "arguments": c.get("arguments", {})}}
+        for c in calls
+    ]
+    return normalized, cleaned
+
+
+
 async def _http_post(url: str, payload: dict, headers: dict) -> dict:
     import urllib.request
     import asyncio
@@ -525,11 +576,18 @@ class Bridge(BaseBridge):
 
             message = body.get("message", {})
             content = message.get("content", "")
+            tool_calls = message.get("tool_calls")
+
+            # abliterated / loosely-templated models emit tool calls as text;
+            # recover them before the content is shown or treated as final
+            if not tool_calls:
+                recovered, content = extract_text_tool_calls(content)
+                if recovered:
+                    tool_calls = recovered
 
             if content:
                 send_notification("message", {"type": "text_delta", "text": content})
 
-            tool_calls = message.get("tool_calls")
             if not tool_calls:
                 self._messages.append({"role": "assistant", "content": content})
                 break
@@ -640,22 +698,28 @@ class Bridge(BaseBridge):
             choice = body["choices"][0]
             message = choice["message"]
             content = message.get("content", "")
+            tool_calls = message.get("tool_calls")
+
+            if not tool_calls:
+                recovered, content = extract_text_tool_calls(content)
+                if recovered:
+                    tool_calls = recovered
 
             if content:
                 send_notification("message", {"type": "text_delta", "text": content})
 
-            tool_calls = message.get("tool_calls")
             if not tool_calls:
                 self._messages.append({"role": "assistant", "content": content})
                 break
 
             for tc in tool_calls:
                 func = tc["function"]
+                _a = func["arguments"]
                 send_notification("message", {
                     "type": "tool_use",
                     "id": tc["id"],
                     "name": func["name"],
-                    "input": json.loads(func["arguments"]),
+                    "input": _a if isinstance(_a, dict) else json.loads(_a),
                     "background": False,
                 })
 
@@ -668,7 +732,9 @@ class Bridge(BaseBridge):
                         "type": "function",
                         "function": {
                             "name": tc["function"]["name"],
-                            "arguments": tc["function"]["arguments"],
+                            "arguments": (tc["function"]["arguments"]
+                                          if isinstance(tc["function"]["arguments"], str)
+                                          else json.dumps(tc["function"]["arguments"])),
                         },
                     }
                     for tc in tool_calls
@@ -679,7 +745,9 @@ class Bridge(BaseBridge):
             for tc in tool_calls:
                 func = tc["function"]
                 name = func["name"]
-                args = json.loads(func["arguments"])
+                args = func["arguments"]
+                if isinstance(args, str):
+                    args = json.loads(args)
 
                 executor = TOOL_DISPATCH.get(name)
                 if executor:
