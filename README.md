@@ -113,7 +113,7 @@ git clone https://github.com/KalimeroMK/sublime-claude ClaudeCode
 | **Generate Commit** | — | Generate commit message from `git diff --staged` |
 | **Git Status** | — | Show `git status --short` in output view |
 | **LSP Tools** | hover, definition, references, symbols, workspace_symbols, diagnostics | + completion, signature_help, type_definition, implementation, call_hierarchy, inlay_hint, rename, code_action (14 total) |
-| **Tests** | Minimal | 740 unit tests, mock Sublime API |
+| **Tests** | Minimal | 753 unit tests, mock Sublime API |
 
 [↑ Back to Top](#table-of-contents)
 
@@ -153,7 +153,7 @@ This build extends the base project with additional features, bug fixes, and a f
 | **Blade & Livewire Navigation** | Cmd/Ctrl+Click resolves `<x-forms.input />` and `<livewire:brand.table />` component tags, which carry no quotes and so were invisible to the helper-call resolver |
 | **Full LSP Tool Surface** | 14 `lsp` subcommands give Claude the language server's own view of the code — `completion` (what is callable here), `signature_help`, `type_definition`, `implementation`, `call_hierarchy`, `inlay_hint`, `rename` and `code_action`, alongside the original hover/definition/references/symbols/diagnostics |
 | **LSP Install Check** | On first run, offers to install the `LSP` package and a language server matched to the project (detected from `composer.json`, `package.json`, `go.mod`, `Cargo.toml`, `pyproject.toml`) |
-| **Comprehensive Test Suite** | 740 unit tests covering all core utilities, running in ~1s with a mock Sublime API |
+| **Comprehensive Test Suite** | 753 unit tests covering all core utilities, running in ~1s with a mock Sublime API |
 
 ### Bug Fixes
 
@@ -164,6 +164,7 @@ This build extends the base project with additional features, bug fixes, and a f
 | Pint and PHPStan findings were silently dropped | Both wrap their JSON in banner text, so parsing the whole stream failed and read as "nothing to fix" |
 | The terminal panel showed stale output and escape junk | It was a text appender, not a terminal: `clear` was stripped rather than honoured so old output stayed, `\r` never overwrote a line, and the `?2004h` / `]0;title` sequences every shell emits were left in the buffer. The panel now hosts the same `pyte` PTY the tabs and the agent use |
 | Toggling the terminal panel erased its scrollback | `create_output_panel` returns the existing view but empties it, and the panel was recreated on every show |
+| `default_model` in the settings file did nothing | The built-in fallback was checked before the user's own setting, and it is always set, so every claude session requested `opus` no matter what the file said. Precedence is now `default_models[backend]` > `default_model` > built-in, with `anthropic_model` kept working as a claude-only alias |
 | A resumed session opened an empty tab | Nothing said which conversation it was or whether the resume had connected, so a working resume looked identical to a broken one. The tab now opens with a recap: turn count, when it was last active, and the last exchanges |
 | Messages shown at session start were written nowhere | `output.text()` appends to the conversation turn in progress and returns silently when there is none — which is always the case at init, so the "Session expired" notice never appeared. Those go through `output.note()` now |
 | A command sent to a just-opened terminal vanished | A freshly spawned `zsh -i -l` sources its rc files before reading stdin; sends now wait for the prompt |
@@ -393,6 +394,38 @@ Right-click selected text and choose "Ask Claude" to query about the selection.
 ## Settings
 
 `Preferences > Package Settings > Claude Code > Settings`
+
+### Choosing the model
+
+`Cmd+Shift+P` → **Claude: Settings** opens the settings file next to the
+defaults. Which model a new session asks for is resolved most-specific-first:
+
+```
+default_models[backend]   >   default_model   >   built-in fallback
+```
+
+```json
+{
+    "default_model": "opus",
+    "default_models": {"claude": "opus", "openai": "qwen2.5:7b"}
+}
+```
+
+To change it without editing the file: **Claude: Select Model** switches the
+running session, **Claude: Set Default Model** persists the choice. The status
+bar shows the model in use.
+
+`anthropic_model` still works as a claude-only alias for `default_model`.
+
+**Reading the model name honestly:** an Anthropic-compatible provider echoes
+back whatever model name you send it, and it receives Claude Code's own system
+prompt. So a Kimi or gateway session will report a Claude model in the status
+bar *and* answer "I am Claude" if you ask it — neither is evidence of who
+served the request. The destination is what you set in `anthropic_base_url`.
+
+[↑ Back to Top](#table-of-contents)
+
+---
 
 ### Backend Selection
 
@@ -1293,7 +1326,7 @@ cd ~/PhpstormProjects/sublime-claude
 python3 -m unittest discover tests/          # add -v for per-test output
 ```
 
-**740 tests** covering all core utilities:
+**753 tests** covering all core utilities:
 - Context window gauge, session tags, drag-drop, usage graph
 - Attach commands (image/file auto-detect, MIME mapping)
 - Swarm monitor (status icons, session tracking)
@@ -1307,6 +1340,8 @@ python3 -m unittest discover tests/          # add -v for per-test output
 - JSON-RPC client, tool routing, settings merging
 - BackendSpec registry, TOOL_FORMATTERS registry
 - Terminal integration (panel reuse, terminal key-binding settings, send-when-ready)
+- Model resolution precedence, including the legacy `anthropic_model` alias and
+  that it stays out of the non-claude backends
 - Resume recap: stripping the smart-context preamble off a stored prompt,
   pairing replies to prompts, and skipping sidechain, meta and synthetic turns
 - Undo quick panel, session bookmarks, live output settings
