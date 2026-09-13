@@ -592,30 +592,25 @@ class SessionQueryMixin:
 
         prompt = re.sub(r'@web\s+([^@\n]+)', replace_web, prompt)
 
-        # @terminal -- add terminal output as context
+        # @terminal -- the screen of the terminal the user is actually looking
+        # at. This used to read a second, invisible shell the bridge kept, so
+        # it reported output nobody could see.
         if "@terminal" in prompt:
             try:
-                if self.client and self.client.is_alive():
-                    result = self.client.send_wait("terminal_read", {"max_chars": 10000}, timeout=5.0)
-                    if "error" not in result:
-                        text = result.get("text", "")
-                        if text:
-                            if len(text) > 10000:
-                                text = text[:10000] + "\n\n... [truncated]\n"
-                            self.pending_context.append(ContextItem(
-                                kind="note",
-                                name="terminal",
-                                content=f"[terminal output]\n```\n{text}\n```",
-                            ))
-                            print(f"[Claude] @terminal: added {len(text)} chars")
-                        else:
-                            print("[Claude] @terminal: no output")
-                    else:
-                        print(f"[Claude] @terminal: error reading terminal")
+                text = _read_visible_terminal(self.window)
+                if text:
+                    if len(text) > 10000:
+                        text = text[:10000] + "\n\n... [truncated]\n"
+                    self.pending_context.append(ContextItem(
+                        kind="note",
+                        name="terminal",
+                        content="[terminal output]\n```\n{}\n```".format(text),
+                    ))
+                    print("[Claude] @terminal: added {} chars".format(len(text)))
                 else:
-                    print("[Claude] @terminal: bridge not available")
+                    print("[Claude] @terminal: no terminal output")
             except Exception as e:
-                print(f"[Claude] @terminal error: {e}")
+                print("[Claude] @terminal error: {}".format(e))
             prompt = prompt.replace("@terminal", "").strip()
 
         # @git -- add git diff --staged as context
@@ -986,6 +981,47 @@ def _format_model(info, root=""):
         lines.extend("  {}() {} {}".format(r["name"], r["kind"], r["target"]).rstrip()
                      for r in rels)
     return "\n".join(lines)
+
+
+def terminal_screen_text(terminal, max_lines=200):
+    """The visible screen of a pyte terminal as plain text."""
+    screen = terminal.screen
+    lines = []
+    for row in range(screen.lines):
+        buf = screen.buffer.get(row, {})
+        lines.append("".join(buf[col].data for col in sorted(buf.keys())).rstrip())
+    while lines and not lines[-1]:
+        lines.pop()
+    if max_lines and len(lines) > max_lines:
+        lines = lines[-max_lines:]
+    return "\n".join(lines)
+
+
+def _read_visible_terminal(window):
+    """Screen text of the terminal panel, else any live terminal in the window.
+
+    The panel is what the user sees, so it is preferred over agent terminals.
+    """
+    try:
+        from .terminal.terminal import Terminal
+    except ImportError:
+        return ""
+    from . import commands_terminal
+
+    view = commands_terminal.panel_view(window) if window else None
+    candidates = []
+    if view:
+        panel_terminal = Terminal.from_id(view.id())
+        if panel_terminal:
+            candidates.append(panel_terminal)
+    candidates.extend(t for t in Terminal.list_all() if t not in candidates)
+    for terminal in candidates:
+        if not terminal.is_alive():
+            continue
+        text = terminal_screen_text(terminal)
+        if text.strip():
+            return text
+    return ""
 
 
 def _setting(key, default=None):

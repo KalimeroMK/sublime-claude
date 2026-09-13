@@ -18,7 +18,6 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from settings import load_project_settings
 from logger import get_bridge_logger, ContextLogger
 
-from bridge.terminal import TerminalManager, strip_ansi
 from permissions import parse_permission_pattern, extract_bash_commands, match_permission_pattern
 
 
@@ -134,8 +133,6 @@ class Bridge:
         self._pending_bg_tasks: set[str] = set()
         self._bg_tool_use_ids: set[str] = set()
 
-        # Persistent terminal session
-        self.terminal: Optional[TerminalManager] = None
 
         # Notification system (notalone2)
         # notalone handled by global client in plugin
@@ -199,16 +196,6 @@ class Bridge:
                 if max_ctx:
                     os.environ["CLAUDE_CODE_MAX_CONTEXT_TOKENS"] = str(max_ctx)
                 send_result(id, {"ok": True})
-            elif method == "terminal_start":
-                await self.terminal_start(id, params)
-            elif method == "terminal_stop":
-                await self.terminal_stop(id, params)
-            elif method == "terminal_write":
-                await self.terminal_write(id, params)
-            elif method == "terminal_read":
-                await self.terminal_read(id, params)
-            elif method == "terminal_resize":
-                await self.terminal_resize(id, params)
             else:
                 send_error(id, -32601, f"Method not found: {method}")
         except Exception as e:
@@ -1171,73 +1158,8 @@ You are subsession **{subsession_id}**. Call signal_complete(session_id={view_id
             _logger.error(f"Error signaling subsession complete: {e}")
             return {"error": str(e)}
 
-    async def _ensure_terminal(self, cwd: str) -> TerminalManager:
-        """Lazy-start the terminal if not running."""
-        if self.terminal is None:
-            loop = asyncio.get_running_loop()
-
-            def on_output(text: str) -> None:
-                # Called from background thread — schedule on event loop
-                try:
-                    loop.call_soon_threadsafe(
-                        lambda: send_notification("terminal_output", {"text": text})
-                    )
-                except Exception:
-                    pass
-
-            self.terminal = TerminalManager(
-                cwd=cwd,
-                on_output=on_output,
-            )
-            self.terminal.start()
-            _bridge_log("Terminal started\n")
-        return self.terminal
-
-    async def terminal_start(self, id: int, params: dict) -> None:
-        """Start the terminal shell."""
-        cwd = params.get("cwd", self.cwd or os.getcwd())
-        await self._ensure_terminal(cwd)
-        send_result(id, {"status": "started"})
-
-    async def terminal_stop(self, id: int, params: dict) -> None:
-        """Stop the terminal shell."""
-        if self.terminal:
-            self.terminal.stop()
-            self.terminal = None
-            _bridge_log("Terminal stopped\n")
-        send_result(id, {"status": "stopped"})
-
-    async def terminal_write(self, id: int, params: dict) -> None:
-        """Write text to the terminal."""
-        cwd = params.get("cwd", self.cwd or os.getcwd())
-        term = await self._ensure_terminal(cwd)
-        text = params.get("text", "")
-        if text:
-            term.write(text)
-        send_result(id, {"status": "ok"})
-
-    async def terminal_read(self, id: int, params: dict) -> None:
-        """Read recent terminal output."""
-        if self.terminal:
-            max_chars = params.get("max_chars", 10000)
-            text = self.terminal.read(max_chars)
-            send_result(id, {"status": "ok", "text": text})
-        else:
-            send_result(id, {"status": "ok", "text": ""})
-
-    async def terminal_resize(self, id: int, params: dict) -> None:
-        """Resize the terminal."""
-        if self.terminal:
-            rows = params.get("rows", 30)
-            cols = params.get("cols", 120)
-            self.terminal.resize(rows, cols)
-        send_result(id, {"status": "ok"})
-
     async def shutdown(self, id: int) -> None:
         """Shutdown the bridge."""
-        if self.terminal:
-            self.terminal.stop()
-            self.terminal = None
         if self.client:
             await self.client.disconnect()
 

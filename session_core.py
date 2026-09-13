@@ -12,7 +12,6 @@ from .output import OutputView
 from .session_query import SessionQueryMixin
 from .session_permissions import SessionPermissionsMixin
 from .session_heartbeat import HeartbeatMonitor
-from .session_terminal import TerminalAdapter
 from .session_state import StateManager
 from .session_ui import SessionUIHelper
 from .session_status import StatusManager
@@ -90,7 +89,6 @@ class Session(SessionQueryMixin, SessionPermissionsMixin):
         self._bg_flush_scheduled: bool = False
 
         # Terminal adapter for persistent shell session
-        self._terminal = TerminalAdapter(self)
         # State manager for persistence
         self._state = StateManager(self)
         # UI overlay helper
@@ -401,15 +399,6 @@ class Session(SessionQueryMixin, SessionPermissionsMixin):
     def _on_notification(self, method: str, params: dict) -> None:
         """Delegate to NotificationHandler."""
         self._notifications.handle(method, params)
-
-    @property
-    def terminal_view(self):
-        """Backward-compat property for external access to terminal view."""
-        return self._terminal.terminal_view
-
-    def toggle_terminal(self) -> None:
-        """Toggle the integrated terminal panel."""
-        self._terminal.toggle()
 
     def _set_name(self, name: str) -> None:
         """Set session name and update UI."""

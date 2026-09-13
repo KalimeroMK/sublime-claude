@@ -36,9 +36,6 @@ class NotificationHandler:
         if method == "queued_inject":
             self._handle_queued_inject(params)
             return
-        if method == "terminal_output":
-            s._terminal.handle_output(params.get("text", ""))
-            return
         if method == "notification_wake":
             self._handle_notification_wake(params)
             return
