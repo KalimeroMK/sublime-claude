@@ -113,7 +113,7 @@ git clone https://github.com/KalimeroMK/sublime-claude ClaudeCode
 | **Generate Commit** | — | Generate commit message from `git diff --staged` |
 | **Git Status** | — | Show `git status --short` in output view |
 | **LSP Tools** | hover, definition, references, symbols, workspace_symbols, diagnostics | + completion, signature_help, type_definition, implementation, call_hierarchy, inlay_hint, rename, code_action (14 total) |
-| **Tests** | Minimal | 724 unit tests, mock Sublime API |
+| **Tests** | Minimal | 718 unit tests, mock Sublime API |
 
 [↑ Back to Top](#table-of-contents)
 
@@ -153,7 +153,7 @@ This build extends the base project with additional features, bug fixes, and a f
 | **Blade & Livewire Navigation** | Cmd/Ctrl+Click resolves `<x-forms.input />` and `<livewire:brand.table />` component tags, which carry no quotes and so were invisible to the helper-call resolver |
 | **Full LSP Tool Surface** | 14 `lsp` subcommands give Claude the language server's own view of the code — `completion` (what is callable here), `signature_help`, `type_definition`, `implementation`, `call_hierarchy`, `inlay_hint`, `rename` and `code_action`, alongside the original hover/definition/references/symbols/diagnostics |
 | **LSP Install Check** | On first run, offers to install the `LSP` package and a language server matched to the project (detected from `composer.json`, `package.json`, `go.mod`, `Cargo.toml`, `pyproject.toml`) |
-| **Comprehensive Test Suite** | 724 unit tests covering all core utilities, running in ~3s with a mock Sublime API |
+| **Comprehensive Test Suite** | 718 unit tests covering all core utilities, running in ~1s with a mock Sublime API |
 
 ### Bug Fixes
 
@@ -741,7 +741,8 @@ This will:
 
 **Privacy note:** Searches go directly to DuckDuckGo (not your AI backend). No tracking, no API key needed.
 
-**`@terminal`** injects the current terminal output into your query context:
+**`@terminal`** injects the screen of the terminal panel — the one you are
+looking at — into your query context:
 
 ```
 ◎ @terminal why is this test failing? ▶
@@ -1290,7 +1291,7 @@ cd ~/PhpstormProjects/sublime-claude
 python3 -m unittest discover tests/          # add -v for per-test output
 ```
 
-**724 tests** covering all core utilities:
+**718 tests** covering all core utilities:
 - Context window gauge, session tags, drag-drop, usage graph
 - Attach commands (image/file auto-detect, MIME mapping)
 - Swarm monitor (status icons, session tracking)
@@ -1303,7 +1304,7 @@ python3 -m unittest discover tests/          # add -v for per-test output
 - Command parsing, context parsing, session state machine
 - JSON-RPC client, tool routing, settings merging
 - BackendSpec registry, TOOL_FORMATTERS registry
-- Terminal integration (PTY lifecycle, ANSI rendering, blocking capture, quiescence)
+- Terminal integration (panel reuse, terminal key-binding settings, send-when-ready)
 - Undo quick panel, session bookmarks, live output settings
 - Sleep protection (background tool abort, orphan cleanup)
 - Auto-sleep thresholds and the wake/auto-restart idle-clock reset
@@ -1321,13 +1322,11 @@ python3 -m unittest discover tests/          # add -v for per-test output
   `apiResource` expansion, array-syntax groups, and module route discovery
 - Module summaries, form-request rule extraction, and the decoy-directory guard
   that keeps `tests/Feature/Modules` from shadowing the real module
-- Terminal panel reuse (a recreated panel loses its scrollback), the view
-  settings the key bindings match on, and the send-when-ready retry
 - The artisan and Pint/PHPStan bridges against a fake runner — JSON buried in
   banner output, PHPStan's exit code 1 meaning "found errors" rather than
   "failed", and the PATH a Dock-launched editor does not inherit
 
-All tests run in ~3s without requiring Sublime Text to be open (uses mock API).
+All tests run in ~1s without requiring Sublime Text to be open (uses mock API).
 `tests/plugin_pkg.py` aliases the repo root as a package so tests exercise the
 real modules through their relative imports rather than a copy of the logic.
 
@@ -1641,9 +1640,11 @@ Yes. Set up Ollama (free, local) or DeepSeek (cheaper than Claude):
 ### Terminal panel not showing
 
 1. Ensure your shell is executable: `echo $SHELL` (defaults to `/bin/bash` if not set)
-2. Check Console (`View > Show Console`) for `terminal_start` errors
-3. Terminal uses `pty.openpty()` — requires macOS/Linux (Windows PTY support is limited)
-4. If terminal output looks garbled, ANSI codes are stripped automatically; some complex TUI apps may not render well
+2. Check Console (`View > Show Console`) for errors from the panel's shell
+3. The terminal uses `ptyprocess` — macOS/Linux only (Windows PTY support is limited)
+4. ANSI is interpreted by a `pyte` screen, not stripped, so colour and TUI apps
+   render. If a program still looks wrong, `Claude: Restart Terminal` gives it a
+   fresh screen
 
 ### "Session lock" or queries stalling for 120s
 
