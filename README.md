@@ -113,7 +113,7 @@ git clone https://github.com/KalimeroMK/sublime-claude ClaudeCode
 | **Generate Commit** | — | Generate commit message from `git diff --staged` |
 | **Git Status** | — | Show `git status --short` in output view |
 | **LSP Tools** | hover, definition, references, symbols, workspace_symbols, diagnostics | + completion, signature_help, type_definition, implementation, call_hierarchy, inlay_hint, rename, code_action (14 total) |
-| **Tests** | Minimal | 718 unit tests, mock Sublime API |
+| **Tests** | Minimal | 740 unit tests, mock Sublime API |
 
 [↑ Back to Top](#table-of-contents)
 
@@ -153,7 +153,7 @@ This build extends the base project with additional features, bug fixes, and a f
 | **Blade & Livewire Navigation** | Cmd/Ctrl+Click resolves `<x-forms.input />` and `<livewire:brand.table />` component tags, which carry no quotes and so were invisible to the helper-call resolver |
 | **Full LSP Tool Surface** | 14 `lsp` subcommands give Claude the language server's own view of the code — `completion` (what is callable here), `signature_help`, `type_definition`, `implementation`, `call_hierarchy`, `inlay_hint`, `rename` and `code_action`, alongside the original hover/definition/references/symbols/diagnostics |
 | **LSP Install Check** | On first run, offers to install the `LSP` package and a language server matched to the project (detected from `composer.json`, `package.json`, `go.mod`, `Cargo.toml`, `pyproject.toml`) |
-| **Comprehensive Test Suite** | 718 unit tests covering all core utilities, running in ~1s with a mock Sublime API |
+| **Comprehensive Test Suite** | 740 unit tests covering all core utilities, running in ~1s with a mock Sublime API |
 
 ### Bug Fixes
 
@@ -164,6 +164,8 @@ This build extends the base project with additional features, bug fixes, and a f
 | Pint and PHPStan findings were silently dropped | Both wrap their JSON in banner text, so parsing the whole stream failed and read as "nothing to fix" |
 | The terminal panel showed stale output and escape junk | It was a text appender, not a terminal: `clear` was stripped rather than honoured so old output stayed, `\r` never overwrote a line, and the `?2004h` / `]0;title` sequences every shell emits were left in the buffer. The panel now hosts the same `pyte` PTY the tabs and the agent use |
 | Toggling the terminal panel erased its scrollback | `create_output_panel` returns the existing view but empties it, and the panel was recreated on every show |
+| A resumed session opened an empty tab | Nothing said which conversation it was or whether the resume had connected, so a working resume looked identical to a broken one. The tab now opens with a recap: turn count, when it was last active, and the last exchanges |
+| Messages shown at session start were written nowhere | `output.text()` appends to the conversation turn in progress and returns silently when there is none — which is always the case at init, so the "Session expired" notice never appeared. Those go through `output.note()` now |
 | A command sent to a just-opened terminal vanished | A freshly spawned `zsh -i -l` sources its rc files before reading stdin; sends now wait for the prompt |
 | Import error | Fixed `ClaudeInsertCommand`/`ClaudeReplaceCommand` imported from wrong module |
 | Python 3.8-syntax compatibility | Replaced `int \| None`, `dict[]`, `list[]` with `Optional`, `Dict`, `List` — kept for the `.python-version` 3.8 alias |
@@ -1291,7 +1293,7 @@ cd ~/PhpstormProjects/sublime-claude
 python3 -m unittest discover tests/          # add -v for per-test output
 ```
 
-**718 tests** covering all core utilities:
+**740 tests** covering all core utilities:
 - Context window gauge, session tags, drag-drop, usage graph
 - Attach commands (image/file auto-detect, MIME mapping)
 - Swarm monitor (status icons, session tracking)
@@ -1305,6 +1307,8 @@ python3 -m unittest discover tests/          # add -v for per-test output
 - JSON-RPC client, tool routing, settings merging
 - BackendSpec registry, TOOL_FORMATTERS registry
 - Terminal integration (panel reuse, terminal key-binding settings, send-when-ready)
+- Resume recap: stripping the smart-context preamble off a stored prompt,
+  pairing replies to prompts, and skipping sidechain, meta and synthetic turns
 - Undo quick panel, session bookmarks, live output settings
 - Sleep protection (background tool abort, orphan cleanup)
 - Auto-sleep thresholds and the wake/auto-restart idle-clock reset
