@@ -151,6 +151,31 @@ def _resolve_model_id(model_id: str):
     return model_id, None
 
 
+_CLAUDE_FAMILY = ("claude", "kimi", "default", "")
+
+
+def resolve_default_model(get, backend, fallback):
+    """The model a new session should ask for, most specific first.
+
+    `get` is a settings getter. The built-in fallback must come last: it is
+    always set ("opus" for the claude backend), so putting it ahead of the
+    user's own setting made `default_model` unreachable — you could write a
+    model into the settings file and the session would still request opus.
+    """
+    per_backend = (get("default_models", {}) or {}).get(backend)
+    if per_backend:
+        return per_backend
+    chosen = get("default_model")
+    if chosen:
+        return chosen
+    if backend in _CLAUDE_FAMILY:
+        # legacy alias, kept working for settings files that already use it
+        legacy = get("anthropic_model")
+        if legacy:
+            return legacy
+    return fallback
+
+
 # ─── Session Persistence ──────────────────────────────────────────────────────
 
 SESSIONS_FILE = os.path.join(os.path.dirname(__file__), ".sessions.json")

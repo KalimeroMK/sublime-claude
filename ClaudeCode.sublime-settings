@@ -20,9 +20,19 @@
     // an absolute path (e.g. "/Users/you/.local/bin/claude") if Sublime can't find it.
     // "claude_cli_path": "claude",
     //
+    // Point base_url at any Anthropic-compatible provider (Kimi, a gateway,
+    // a proxy) and the claude backend talks to it instead of Anthropic.
     // "anthropic_base_url": "https://api.kimi.com/coding/",
     // "anthropic_api_key": "sk-ant-api03-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    //
+    // Legacy alias for "default_model", honoured only by the claude backend.
+    // Prefer "default_model" (or "default_models") below.
     // "anthropic_model": "kimi-for-coding",
+    //
+    // NOTE: a provider that speaks the Anthropic API echoes back whatever
+    // model name you send and is fed Claude Code's own system prompt, so both
+    // the status bar and the model's own answer to "which model are you?"
+    // report that name — they are not proof of who served the request.
 
     // =========================================================================
     // OLLAMA / OPENAI-COMPATIBLE BACKEND (local or remote)
@@ -52,8 +62,11 @@
     // stays quiet. The lsp tools need both — LSP alone has no server.
     "lsp_install_prompt": "ask",
 
-    // Default model when no profile is selected.
-    // Only used by the claude backend; openai/deepseek use their own model settings.
+    // Which model a new session asks for, when no profile is selected.
+    // Precedence, most specific first:
+    //     default_models[backend]  >  default_model  >  built-in fallback
+    // Switch the running session instead with "Claude: Select Model", or
+    // persist a choice with "Claude: Set Default Model".
     // "default_model": "kimi-for-coding",
 
     // Tools the AI is allowed to use
@@ -72,9 +85,11 @@
     // Extra CLI arguments passed to `claude` (e.g. "--max-budget-usd 5 --verbose")
     // "claude_extra_args": "",
 
-    // Default models per backend (overrides built-in defaults)
+    // Per-backend model, the most specific setting there is. Wins over
+    // "default_model" above.
     // "default_models": {
     //     "claude": "opus",
+    //     "openai": "qwen2.5:7b",
     //     "deepseek": "deepseek-v4-pro"
     // },
 

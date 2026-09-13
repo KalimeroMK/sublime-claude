@@ -44,7 +44,7 @@
         "command": "claude_code_start_with_backend"
     },
     {
-        "caption": "Claude: Configure Settings",
+        "caption": "Claude: Settings",
         "command": "claude_settings"
     },
     {

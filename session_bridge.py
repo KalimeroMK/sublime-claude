@@ -6,7 +6,7 @@ import time
 import sublime
 
 from .rpc import JsonRpcClient
-from .session_env import _find_python_310_plus, _resolve_model_id, load_saved_sessions
+from .session_env import resolve_default_model as _resolve_default_model, _find_python_310_plus, _resolve_model_id, load_saved_sessions
 from . import backends
 
 
@@ -40,8 +40,7 @@ class BridgeManager:
         spec = backends.get(s.backend)
 
         # Resolve virtual model ID (e.g. @400k suffix) → real model + context limit
-        default_models = settings.get("default_models", {})
-        default_model = default_models.get(s.backend) or spec.fallback_model or settings.get("default_model")
+        default_model = _resolve_default_model(settings.get, s.backend, spec.fallback_model)
         model_for_env = (s.profile.get("model") if s.profile else None) or default_model
         if model_for_env:
             _, ctx = _resolve_model_id(model_for_env)

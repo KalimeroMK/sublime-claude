@@ -249,20 +249,29 @@ class OpenaiSettingsCommand(sublime_plugin.WindowCommand):
 
 
 class ClaudeSettingsCommand(sublime_plugin.WindowCommand):
-    """Open ClaudeCode settings file for editing."""
+    """Open the ClaudeCode settings file side by side with the defaults."""
     def run(self) -> None:
         self.window.run_command("edit_settings", {
             "base_file": "${packages}/ClaudeCode/ClaudeCode.sublime-settings",
             "default": (
                 "{\n"
-                '    // Claude / Kimi settings\n'
-                '    "default_model": "kimi-for-coding",\n'
-                '    "anthropic_api_key": "",\n'
-                '    "claude_extra_args": "",\n'
+                '    // Which model a new session asks for. Most specific wins:\n'
+                '    //   default_models[backend]  >  default_model  >  built-in\n'
+                '    // Switch live instead with "Claude: Select Model".\n'
+                '    "default_model": "opus",\n'
+                '    // "default_models": {"claude": "opus", "openai": "qwen2.5:7b"},\n'
                 "\n"
-                '    // OpenAI / Ollama settings\n'
-                '    "openai_base_url": "http://localhost:11434",\n'
-                '    "openai_model": "qwen2.5:7b",\n'
+                '    // Which backend a plain "Claude: New Session" starts.\n'
+                '    // claude | openai | deepseek | codex | copilot\n'
+                '    "default_backend": "claude",\n'
+                "\n"
+                '    // Claude backend. Point base_url elsewhere for an\n'
+                '    // Anthropic-compatible provider such as Kimi:\n'
+                '    //   "anthropic_base_url": "https://api.kimi.com/coding/"\n'
+                '    "anthropic_api_key": "",\n'
+                "\n"
+                '    // OpenAI backend. Point base_url at Ollama for local models:\n'
+                '    //   "openai_base_url": "http://localhost:11434"\n'
                 '    "openai_api_key": "",\n'
                 "\n"
                 '    "allowed_tools": ["Read", "Write", "Edit", "Bash", "Glob", "Grep"],\n'
@@ -270,7 +279,6 @@ class ClaudeSettingsCommand(sublime_plugin.WindowCommand):
                 "}\n"
             )
         })
-
 
 
 class ClaudeCodeStartWithBackendCommand(sublime_plugin.WindowCommand):
