@@ -113,7 +113,7 @@ git clone https://github.com/KalimeroMK/sublime-claude ClaudeCode
 | **Generate Commit** | — | Generate commit message from `git diff --staged` |
 | **Git Status** | — | Show `git status --short` in output view |
 | **LSP Tools** | hover, definition, references, symbols, workspace_symbols, diagnostics | + completion, signature_help, type_definition, implementation, call_hierarchy, inlay_hint, rename, code_action (14 total) |
-| **Tests** | Minimal | 753 unit tests, mock Sublime API |
+| **Tests** | Minimal | 760 unit tests, mock Sublime API |
 
 [↑ Back to Top](#table-of-contents)
 
@@ -153,7 +153,7 @@ This build extends the base project with additional features, bug fixes, and a f
 | **Blade & Livewire Navigation** | Cmd/Ctrl+Click resolves `<x-forms.input />` and `<livewire:brand.table />` component tags, which carry no quotes and so were invisible to the helper-call resolver |
 | **Full LSP Tool Surface** | 14 `lsp` subcommands give Claude the language server's own view of the code — `completion` (what is callable here), `signature_help`, `type_definition`, `implementation`, `call_hierarchy`, `inlay_hint`, `rename` and `code_action`, alongside the original hover/definition/references/symbols/diagnostics |
 | **LSP Install Check** | On first run, offers to install the `LSP` package and a language server matched to the project (detected from `composer.json`, `package.json`, `go.mod`, `Cargo.toml`, `pyproject.toml`) |
-| **Comprehensive Test Suite** | 753 unit tests covering all core utilities, running in ~1s with a mock Sublime API |
+| **Comprehensive Test Suite** | 760 unit tests covering all core utilities, running in ~1s with a mock Sublime API |
 
 ### Bug Fixes
 
@@ -416,6 +416,11 @@ running session, **Claude: Set Default Model** persists the choice. The status
 bar shows the model in use.
 
 `anthropic_model` still works as a claude-only alias for `default_model`.
+
+If a session starts with no model chosen for its backend, the settings file
+opens so the choice gets made rather than silently defaulted — once per backend
+per Sublime run, and the session starts meanwhile. Turn it off with
+`"prompt_for_model": false`.
 
 **Reading the model name honestly:** an Anthropic-compatible provider echoes
 back whatever model name you send it, and it receives Claude Code's own system
@@ -1326,7 +1331,7 @@ cd ~/PhpstormProjects/sublime-claude
 python3 -m unittest discover tests/          # add -v for per-test output
 ```
 
-**753 tests** covering all core utilities:
+**760 tests** covering all core utilities:
 - Context window gauge, session tags, drag-drop, usage graph
 - Attach commands (image/file auto-detect, MIME mapping)
 - Swarm monitor (status icons, session tracking)
@@ -1341,7 +1346,8 @@ python3 -m unittest discover tests/          # add -v for per-test output
 - BackendSpec registry, TOOL_FORMATTERS registry
 - Terminal integration (panel reuse, terminal key-binding settings, send-when-ready)
 - Model resolution precedence, including the legacy `anthropic_model` alias and
-  that it stays out of the non-claude backends
+  that it stays out of the non-claude backends, and telling a chosen model from
+  a fallen-back one
 - Resume recap: stripping the smart-context preamble off a stored prompt,
   pairing replies to prompts, and skipping sidechain, meta and synthetic turns
 - Undo quick panel, session bookmarks, live output settings
