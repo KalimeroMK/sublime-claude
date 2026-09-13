@@ -228,6 +228,10 @@
         "command": "claude_toggle_terminal"
     },
     {
+        "caption": "Claude: Restart Terminal",
+        "command": "claude_terminal_restart"
+    },
+    {
         "caption": "Claude: Terminal Send",
         "command": "claude_terminal_send"
     },
