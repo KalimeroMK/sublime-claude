@@ -150,6 +150,7 @@ class BridgeManager:
             "additional_dirs": additional_dirs,
             "allowed_tools": allowed_tools,
             "tools_enabled": settings.get("tools_enabled", True),
+            "request_timeout": settings.get("request_timeout", 600),
             "permission_mode": permission_mode,
             "view_id": str(s.output.view.id()) if s.output and s.output.view else None,
         }

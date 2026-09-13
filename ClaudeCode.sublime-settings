@@ -87,6 +87,11 @@
     // so turning tools off gives clean code output from them.
     "tools_enabled": true,
 
+    // Seconds to wait for one model response before giving up. A slow local
+    // or thinking model on a big task can run past the old fixed 300s and
+    // fail with "Query failed: timed out"; raise this for such setups.
+    "request_timeout": 600,
+
     // Reasoning effort level: "low", "high", "max"
     "effort": "high",
 

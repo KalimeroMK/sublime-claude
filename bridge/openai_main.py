@@ -404,7 +404,7 @@ def extract_text_tool_calls(content):
 
 
 
-async def _http_post(url: str, payload: dict, headers: dict) -> dict:
+async def _http_post(url: str, payload: dict, headers: dict, timeout: int = 600) -> dict:
     import urllib.request
     import asyncio
     data = json.dumps(payload).encode("utf-8")
@@ -413,13 +413,13 @@ async def _http_post(url: str, payload: dict, headers: dict) -> dict:
     loop = asyncio.get_running_loop()
     return await loop.run_in_executor(
         None,
-        lambda: _http_post_sync(req)
+        lambda: _http_post_sync(req, timeout)
     )
 
 
-def _http_post_sync(req) -> dict:
+def _http_post_sync(req, timeout: int = 600) -> dict:
     import urllib.request
-    with urllib.request.urlopen(req, context=_make_ctx(), timeout=300) as resp:
+    with urllib.request.urlopen(req, context=_make_ctx(), timeout=timeout) as resp:
         return json.loads(resp.read().decode("utf-8"))
 
 
@@ -439,6 +439,7 @@ class Bridge(BaseBridge):
         self._cwd: str = "."
         self._allowed_tools: List[str] = []
         self._tools_enabled: bool = True
+        self._request_timeout: int = 600
         self._is_ollama = False
 
     async def handle_request(self, req: dict) -> None:
@@ -471,6 +472,7 @@ class Bridge(BaseBridge):
 
         self._allowed_tools = params.get("allowed_tools", [])
         self._tools_enabled = params.get("tools_enabled", True)
+        self._request_timeout = int(params.get("request_timeout", 600) or 600)
 
         self.base_url = (settings.get("openai_base_url")
                          or os.environ.get("OPENAI_BASE_URL", "")
@@ -574,7 +576,7 @@ class Bridge(BaseBridge):
                 payload["tools"] = tools
 
             headers = {"Content-Type": "application/json"}
-            body = await _http_post(url, payload, headers)
+            body = await _http_post(url, payload, headers, self._request_timeout)
 
             message = body.get("message", {})
             content = message.get("content", "")
@@ -695,7 +697,7 @@ class Bridge(BaseBridge):
             if self.api_key:
                 headers["Authorization"] = f"Bearer {self.api_key}"
 
-            body = await _http_post(url, payload, headers)
+            body = await _http_post(url, payload, headers, self._request_timeout)
 
             choice = body["choices"][0]
             message = choice["message"]
