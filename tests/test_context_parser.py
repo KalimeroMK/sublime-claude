@@ -5,7 +5,8 @@ import os
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from context_parser import ContextParser, ContextTrigger, ContextMenuItem
+from context_parser import (ContextParser, ContextTrigger, ContextMenuItem,
+                            ContextMenuHandler)
 
 
 class ContextParserTest(unittest.TestCase):
@@ -48,10 +49,19 @@ class ContextParserTest(unittest.TestCase):
         actions = [item.action for item in menu]
         self.assertEqual(
             actions,
-            ["codebase", "git", "web", "model", "routes", "browse", "file"],
+            ["codebase", "git", "web", "model", "routes", "module", "artisan",
+             "quality", "browse", "file"],
         )
         # the trailing "file" entry comes from the open_files argument
         self.assertEqual(menu[-1].label, "main.py")
+
+    def test_build_menu_has_laravel_commands(self):
+        """The Laravel context commands must be reachable from the @ menu, not
+        only by typing them."""
+        menu = ContextParser.build_menu(open_files=[], has_pending_context=False)
+        labels = [item.label for item in menu]
+        for label in ("@module", "@artisan", "@quality"):
+            self.assertIn(label, labels)
 
     def test_build_menu_has_codebase(self):
         """Menu includes @codebase option."""
@@ -123,6 +133,48 @@ class ContextParserTest(unittest.TestCase):
         trigger = ContextTrigger(position=5)
         self.assertEqual(trigger.position, 5)
         self.assertTrue(trigger.triggered)
+
+
+class ContextMenuHandlerInsertTest(unittest.TestCase):
+    """@model and @routes were in the menu with no branch in the handler, so
+    choosing either did nothing at all."""
+
+    def _handler(self, inserted):
+        return ContextMenuHandler(
+            on_browse=lambda: inserted.append("browse"),
+            on_clear=lambda: None,
+            on_add_file=lambda p, c: None,
+            on_insert=inserted.append,
+        )
+
+    def _pick(self, label, action):
+        inserted = []
+        items = [ContextMenuItem(action=action, label=label, description="")]
+        self._handler(inserted).handle_selection(items, 0)
+        return inserted
+
+    def test_model_inserts_its_command(self):
+        self.assertEqual(self._pick("@model", "model"), ["@model "])
+
+    def test_module_inserts_its_command(self):
+        self.assertEqual(self._pick("@module", "module"), ["@module "])
+
+    def test_artisan_inserts_its_command(self):
+        self.assertEqual(self._pick("@artisan", "artisan"), ["@artisan "])
+
+    def test_quality_inserts_its_command(self):
+        self.assertEqual(self._pick("@quality", "quality"), ["@quality "])
+
+    def test_browse_is_not_treated_as_a_command(self):
+        inserted = []
+        items = [ContextMenuItem(action="browse", label="Browse...", description="")]
+        self._handler(inserted).handle_selection(items, 0)
+        self.assertEqual(inserted, ["browse"])
+
+    def test_missing_callback_is_not_an_error(self):
+        items = [ContextMenuItem(action="module", label="@module", description="")]
+        handler = ContextMenuHandler(lambda: None, lambda: None, lambda p, c: None)
+        handler.handle_selection(items, 0)  # must not raise
 
 
 if __name__ == "__main__":

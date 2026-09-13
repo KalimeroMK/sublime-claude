@@ -87,14 +87,35 @@ class ContextParser:
         items.append(ContextMenuItem(
             action="model",
             label="@model",
-            description="Laravel model: table, fillable, casts, relations"
+            description="Laravel model: real columns from migrations, casts, relations"
         ))
 
-        # @routes -- parsed from routes/*.php
+        # @routes -- parsed from the project source, modules included
         items.append(ContextMenuItem(
             action="routes",
             label="@routes",
-            description="Routes parsed from routes/*.php (no artisan needed)"
+            description="Routes parsed from the project (no artisan needed)"
+        ))
+
+        # @module -- the whole vertical slice of one module
+        items.append(ContextMenuItem(
+            action="module",
+            label="@module",
+            description="Module slice: models, actions, requests, controllers, routes"
+        ))
+
+        # @artisan -- ground truth from the running app
+        items.append(ContextMenuItem(
+            action="artisan",
+            label="@artisan",
+            description="Ask the app itself: route:list, db:table, model:show, about"
+        ))
+
+        # @quality -- the project's own Pint/PHPStan verdict
+        items.append(ContextMenuItem(
+            action="quality",
+            label="@quality",
+            description="Run the project's Pint and PHPStan on the current file"
         ))
 
         # Browse option
@@ -165,6 +186,7 @@ class ContextMenuHandler:
         on_codebase: Optional[Callable[[], None]] = None,
         on_git: Optional[Callable[[], None]] = None,
         on_web: Optional[Callable[[], None]] = None,
+        on_insert: Optional[Callable[[str], None]] = None,
     ):
         """Initialize handler with action callbacks.
 
@@ -175,6 +197,9 @@ class ContextMenuHandler:
             on_codebase: Callback when @codebase is selected
             on_git: Callback when @git is selected
             on_web: Callback when @web is selected
+            on_insert: Callback for any other @-command; receives the text to
+                insert. Without it a new @-command would be added to the menu
+                and silently do nothing when chosen.
         """
         self.on_browse = on_browse
         self.on_clear = on_clear
@@ -182,6 +207,7 @@ class ContextMenuHandler:
         self.on_codebase = on_codebase
         self.on_git = on_git
         self.on_web = on_web
+        self.on_insert = on_insert
 
     def handle_selection(self, items: List[ContextMenuItem], index: int) -> None:
         """Handle menu item selection.
@@ -206,6 +232,11 @@ class ContextMenuHandler:
                 self.on_web()
         elif selected.action == "browse":
             self.on_browse()
+        elif selected.label.startswith("@"):
+            # every other @-command is expanded at submit time, so the menu
+            # only has to put its text in the input
+            if self.on_insert:
+                self.on_insert(selected.label + " ")
         elif selected.action == "clear":
             self.on_clear()
         elif selected.action == "file":

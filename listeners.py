@@ -693,7 +693,11 @@ class ClaudeOutputEventListener(sublime_plugin.ViewEventListener):
             # Insert @web text at current cursor position
             self.view.run_command("insert", {"characters": "@web "})
 
-        handler = ContextMenuHandler(on_browse, on_clear, on_add_file, on_codebase, on_git, on_web)
+        def on_insert(text):
+            self.view.run_command("insert", {"characters": text})
+
+        handler = ContextMenuHandler(on_browse, on_clear, on_add_file, on_codebase,
+                                     on_git, on_web, on_insert)
 
         def on_select(idx):
             handler.handle_selection(menu_items, idx)

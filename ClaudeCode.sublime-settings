@@ -95,4 +95,32 @@
 
     // Environment variables passed to bridge process
     // "env": {},
+
+    // ─── Laravel / PHP ──────────────────────────────────────────────────────
+
+    // How to invoke artisan for @artisan. A dockerised app needs the full
+    // command, e.g. "docker compose exec -T app php artisan".
+    "artisan_command": "php artisan",
+
+    // Seconds before an artisan call is given up on.
+    "artisan_timeout": 20,
+
+    // @quality runs whichever of these the project actually configures
+    // (pint.json / phpstan.neon). Set either to false to skip it.
+    "php_pint": true,
+    "php_phpstan": true,
+
+    // Override the binaries if they are not in vendor/bin or on PATH.
+    // "php_pint_command": "docker compose exec -T app ./vendor/bin/pint",
+    // "php_phpstan_command": "docker compose exec -T app ./vendor/bin/phpstan",
+
+    // Override the level in phpstan.neon for @quality runs only.
+    // "php_phpstan_level": 8,
+
+    // PHP's stock 128M limit makes PHPStan crash mid-analysis and report
+    // nothing, which reads as a clean result.
+    "php_phpstan_memory_limit": "512M",
+
+    // Seconds before a Pint/PHPStan run is given up on.
+    "php_timeout": 120,
 }

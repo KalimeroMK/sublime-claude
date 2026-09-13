@@ -278,8 +278,11 @@ class SessionQueryMixin:
             @codebase <query>  -- search project for relevant code (TF-IDF)
             @file:<path>       -- inline file reference
             @web <query>       -- web search via DuckDuckGo (no API key)
-            @model <Name>      -- Laravel model: table, fillable, casts, relations
-            @routes            -- routes parsed from routes/*.php
+            @model <Name>      -- Laravel model: real columns, casts, relations
+            @routes            -- routes parsed from the project (modules too)
+            @module <Name>     -- one module's models, actions, requests, routes
+            @artisan <sub>     -- ask the running app (route:list, db:table, ...)
+            @quality [path]    -- the project's own Pint/PHPStan verdict
 
         Returns the prompt with @-markers removed.
         """
@@ -346,6 +349,14 @@ class SessionQueryMixin:
                     print("[Claude] @model: no model named {}".format(name))
                     return ""
                 info = framework_nav.model_summary(path)
+                # $fillable is a mass-assignment allowlist, not the table — the
+                # migrations are the only source for the real column set.
+                try:
+                    table = framework_nav.table_name_for(info)
+                    if table:
+                        info["columns"] = framework_nav.table_columns(root, table)
+                except Exception as ce:
+                    print("[Claude] @model columns unavailable: {}".format(ce))
             except Exception as e:
                 print("[Claude] @model error: {}".format(e))
                 return ""
@@ -359,29 +370,169 @@ class SessionQueryMixin:
 
         prompt = re.sub(r'@model\s+([A-Za-z_]\w*)', replace_model, prompt)
 
-        # @routes -- parsed out of routes/*.php, so it works on a broken app too
+        # @routes [filter] -- parsed from the project source, so it works on a
+        # broken app too. A modular project has hundreds of routes; unfiltered
+        # they would crowd everything else out of the context window.
         def replace_routes(match):
+            raw = (match.group(1) or "").strip()
+            keep = "" if _looks_like_route_filter(raw) else raw
+            needle = raw.lower() if _looks_like_route_filter(raw) else ""
             root = _framework_root(self.window)
             if not root:
-                return ""
+                return keep
             try:
                 from . import framework_nav
                 routes = framework_nav.route_summary(root)
             except Exception as e:
                 print("[Claude] @routes error: {}".format(e))
-                return ""
+                return keep
+            total = len(routes)
+            if needle:
+                routes = _filter_routes(routes, needle)
+            cap = _setting("routes_max", 150)
+            capped = False
+            if cap and len(routes) > cap:
+                routes, capped = routes[:cap], True
             if not routes:
-                print("[Claude] @routes: nothing found under routes/")
+                print("[Claude] @routes: nothing matched{}".format(
+                    " '{}'".format(needle) if needle else ""))
+                return keep
+            body = _format_routes(routes)
+            if capped:
+                body += "\n... {} more not shown — narrow it with @routes <filter>".format(
+                    total - cap)
+            label = "@routes {}".format(needle) if needle else "@routes"
+            self.pending_context.append(ContextItem(
+                kind="file",
+                name="{} ({}/{})".format(label, len(routes), total),
+                content=body,
+            ))
+            print("[Claude] @routes: added {} of {} routes".format(len(routes), total))
+            return keep
+
+        prompt = re.sub(r'@routes(?:\s+([^\s@]+))?', replace_routes, prompt)
+
+        # @module <Name> -- the whole vertical slice, grouped by layer
+        def replace_module(match):
+            name = match.group(1).strip()
+            root = _framework_root(self.window)
+            if not (name and root):
+                return ""
+            try:
+                from . import framework_nav
+                info = framework_nav.module_summary(root, name)
+            except Exception as e:
+                print("[Claude] @module error: {}".format(e))
+                return ""
+            if not info:
+                try:
+                    known = ", ".join(framework_nav.list_modules(root)[:20])
+                except Exception:
+                    known = ""
+                print("[Claude] @module: no module named {}{}".format(
+                    name, " (have: {})".format(known) if known else ""))
                 return ""
             self.pending_context.append(ContextItem(
                 kind="file",
-                name="@routes ({})".format(len(routes)),
-                content=_format_routes(routes),
+                name="@module {}".format(name),
+                content=_format_module(info, root),
             ))
-            print("[Claude] @routes: added {} routes".format(len(routes)))
+            print("[Claude] @module: added {}".format(name))
             return ""
 
-        prompt = re.sub(r'@routes\b', replace_routes, prompt)
+        prompt = re.sub(r'@module\s+([A-Za-z_]\w*)', replace_module, prompt)
+
+        # @artisan <sub> -- ground truth from the running app; the static
+        # parsers above stay the default because they work on a broken app
+        def replace_artisan(match):
+            sub = (match.group(1) or "").strip()
+            arg = (match.group(2) or "").strip()
+            root = _framework_root(self.window)
+            if not root:
+                return ""
+            try:
+                import json
+                from . import laravel_artisan
+                if not laravel_artisan.artisan_available(root):
+                    print("[Claude] @artisan: no artisan in {}".format(root))
+                    return ""
+                command = _setting("artisan_command", "php artisan")
+                timeout = _setting("artisan_timeout", laravel_artisan.DEFAULT_TIMEOUT)
+                if sub in ("routes", "route", "route:list"):
+                    data, err = laravel_artisan.route_list(root, command, timeout)
+                    body = _format_routes(data) if data else ""
+                elif sub in ("table", "db", "db:table"):
+                    data, err = laravel_artisan.db_table(root, arg, command, timeout)
+                    body = _format_db_table(arg, data) if data else ""
+                elif sub in ("model", "model:show"):
+                    data, err = laravel_artisan.model_show(root, arg, command, timeout)
+                    body = json.dumps(data, indent=2)[:8000] if data else ""
+                elif sub == "about":
+                    data, err = laravel_artisan.about(root, command, timeout)
+                    body = json.dumps(data, indent=2)[:4000] if data else ""
+                else:
+                    ok, out, errtext = laravel_artisan.run(
+                        root, ([sub] + arg.split()) if arg else [sub], command, timeout)
+                    data, err, body = (out if ok else None), ("" if ok else errtext), out
+            except Exception as e:
+                print("[Claude] @artisan error: {}".format(e))
+                return ""
+            if not data:
+                print("[Claude] @artisan {}: {}".format(sub, err or "no output"))
+                return ""
+            self.pending_context.append(ContextItem(
+                kind="file",
+                name="@artisan {}".format(" ".join(x for x in (sub, arg) if x)),
+                content=body,
+            ))
+            print("[Claude] @artisan {}: added".format(sub))
+            return ""
+
+        prompt = re.sub(r'@artisan\s+([\w:]+)(?:\s+([\w.\-]+))?', replace_artisan, prompt)
+
+        # @quality [path] -- what the project's own Pint/PHPStan say about the
+        # code. LSP diagnostics come from intelephense and know nothing about
+        # the configured PHPStan level or the project's Pint ruleset.
+        def replace_quality(match):
+            raw = (match.group(1) or "").strip()
+            arg = raw if _looks_like_path(raw) else ""
+            keep = "" if arg else raw
+            root = _framework_root(self.window)
+            if not root:
+                return keep
+            targets = []
+            if arg:
+                targets = [arg]
+            else:
+                view = self.window.active_view() if self.window else None
+                current = view.file_name() if view else None
+                if current and current.endswith(".php"):
+                    targets = [current]
+            try:
+                from . import php_quality
+                settings = {
+                    "php_pint": _setting("php_pint", True),
+                    "php_phpstan": _setting("php_phpstan", True),
+                    "php_pint_command": _setting("php_pint_command"),
+                    "php_phpstan_command": _setting("php_phpstan_command"),
+                    "php_phpstan_level": _setting("php_phpstan_level"),
+                    "php_phpstan_memory_limit": _setting("php_phpstan_memory_limit", "512M"),
+                    "php_timeout": _setting("php_timeout", 120),
+                }
+                result = php_quality.check(root, targets, settings)
+                body = php_quality.format_report(result, root)
+            except Exception as e:
+                print("[Claude] @quality error: {}".format(e))
+                return keep
+            self.pending_context.append(ContextItem(
+                kind="file",
+                name="@quality {}".format(os.path.basename(targets[0]) if targets else "project"),
+                content=body,
+            ))
+            print("[Claude] @quality: {}".format(body.splitlines()[0] if body else "no output"))
+            return keep
+
+        prompt = re.sub(r'@quality(?:\s+([^\s@]+))?', replace_quality, prompt)
 
         # @file:<path> -- inline file reference
         def replace_file(match):
@@ -814,6 +965,17 @@ def _format_model(info, root=""):
                  for i in range(0, len(casts) - 1, 2)]
         if pairs:
             lines.append("casts: {}".format(", ".join(pairs)))
+    cols = info.get("columns") or []
+    if cols:
+        lines.append("columns ({}):".format(len(cols)))
+        for c in cols:
+            flags = [k for k in ("pk", "unique", "index", "nullable") if c.get(k)]
+            if c.get("fk"):
+                flags.append("FK->{}".format(c["fk"]))
+            if c.get("default") is not None:
+                flags.append("default={}".format(c["default"]))
+            lines.append("  {:24} {:18} {}".format(
+                c["name"], c.get("type", ""), " ".join(flags)).rstrip())
     props = info.get("properties") or []
     if props:
         lines.append("properties:")
@@ -826,21 +988,121 @@ def _format_model(info, root=""):
     return "\n".join(lines)
 
 
+def _setting(key, default=None):
+    """One ClaudeCode setting, with a default when Sublime is unavailable."""
+    try:
+        return sublime.load_settings("ClaudeCode.sublime-settings").get(key, default)
+    except Exception:
+        return default
+
+
+def _format_db_table(table, columns):
+    """Live schema for one table — the database's answer, not the migrations'."""
+    if not columns:
+        return "[db:table {}] no columns".format(table)
+    lines = ["[db:table] {} ({} columns)".format(table, len(columns))]
+    for c in columns:
+        flags = []
+        if c.get("nullable"):
+            flags.append("nullable")
+        if c.get("default") is not None:
+            flags.append("default={}".format(c["default"]))
+        lines.append("  {:26} {:20} {}".format(
+            c.get("name", ""), c.get("type", ""), " ".join(flags)).rstrip())
+    return "\n".join(lines)
+
+
+def _format_module(info, root=""):
+    """Render a module as a layered outline — the shape, not the source."""
+    import os as _os
+    if not info:
+        return "[module] (not found)"
+    path = info.get("path", "")
+    rel = _os.path.relpath(path, root) if root and path else path
+    lines = ["[module] {}".format(info.get("name", "")), "path: {}".format(rel)]
+    for layer, items in info.get("layers", {}).items():
+        lines.append("{} ({}):".format(layer, len(items)))
+        for it in items:
+            label = it.get("class") or it.get("file")
+            extra = ""
+            if it.get("methods"):
+                extra = " — " + ", ".join(it["methods"])
+            elif it.get("table"):
+                extra = " — table {}".format(it["table"])
+                if it.get("relations"):
+                    extra += "; " + ", ".join(
+                        "{}() {}".format(r["name"], r["kind"]) for r in it["relations"])
+            lines.append("  {}{}".format(label, extra))
+            for field, rule in (it.get("rules") or {}).items():
+                lines.append("      {:24} {}".format(field, rule))
+    return "\n".join(lines)
+
+
+def _looks_like_path(word):
+    """Only treat a trailing word as a path when it actually looks like one.
+
+    "@quality fix this" must not read "fix" as a file to analyse.
+    """
+    if not word:
+        return False
+    return word.endswith(".php") or "/" in word or os.sep in word
+
+
+def _looks_like_route_filter(word):
+    """Whether a trailing word is a route filter rather than prose.
+
+    "@routes please review this" would otherwise filter on "please" and report
+    nothing. Module names are capitalised, URIs contain a slash, verbs are
+    upper case — prose is none of those.
+    """
+    if not word:
+        return False
+    if "/" in word or "." in word or "::" in word:
+        return True
+    if word.isupper():
+        return True
+    return word[:1].isupper()
+
+
+def _filter_routes(routes, needle):
+    """Routes whose module, uri, name or action contains `needle`."""
+    out = []
+    for r in routes:
+        haystack = " ".join(str(r.get(k, "")) for k in
+                            ("module", "uri", "name", "action", "verb", "file")).lower()
+        if needle in haystack:
+            out.append(r)
+    return out
+
+
 def _format_routes(routes):
     """Render routes as an aligned table — compact enough for a prompt."""
     if not routes:
         return "[routes] none found"
+    # route_summary already folds group prefixes into uri
+    show_module = any(r.get("module") for r in routes)
     rows = []
     for r in routes:
         uri = r.get("uri", "")
-        prefix = r.get("prefix") or ""
+        prefix = (r.get("prefix") or "").strip("/")
+        # route_summary already folds the prefix in; this only fires for entries
+        # built by hand or by an older caller
         if prefix and not uri.startswith("/" + prefix):
-            uri = "/{}{}".format(prefix.strip("/"), uri if uri.startswith("/") else "/" + uri)
-        rows.append((r.get("verb", ""), uri, r.get("name", ""), r.get("action", ""),
-                     "{}:{}".format(r.get("file", ""), r.get("line", ""))))
-    w = [max(len(row[i]) for row in rows) for i in range(4)]
-    out = ["[routes] {} found".format(len(rows))]
-    for verb, uri, name, action, where in rows:
-        out.append("{}  {}  {}  {}  {}".format(
-            verb.ljust(w[0]), uri.ljust(w[1]), name.ljust(w[2]), action.ljust(w[3]), where))
+            uri = "/{}{}".format(prefix, uri if uri.startswith("/") else "/" + uri)
+        row = [r.get("verb", ""), uri, r.get("name", ""),
+               r.get("action", ""), "{}:{}".format(r.get("file", ""), r.get("line", ""))]
+        if show_module:
+            row.insert(0, r.get("module", ""))
+        rows.append(row)
+    n = len(rows[0])
+    header = ["VERB", "URI", "NAME", "ACTION"]
+    if show_module:
+        header.insert(0, "MODULE")
+    # the header can be wider than every value in its column
+    w = [max([len(row[i]) for row in rows] + [len(header[i])]) for i in range(n - 1)]
+    out = ["[routes] {} found".format(len(rows)),
+           "  ".join(h.ljust(w[i]) for i, h in enumerate(header))]
+    for row in rows:
+        out.append("  ".join(
+            (cell.ljust(w[i]) if i < n - 1 else cell) for i, cell in enumerate(row)))
     return "\n".join(out)

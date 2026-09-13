@@ -82,13 +82,94 @@ class FormatRoutesTest(unittest.TestCase):
         self.assertIn("events.ingest", out)
         self.assertIn("api.php:6", out)
 
+    def test_header_names_the_columns(self):
+        head = sq._format_routes(self.ROUTES).splitlines()[1]
+        self.assertTrue(head.startswith("VERB"))
+        self.assertIn("URI", head)
+
+    def test_header_is_aligned_with_the_rows(self):
+        """Widths taken from the data alone leave the header out of step when a
+        heading is longer than every value under it (VERB vs GET)."""
+        lines = sq._format_routes(self.ROUTES).splitlines()[1:]
+        starts = [line.index("URI" if i == 0 else "/") for i, line in enumerate(lines)]
+        self.assertEqual(len(set(starts)), 1, "header not aligned: %s" % lines)
+
     def test_columns_are_aligned(self):
-        body = sq._format_routes(self.ROUTES).splitlines()[1:]
+        body = sq._format_routes(self.ROUTES).splitlines()[2:]
         starts = [line.index("/") for line in body]
         self.assertEqual(len(set(starts)), 1, "uri column not aligned: %s" % body)
 
     def test_empty(self):
         self.assertEqual(sq._format_routes([]), "[routes] none found")
+
+
+class FilterRoutesTest(unittest.TestCase):
+    """A modular project reports hundreds of routes; injecting all of them
+    costs more context than the question being asked."""
+
+    ROUTES = [
+        {"module": "Brand", "verb": "GET", "uri": "/api/brands",
+         "name": "brands.index", "action": "BrandController::index", "file": "api.php"},
+        {"module": "License", "verb": "POST", "uri": "/api/licenses",
+         "name": "licenses.store", "action": "LicenseController::store", "file": "api.php"},
+        {"module": "", "verb": "GET", "uri": "/health",
+         "name": "", "action": "", "file": "web.php"},
+    ]
+
+    def test_filters_by_module(self):
+        got = sq._filter_routes(self.ROUTES, "brand")
+        self.assertEqual(len(got), 1)
+        self.assertEqual(got[0]["module"], "Brand")
+
+    def test_filters_by_uri(self):
+        self.assertEqual(len(sq._filter_routes(self.ROUTES, "/api/")), 2)
+
+    def test_filters_by_name(self):
+        self.assertEqual(len(sq._filter_routes(self.ROUTES, "licenses.store")), 1)
+
+    def test_filters_by_action(self):
+        self.assertEqual(len(sq._filter_routes(self.ROUTES, "licensecontroller")), 1)
+
+    def test_filters_by_verb(self):
+        self.assertEqual(len(sq._filter_routes(self.ROUTES, "post")), 1)
+
+    def test_no_match_is_empty(self):
+        self.assertEqual(sq._filter_routes(self.ROUTES, "zzz"), [])
+
+
+class ArgumentHeuristicTest(unittest.TestCase):
+    """`@quality fix this` and `@routes please review` must not swallow the
+    next word of the sentence as an argument."""
+
+    def test_prose_is_not_a_route_filter(self):
+        for word in ("please", "review", "this", "and"):
+            self.assertFalse(sq._looks_like_route_filter(word), word)
+
+    def test_module_name_is_a_route_filter(self):
+        self.assertTrue(sq._looks_like_route_filter("Brand"))
+
+    def test_uri_is_a_route_filter(self):
+        self.assertTrue(sq._looks_like_route_filter("/api/v1"))
+
+    def test_verb_is_a_route_filter(self):
+        self.assertTrue(sq._looks_like_route_filter("POST"))
+
+    def test_dotted_name_is_a_route_filter(self):
+        self.assertTrue(sq._looks_like_route_filter("brands.index"))
+
+    def test_empty_is_not_a_filter(self):
+        self.assertFalse(sq._looks_like_route_filter(""))
+
+    def test_php_file_is_a_path(self):
+        self.assertTrue(sq._looks_like_path("app/Models/Brand.php"))
+        self.assertTrue(sq._looks_like_path("Brand.php"))
+
+    def test_directory_is_a_path(self):
+        self.assertTrue(sq._looks_like_path("app/Modules/Brand"))
+
+    def test_prose_is_not_a_path(self):
+        for word in ("fix", "this", "Brand"):
+            self.assertFalse(sq._looks_like_path(word), word)
 
 
 if __name__ == "__main__":
